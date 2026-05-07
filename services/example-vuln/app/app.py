@@ -136,7 +136,6 @@ def init_db(app: Flask) -> None:
                     admin_id,
                     "Round 0 flag",
                     f"The current flag is: {flag}",
-                    1,
                 ),
             )
             db.commit()
