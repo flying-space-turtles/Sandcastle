@@ -53,6 +53,13 @@ RUN mkdir -p /run/sshd \
     && sed -i 's/#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config \
     && sed -i 's/UsePAM yes/UsePAM no/' /etc/ssh/sshd_config
 
+# Bake the bundled template vulnerable app source into each team's gateway
+# so participants can read, patch, and rebuild it from inside the SSH box.
+# The build context for this Dockerfile is the repo root (set in
+# scripts/gen_compose.py), which is what makes this COPY work.
+COPY services/example-vuln /home/${TEAM_USER}/service
+RUN chown -R ${TEAM_USER}:${TEAM_USER} /home/${TEAM_USER}/service
+
 # A small MOTD so participants understand the scaffold.
 RUN cat <<'EOF' > /etc/motd
 
@@ -66,9 +73,15 @@ RUN cat <<'EOF' > /etc/motd
     - Vulnerable app slot:      10.10.<team>.3
     - Shared Docker network:    10.10.0.0/16
 
-  Challenge source and app-specific tooling are supplied separately.
-  The host Docker socket is mounted so organizers can provide workflows
-  for managing each team's future vulnerable application container.
+  Reach your vulnerable app from this box:
+    curl http://team<team>-vuln:8080/health
+
+  Source for the running service is in:
+    ~/service        # patch, rebuild, redeploy
+
+  The host Docker socket is mounted, so:
+    docker logs team<team>-vuln       # tail the live service
+    docker restart team<team>-vuln    # bounce it after patching
 ================================================================
 
 EOF

@@ -1,0 +1,27 @@
+# Keep team-ssh build contexts (which point at the repo root) lean.
+.git/
+.github/
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+.vscode/
+.idea/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+
+# Scaffold artefacts and per-host bits that should never be baked into an
+# image.
+.env
+.env.*
+!.env.example
+docker-compose.override.yml
+context/
+docs/
+README.md
+*.log
+*.sqlite
+*.sqlite3
+*.db
