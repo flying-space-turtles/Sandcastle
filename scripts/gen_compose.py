@@ -47,6 +47,14 @@ VULN_TPL = """\
       - SERVICE_PORT=${{VULN_PORT:-8080}}
     volumes:
       - team{i}-data:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "${{TEAM_CPU_LIMIT:-2}}"
+          memory: "${{TEAM_MEM_LIMIT:-2g}}"
+        reservations:
+          cpus: "0.5"
+          memory: 512m
     restart: unless-stopped
 """
 
@@ -71,6 +79,14 @@ SSH_TPL = """\
       - /var/run/docker.sock:/var/run/docker.sock
     cap_add:
       - NET_ADMIN
+    deploy:
+      resources:
+        limits:
+          cpus: "${{TEAM_CPU_LIMIT:-2}}"
+          memory: "${{TEAM_MEM_LIMIT:-2g}}"
+        reservations:
+          cpus: "0.5"
+          memory: 512m
     restart: unless-stopped
 """
 
