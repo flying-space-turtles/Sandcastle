@@ -53,23 +53,22 @@ RUN mkdir -p /run/sshd \
     && sed -i 's/#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config \
     && sed -i 's/UsePAM yes/UsePAM no/' /etc/ssh/sshd_config
 
-# A small MOTD so participants immediately know what to do.
+# A small MOTD so participants understand the scaffold.
 RUN cat <<'EOF' > /etc/motd
 
 ================================================================
-  AD-CTF Local Simulation — Team Box
+  Sandcastle CTF Infrastructure - Team Box
 
-  Your vulnerable service source code is in:   ~/service/
-  Manage it with the standard docker-compose verbs:
+  This container is your team's SSH gateway.
 
-    cd ~/service
-    docker compose ps
-    docker compose logs -f
-    docker compose up -d --build
-    docker compose down
+  Network layout:
+    - SSH gateway:              10.10.<team>.2
+    - Vulnerable app slot:      10.10.<team>.3
+    - Shared Docker network:    10.10.0.0/16
 
-  The gameserver lives at  http://10.10.0.2:8080
-  (scoreboard, /api/state, /api/submit)
+  Challenge source and app-specific tooling are supplied separately.
+  The host Docker socket is mounted so organizers can provide workflows
+  for managing each team's future vulnerable application container.
 ================================================================
 
 EOF

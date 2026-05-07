@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stop the simulation but keep volumes (so the gameserver DB persists).
+# Stop the infrastructure scaffold but keep team volumes.
 
 set -euo pipefail
 
