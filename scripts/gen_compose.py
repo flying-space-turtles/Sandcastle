@@ -62,7 +62,8 @@ VULN_TPL = """\
 SSH_TPL = """\
   team{i}-ssh:
     build:
-      context: ./teams/ssh
+      context: .
+      dockerfile: teams/ssh/Dockerfile
       args:
         TEAM_USER: ctfuser
         TEAM_PASS: team{i}pass

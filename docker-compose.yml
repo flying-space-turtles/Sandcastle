@@ -86,7 +86,8 @@ services:
     restart: unless-stopped
   team1-ssh:
     build:
-      context: ./teams/ssh
+      context: .
+      dockerfile: teams/ssh/Dockerfile
       args:
         TEAM_USER: ctfuser
         TEAM_PASS: team1pass
@@ -114,7 +115,8 @@ services:
     restart: unless-stopped
   team2-ssh:
     build:
-      context: ./teams/ssh
+      context: .
+      dockerfile: teams/ssh/Dockerfile
       args:
         TEAM_USER: ctfuser
         TEAM_PASS: team2pass
@@ -142,7 +144,8 @@ services:
     restart: unless-stopped
   team3-ssh:
     build:
-      context: ./teams/ssh
+      context: .
+      dockerfile: teams/ssh/Dockerfile
       args:
         TEAM_USER: ctfuser
         TEAM_PASS: team3pass
