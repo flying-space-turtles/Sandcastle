@@ -1,0 +1,41 @@
+# OS and editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# Node/frontend artifacts, for future UI iterations
+node_modules/
+dist/
+build/
+coverage/
+.vite/
+
+# Runtime data and logs
+*.log
+logs/
+tmp/
+*.sqlite
+*.sqlite3
+*.db
+
+# Local Docker Compose overrides
+docker-compose.override.yml
