@@ -1,0 +1,25 @@
+version: '3.8'
+services:
+  topology-api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    image: sandcastle/topology-api:local
+    container_name: sandcastle-topology-api
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DOCKER_HOST=unix:///var/run/docker.sock
+      - REPO_ROOT=/workspace
+    volumes:
+      - ./api:/app
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # mount repository root so extractor can read docker-compose.yml
+      - ..:/workspace:ro
+    networks:
+      - sandcastle-net
+
+networks:
+  sandcastle-net:
+    driver: bridge

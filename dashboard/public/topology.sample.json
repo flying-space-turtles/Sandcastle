@@ -1,0 +1,107 @@
+{
+  "nodes": [
+    {
+      "id": "team1-ssh",
+      "data": {
+        "label": "team1-ssh",
+        "type": "gateway",
+        "team": "team1",
+        "ip": "10.10.1.2",
+        "image": "sandcastle/team1-ssh-gateway",
+        "color": "#06b6d4"
+      },
+      "position": { "x": 0, "y": 0 },
+      "type": "gateway"
+    },
+    {
+      "id": "team1-vuln",
+      "data": {
+        "label": "team1-vuln",
+        "type": "service",
+        "team": "team1",
+        "ip": "10.10.1.3",
+        "image": "sandcastle/example-vuln:latest",
+        "color": "#8b5cf6"
+      },
+      "position": { "x": 300, "y": 0 },
+      "type": "service"
+    },
+    {
+      "id": "team2-ssh",
+      "data": {
+        "label": "team2-ssh",
+        "type": "gateway",
+        "team": "team2",
+        "ip": "10.10.2.2",
+        "image": "sandcastle/team2-ssh-gateway",
+        "color": "#06b6d4"
+      },
+      "position": { "x": 0, "y": 200 },
+      "type": "gateway"
+    },
+    {
+      "id": "team2-vuln",
+      "data": {
+        "label": "team2-vuln",
+        "type": "service",
+        "team": "team2",
+        "ip": "10.10.2.3",
+        "image": "sandcastle/example-vuln:latest",
+        "color": "#8b5cf6"
+      },
+      "position": { "x": 300, "y": 200 },
+      "type": "service"
+    },
+    {
+      "id": "team3-ssh",
+      "data": {
+        "label": "team3-ssh",
+        "type": "gateway",
+        "team": "team3",
+        "ip": "10.10.3.2",
+        "image": "sandcastle/team3-ssh-gateway",
+        "color": "#06b6d4"
+      },
+      "position": { "x": 0, "y": 400 },
+      "type": "gateway"
+    },
+    {
+      "id": "team3-vuln",
+      "data": {
+        "label": "team3-vuln",
+        "type": "service",
+        "team": "team3",
+        "ip": "10.10.3.3",
+        "image": "sandcastle/example-vuln:latest",
+        "color": "#8b5cf6"
+      },
+      "position": { "x": 300, "y": 400 },
+      "type": "service"
+    }
+  ],
+  "edges": [
+    {
+      "id": "team1-ssh-team1-vuln",
+      "source": "team1-ssh",
+      "target": "team1-vuln",
+      "type": "smoothstep"
+    },
+    {
+      "id": "team2-ssh-team2-vuln",
+      "source": "team2-ssh",
+      "target": "team2-vuln",
+      "type": "smoothstep"
+    },
+    {
+      "id": "team3-ssh-team3-vuln",
+      "source": "team3-ssh",
+      "target": "team3-vuln",
+      "type": "smoothstep"
+    }
+  ],
+  "teams": [
+    { "id": "team1", "name": "Team 1" },
+    { "id": "team2", "name": "Team 2" },
+    { "id": "team3", "name": "Team 3" }
+  ]
+}
