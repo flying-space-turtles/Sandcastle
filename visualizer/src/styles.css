@@ -167,6 +167,7 @@ button {
 }
 
 .canvas-shell {
+  position: relative;
   min-width: 0;
   min-height: 0;
 }
@@ -221,7 +222,7 @@ button {
 }
 
 .react-flow__node-machineNode {
-  z-index: 4 !important;
+  z-index: 5 !important;
 }
 
 .network-group {
@@ -292,9 +293,9 @@ button {
   position: relative;
   display: grid;
   grid-template-rows: auto 1fr auto;
-  width: 224px;
-  height: 126px;
-  padding: 13px;
+  width: 196px;
+  height: 104px;
+  padding: 10px;
   border: 1px solid color-mix(in srgb, var(--node-accent) 45%, rgba(148, 163, 184, 0.2));
   border-radius: 8px;
   color: var(--text);
@@ -304,6 +305,11 @@ button {
   box-shadow:
     0 16px 32px rgba(2, 6, 23, 0.38),
     inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  transition:
+    border-color 140ms ease,
+    box-shadow 140ms ease,
+    filter 140ms ease,
+    opacity 140ms ease;
 }
 
 .machine-node::before {
@@ -321,23 +327,49 @@ button {
     0 18px 36px rgba(2, 6, 23, 0.42);
 }
 
+.machine-node.is-hovered,
+.machine-node.is-related {
+  border-color: color-mix(in srgb, var(--node-accent) 82%, #ffffff);
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--node-accent) 44%, transparent),
+    0 18px 34px rgba(2, 6, 23, 0.46);
+}
+
+.machine-node.is-dimmed {
+  opacity: 0.34;
+  filter: saturate(0.62);
+}
+
 .machine-node__header {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr);
+  grid-template-columns: 42px minmax(0, 1fr);
   align-items: center;
-  gap: 10px;
+  gap: 9px;
   min-width: 0;
 }
 
-.machine-node__icon {
+.machine-node__badge {
   display: grid;
-  width: 36px;
-  height: 36px;
+  grid-template-columns: 1fr;
+  width: 42px;
+  height: 42px;
   place-items: center;
   border: 1px solid color-mix(in srgb, var(--node-accent) 46%, transparent);
   border-radius: 8px;
   color: color-mix(in srgb, var(--node-accent) 78%, #ffffff);
   background: color-mix(in srgb, var(--node-accent) 14%, rgba(2, 6, 23, 0.9));
+}
+
+.machine-node__badge span {
+  color: #f8fafc;
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.machine-node__badge svg {
+  margin-top: -2px;
+  color: color-mix(in srgb, var(--node-accent) 74%, #ffffff);
 }
 
 .machine-node__identity {
@@ -347,7 +379,7 @@ button {
 .machine-node__name {
   overflow: hidden;
   color: #f8fafc;
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 800;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -356,18 +388,18 @@ button {
 .machine-node__kind {
   margin-top: 2px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   text-transform: uppercase;
 }
 
 .machine-node__meta {
   display: grid;
-  gap: 4px;
+  gap: 3px;
   align-content: center;
   min-width: 0;
   color: #cbd5e1;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .machine-node__meta span {
@@ -386,22 +418,39 @@ button {
 .machine-node__ports span {
   overflow: hidden;
   max-width: 96px;
-  min-height: 22px;
-  padding: 3px 6px;
+  min-height: 19px;
+  padding: 2px 6px;
   border: 1px solid rgba(148, 163, 184, 0.18);
   border-radius: 6px;
   color: #dbeafe;
   background: rgba(2, 6, 23, 0.42);
-  font-size: 11px;
+  font-size: 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .machine-node__handle {
-  width: 9px;
-  height: 9px;
+  width: 8px;
+  height: 8px;
   border: 1px solid #020617;
   background: var(--node-accent);
+}
+
+.canvas-relation-hint {
+  position: absolute;
+  right: 24px;
+  bottom: 24px;
+  z-index: 8;
+  max-width: min(520px, calc(100% - 48px));
+  border: 1px solid rgba(148, 163, 184, 0.2);
+  border-radius: 8px;
+  padding: 10px 12px;
+  color: #dbeafe;
+  background: rgba(2, 6, 23, 0.86);
+  box-shadow: 0 18px 36px rgba(2, 6, 23, 0.38);
+  font-size: 12px;
+  font-weight: 700;
+  pointer-events: none;
 }
 
 .details-panel {

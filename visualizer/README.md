@@ -21,6 +21,8 @@ The parser normalizes Compose metadata into React Flow nodes and edges:
 - services become machine nodes with team, IP, environment, label, port, and
   Dockerfile metadata where available
 - Compose networks become colored group nodes
-- network IPAM gateways become synthetic gateway nodes
-- `depends_on`, `links`, team gateway access, and network membership become
-  labeled edges
+- SSH containers and vulnerable app containers are laid out as sparse team
+  pairs inside their network
+- team SSH-to-vulnerable-app ownership edges stay visible by default
+- cross-team attack paths, `depends_on`, and `links` are revealed on hover to
+  keep the idle canvas uncluttered

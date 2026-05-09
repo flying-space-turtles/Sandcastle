@@ -7,26 +7,20 @@ const GROUP_PALETTE = [
   '#fbbf24',
 ];
 
-const KIND_ORDER = {
-  gateway: 0,
-  firewall: 1,
-  service: 2,
-  server: 3,
-  database: 4,
-};
-
-const MACHINE_WIDTH = 224;
-const MACHINE_HEIGHT = 126;
-const GROUP_PADDING_X = 42;
-const GROUP_HEADER = 112;
-const COLUMN_WIDTH = 268;
-const ROW_HEIGHT = 154;
-const GROUP_GAP = 110;
-const GROUP_MAX_ROW_WIDTH = 1500;
+const MACHINE_WIDTH = 196;
+const MACHINE_HEIGHT = 104;
+const NETWORK_PADDING_X = 96;
+const NETWORK_PADDING_BOTTOM = 96;
+const NETWORK_HEADER = 118;
+const PAIR_WIDTH = 240;
+const PAIR_HEIGHT = 276;
+const PAIR_COLUMN_GAP = 180;
+const PAIR_ROW_GAP = 116;
+const GROUP_GAP = 150;
+const GROUP_MAX_ROW_WIDTH = 2600;
+const MIN_NETWORK_WIDTH = 1160;
 
 const networkNodeId = (name) => `network:${name}`;
-const gatewayNodeId = (name) => `gateway:${name}`;
-
 const edgeKey = (source, target, kind) => `${source}->${target}:${kind}`;
 
 const teamSortValue = (service) => {
@@ -42,17 +36,48 @@ const sortServices = (a, b) => {
   if (teamDelta !== 0) {
     return teamDelta;
   }
-
-  const kindDelta = (KIND_ORDER[a.kind] ?? 99) - (KIND_ORDER[b.kind] ?? 99);
-  if (kindDelta !== 0) {
-    return kindDelta;
-  }
-
   return a.serviceName.localeCompare(b.serviceName);
 };
 
 const getTeamKey = (service) =>
   service.teamId ? `team-${service.teamId}` : `${service.teamName}:${service.serviceName}`;
+
+const getServiceRole = (service) => {
+  const text = [service.serviceName, service.containerName, service.hostname, service.image]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  if (service.kind === 'gateway' || /(ssh|gateway|jump|bastion)/.test(text)) {
+    return 'ssh';
+  }
+  if (/(vuln|challenge|app|api|web|http|service)/.test(text) || service.kind === 'service') {
+    return 'vuln';
+  }
+  if (service.kind === 'database') {
+    return 'database';
+  }
+  if (service.kind === 'firewall') {
+    return 'firewall';
+  }
+  return 'other';
+};
+
+const getShortLabel = (role, service) => {
+  if (role === 'ssh') {
+    return 'S';
+  }
+  if (role === 'vuln') {
+    return 'V';
+  }
+  if (role === 'database') {
+    return 'DB';
+  }
+  if (role === 'firewall') {
+    return 'FW';
+  }
+  return service.serviceName.slice(0, 2).toUpperCase();
+};
 
 const buildNetworkCatalog = (parsed) => {
   const catalog = new Map(parsed.networks.map((network) => [network.name, network]));
@@ -87,54 +112,40 @@ const groupServicesByNetwork = (services) =>
     return acc;
   }, new Map());
 
-const measureGroup = (services, hasGateway) => {
-  const teamKeys = [...new Set(services.map(getTeamKey))];
-  const columns = Math.max(1, teamKeys.length || Math.min(services.length, 3));
-  const rows = Math.max(
-    1,
-    ...teamKeys.map((teamKey) => services.filter((service) => getTeamKey(service) === teamKey).length),
-  );
-  const width = Math.max(620, GROUP_PADDING_X * 2 + columns * COLUMN_WIDTH);
-  const serviceStart = hasGateway ? GROUP_HEADER + 86 : GROUP_HEADER;
-  const height = Math.max(392, serviceStart + rows * ROW_HEIGHT + 68);
+const createMachineData = (service) => {
+  const relationRole = getServiceRole(service);
 
   return {
-    columns,
-    rows,
-    width,
-    height,
-    serviceStart,
+    id: service.id,
+    serviceName: service.serviceName,
+    containerName: service.containerName,
+    hostname: service.hostname,
+    image: service.image,
+    build: service.build,
+    dockerfile: service.dockerfile,
+    kind: service.kind,
+    relationRole,
+    shortLabel: getShortLabel(relationRole, service),
+    teamId: service.teamId,
+    teamName: service.teamName,
+    networks: service.networks,
+    primaryNetwork: service.primaryNetwork,
+    ipAddress: service.ipAddress,
+    dependsOn: service.dependsOn,
+    links: service.links,
+    ports: service.ports,
+    expose: service.expose,
+    environment: service.environment,
+    labels: service.labels,
+    command: service.command,
+    entrypoint: service.entrypoint,
+    restart: service.restart,
+    volumes: service.volumes,
+    capAdd: service.capAdd,
+    privileged: service.privileged,
+    raw: service.raw,
   };
 };
-
-const createMachineData = (service) => ({
-  id: service.id,
-  serviceName: service.serviceName,
-  containerName: service.containerName,
-  hostname: service.hostname,
-  image: service.image,
-  build: service.build,
-  dockerfile: service.dockerfile,
-  kind: service.kind,
-  teamId: service.teamId,
-  teamName: service.teamName,
-  networks: service.networks,
-  primaryNetwork: service.primaryNetwork,
-  ipAddress: service.ipAddress,
-  dependsOn: service.dependsOn,
-  links: service.links,
-  ports: service.ports,
-  expose: service.expose,
-  environment: service.environment,
-  labels: service.labels,
-  command: service.command,
-  entrypoint: service.entrypoint,
-  restart: service.restart,
-  volumes: service.volumes,
-  capAdd: service.capAdd,
-  privileged: service.privileged,
-  raw: service.raw,
-});
 
 const addEdge = (edges, seen, edge) => {
   const key = edgeKey(edge.source, edge.target, edge.data?.kind || edge.label || 'edge');
@@ -142,53 +153,147 @@ const addEdge = (edges, seen, edge) => {
     return;
   }
 
+  const markerEnd =
+    edge.markerEnd === null
+      ? undefined
+      : edge.markerEnd || {
+          type: 'arrowclosed',
+          width: 16,
+          height: 16,
+        };
+
   seen.add(key);
   edges.push({
     id: key.replace(/[^a-zA-Z0-9:_>-]/g, '-'),
     type: 'smoothstep',
-    markerEnd: {
-      type: 'arrowclosed',
-      width: 18,
-      height: 18,
-    },
     ...edge,
+    markerEnd,
   });
 };
 
-const createNetworkGatewayNode = (network, groupId, position, color) => ({
-  id: gatewayNodeId(network.name),
-  type: 'machineNode',
-  parentNode: groupId,
-  extent: 'parent',
-  position,
-  draggable: true,
-  data: {
-    id: gatewayNodeId(network.name),
-    serviceName: `${network.name} gateway`,
-    teamName: 'Network',
-    kind: 'gateway',
-    ipAddress: network.gateway,
-    subnet: network.subnet,
-    primaryNetwork: network.name,
-    networks: [
-      {
-        name: network.name,
-        subnet: network.subnet,
-        gateway: network.gateway,
-      },
-    ],
-    ports: [],
-    expose: [],
-    environment: {},
-    labels: {},
-    dependsOn: [],
-    links: [],
-    volumes: [],
-    capAdd: [],
-    isSynthetic: true,
-    accentColor: color,
-  },
-});
+const getGrid = (itemCount) => {
+  if (itemCount <= 0) {
+    return {
+      columns: 1,
+      rows: 1,
+    };
+  }
+
+  const columns = itemCount <= 3 ? itemCount : Math.ceil(Math.sqrt(itemCount * 1.45));
+
+  return {
+    columns,
+    rows: Math.ceil(itemCount / columns),
+  };
+};
+
+const buildTeamGroups = (services) => {
+  const grouped = services.reduce((acc, service) => {
+    const teamKey = getTeamKey(service);
+    if (!acc.has(teamKey)) {
+      acc.set(teamKey, []);
+    }
+    acc.get(teamKey).push(service);
+    return acc;
+  }, new Map());
+
+  return [...grouped.entries()]
+    .map(([teamKey, teamServices]) => {
+      const sorted = [...teamServices].sort(sortServices);
+      const ssh = sorted.find((service) => getServiceRole(service) === 'ssh');
+      const vuln = sorted.find((service) => getServiceRole(service) === 'vuln');
+      const primary = ssh || vuln || sorted[0];
+
+      return {
+        teamKey,
+        teamId: primary?.teamId,
+        teamName: primary?.teamName || teamKey,
+        sshServices: sorted.filter((service) => getServiceRole(service) === 'ssh'),
+        vulnServices: sorted.filter((service) => getServiceRole(service) === 'vuln'),
+        otherServices: sorted.filter((service) => !['ssh', 'vuln'].includes(getServiceRole(service))),
+        services: sorted,
+      };
+    })
+    .sort((a, b) => {
+      const aValue = Number.parseInt(a.teamId, 10);
+      const bValue = Number.parseInt(b.teamId, 10);
+      if (!Number.isNaN(aValue) && !Number.isNaN(bValue) && aValue !== bValue) {
+        return aValue - bValue;
+      }
+      return a.teamName.localeCompare(b.teamName);
+    });
+};
+
+const measureNetwork = (teamGroups) => {
+  const grid = getGrid(teamGroups.length);
+  const width = Math.max(
+    MIN_NETWORK_WIDTH,
+    NETWORK_PADDING_X * 2 + grid.columns * PAIR_WIDTH + (grid.columns - 1) * PAIR_COLUMN_GAP,
+  );
+  const height =
+    NETWORK_HEADER +
+    NETWORK_PADDING_BOTTOM +
+    grid.rows * PAIR_HEIGHT +
+    Math.max(0, grid.rows - 1) * PAIR_ROW_GAP;
+
+  return {
+    ...grid,
+    width,
+    height,
+  };
+};
+
+const getTeamPosition = (index, layout) => {
+  const row = Math.floor(index / layout.columns);
+  const column = index % layout.columns;
+  const itemsInRow = Math.min(layout.columns, layout.count - row * layout.columns);
+  const rowWidth = itemsInRow * PAIR_WIDTH + Math.max(0, itemsInRow - 1) * PAIR_COLUMN_GAP;
+  const fullWidth = layout.width - NETWORK_PADDING_X * 2;
+  const rowOffset = Math.max(0, (fullWidth - rowWidth) / 2);
+
+  return {
+    x: NETWORK_PADDING_X + rowOffset + column * (PAIR_WIDTH + PAIR_COLUMN_GAP),
+    y: NETWORK_HEADER + row * (PAIR_HEIGHT + PAIR_ROW_GAP),
+  };
+};
+
+const placeTeamServices = (teamGroup, basePosition) => {
+  const placements = [];
+  const centerX = basePosition.x + (PAIR_WIDTH - MACHINE_WIDTH) / 2;
+  const topY = basePosition.y;
+  const bottomY = basePosition.y + MACHINE_HEIGHT + 64;
+
+  teamGroup.sshServices.forEach((service, index) => {
+    placements.push({
+      service,
+      x: centerX + index * 18,
+      y: topY + index * 16,
+    });
+  });
+
+  teamGroup.vulnServices.forEach((service, index) => {
+    placements.push({
+      service,
+      x: centerX + index * 18,
+      y: bottomY + index * 16,
+    });
+  });
+
+  const sideBySide = teamGroup.sshServices.length === 0 || teamGroup.vulnServices.length === 0;
+  teamGroup.otherServices.forEach((service, index) => {
+    placements.push({
+      service,
+      x: sideBySide
+        ? centerX
+        : basePosition.x + PAIR_WIDTH + 22 + (index % 2) * (MACHINE_WIDTH + 20),
+      y: sideBySide ? topY + index * (MACHINE_HEIGHT + 28) : topY + Math.floor(index / 2) * (MACHINE_HEIGHT + 28),
+    });
+  });
+
+  return placements;
+};
+
+const getTeamId = (service) => service.teamId || service.teamName || service.serviceName;
 
 export const buildDockerFlow = (parsed) => {
   const nodes = [];
@@ -205,8 +310,8 @@ export const buildDockerFlow = (parsed) => {
   networks.forEach((network, index) => {
     const color = GROUP_PALETTE[index % GROUP_PALETTE.length];
     const services = [...(servicesByNetwork.get(network.name) || [])].sort(sortServices);
-    const hasNetworkGateway = Boolean(network.gateway);
-    const size = measureGroup(services, hasNetworkGateway);
+    const teamGroups = buildTeamGroups(services);
+    const size = measureNetwork(teamGroups);
 
     if (cursorX > 0 && cursorX + size.width > GROUP_MAX_ROW_WIDTH) {
       cursorX = 0;
@@ -230,6 +335,7 @@ export const buildDockerFlow = (parsed) => {
         subnet: network.subnet,
         gateway: network.gateway,
         serviceCount: services.length,
+        teamCount: teamGroups.length,
         color,
       },
       style: {
@@ -238,38 +344,18 @@ export const buildDockerFlow = (parsed) => {
       },
     });
 
-    if (hasNetworkGateway) {
-      const gatewayNode = createNetworkGatewayNode(
-        network,
-        groupId,
-        {
-          x: GROUP_PADDING_X,
-          y: GROUP_HEADER - 18,
-        },
-        color,
-      );
-      nodes.push(gatewayNode);
-      nodeDetailsById[gatewayNode.id] = gatewayNode.data;
-    }
+    teamGroups.forEach((teamGroup, teamIndex) => {
+      const basePosition = getTeamPosition(teamIndex, {
+        ...size,
+        count: teamGroups.length,
+      });
+      const placements = placeTeamServices(teamGroup, basePosition);
 
-    const teamKeys = [...new Set(services.map(getTeamKey))];
-    const teamIndex = new Map(teamKeys.map((teamKey, column) => [teamKey, column]));
-    const servicesByTeam = services.reduce((acc, service) => {
-      const teamKey = getTeamKey(service);
-      if (!acc.has(teamKey)) {
-        acc.set(teamKey, []);
-      }
-      acc.get(teamKey).push(service);
-      return acc;
-    }, new Map());
-
-    servicesByTeam.forEach((teamServices, teamKey) => {
-      const column = teamIndex.get(teamKey) || 0;
-      const sortedTeamServices = [...teamServices].sort(sortServices);
-
-      sortedTeamServices.forEach((service, row) => {
-        const x = GROUP_PADDING_X + column * COLUMN_WIDTH;
-        const y = size.serviceStart + row * ROW_HEIGHT;
+      placements.forEach(({ service, x, y }) => {
+        const data = {
+          ...createMachineData(service),
+          accentColor: getServiceRole(service) === 'ssh' ? '#fbbf24' : getServiceRole(service) === 'vuln' ? '#f87171' : color,
+        };
 
         const node = {
           id: service.id,
@@ -280,10 +366,7 @@ export const buildDockerFlow = (parsed) => {
             x,
             y,
           },
-          data: {
-            ...createMachineData(service),
-            accentColor: color,
-          },
+          data,
           style: {
             width: MACHINE_WIDTH,
             height: MACHINE_HEIGHT,
@@ -292,23 +375,28 @@ export const buildDockerFlow = (parsed) => {
 
         nodes.push(node);
         nodeDetailsById[node.id] = node.data;
+      });
 
-        if (hasNetworkGateway) {
+      teamGroup.sshServices.forEach((ssh) => {
+        teamGroup.vulnServices.forEach((vuln) => {
           addEdge(edges, seenEdges, {
-            source: gatewayNodeId(network.name),
-            target: service.id,
-            label: network.name,
+            source: ssh.serviceName,
+            target: vuln.serviceName,
+            sourceHandle: 'bottom',
+            targetHandle: 'top',
+            markerEnd: null,
             data: {
-              kind: 'network',
+              kind: 'team-pair',
+              label: 'team service',
+              defaultVisible: true,
             },
             style: {
-              stroke: color,
-              strokeWidth: 1.6,
-              strokeOpacity: 0.45,
-              strokeDasharray: '7 7',
+              stroke: '#cbd5e1',
+              strokeWidth: 1.8,
+              strokeOpacity: 0.36,
             },
           });
-        }
+        });
       });
     });
 
@@ -328,13 +416,16 @@ export const buildDockerFlow = (parsed) => {
         source: dependency,
         target: service.serviceName,
         label: 'depends_on',
-        animated: true,
+        hidden: true,
         data: {
           kind: 'depends_on',
+          label: 'depends_on',
+          revealOnHover: true,
         },
         style: {
           stroke: '#38bdf8',
-          strokeWidth: 2.4,
+          strokeWidth: 2,
+          strokeOpacity: 0.52,
         },
       });
     });
@@ -348,46 +439,56 @@ export const buildDockerFlow = (parsed) => {
         source: service.serviceName,
         target: link,
         label: 'link',
+        hidden: true,
         data: {
           kind: 'link',
+          label: 'link',
+          revealOnHover: true,
         },
         style: {
           stroke: '#a78bfa',
-          strokeWidth: 2.2,
+          strokeWidth: 2,
+          strokeOpacity: 0.52,
         },
       });
     });
   });
 
-  const servicesByTeam = parsed.services.reduce((acc, service) => {
-    if (!service.teamId) {
-      return acc;
-    }
-    if (!acc.has(service.teamId)) {
-      acc.set(service.teamId, []);
-    }
-    acc.get(service.teamId).push(service);
-    return acc;
-  }, new Map());
+  const sshServices = parsed.services.filter((service) => getServiceRole(service) === 'ssh');
+  const vulnServices = parsed.services.filter((service) => getServiceRole(service) === 'vuln');
 
-  servicesByTeam.forEach((teamServices) => {
-    const gateways = teamServices.filter((service) => service.kind === 'gateway');
-    const targets = teamServices.filter((service) => service.kind !== 'gateway');
+  sshServices.forEach((ssh) => {
+    vulnServices.forEach((vuln) => {
+      if (getTeamId(ssh) === getTeamId(vuln)) {
+        return;
+      }
 
-    gateways.forEach((gateway) => {
-      targets.forEach((target) => {
-        addEdge(edges, seenEdges, {
-          source: gateway.serviceName,
-          target: target.serviceName,
-          label: 'team access',
-          data: {
-            kind: 'team-access',
-          },
-          style: {
-            stroke: '#fbbf24',
-            strokeWidth: 2,
-          },
-        });
+      const sharedNetwork = ssh.networks.some((sshNetwork) =>
+        vuln.networks.some((vulnNetwork) => vulnNetwork.name === sshNetwork.name),
+      );
+
+      if (!sharedNetwork) {
+        return;
+      }
+
+      addEdge(edges, seenEdges, {
+        source: ssh.serviceName,
+        target: vuln.serviceName,
+        sourceHandle: 'right',
+        targetHandle: 'left',
+        hidden: true,
+        data: {
+          kind: 'attack',
+          label: 'can attack',
+          revealOnHover: true,
+        },
+        animated: true,
+        style: {
+          stroke: '#fb7185',
+          strokeWidth: 2.2,
+          strokeOpacity: 0.34,
+          strokeDasharray: '8 8',
+        },
       });
     });
   });

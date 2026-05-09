@@ -13,6 +13,7 @@ const CustomNetworkGroup = ({ data }) => (
     </div>
     <div className="network-group__details">
       <span>{data.driver || 'default'} driver</span>
+      {data.teamCount > 0 && <span>{data.teamCount} teams</span>}
       {data.subnet && <span>{data.subnet}</span>}
       {data.gateway && <span>gateway {data.gateway}</span>}
     </div>

@@ -16,6 +16,13 @@ volumes:
   team1-data:
   team2-data:
   team3-data:
+  team4-data:
+  team5-data:
+  team6-data:
+  team7-data:
+  team8-data:
+  team9-data:
+  team10-data:
 
 services:
   team1-vuln:
@@ -75,6 +82,160 @@ services:
       - SERVICE_PORT=${VULN_PORT:-8080}
     volumes:
       - team3-data:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "${TEAM_CPU_LIMIT:-2}"
+          memory: "${TEAM_MEM_LIMIT:-2g}"
+        reservations:
+          cpus: "0.5"
+          memory: 512m
+    restart: unless-stopped
+  team4-vuln:
+    image: "${VULN_IMAGE:?Set VULN_IMAGE to the vulnerable app image before starting}"
+    container_name: team4-vuln
+    hostname: team4-vuln
+    networks:
+      ctf-network:
+        ipv4_address: 10.10.4.3
+    environment:
+      - TEAM_ID=4
+      - TEAM_NAME=Team 4
+      - SERVICE_PORT=${VULN_PORT:-8080}
+    volumes:
+      - team4-data:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "${TEAM_CPU_LIMIT:-2}"
+          memory: "${TEAM_MEM_LIMIT:-2g}"
+        reservations:
+          cpus: "0.5"
+          memory: 512m
+    restart: unless-stopped
+  team5-vuln:
+    image: "${VULN_IMAGE:?Set VULN_IMAGE to the vulnerable app image before starting}"
+    container_name: team5-vuln
+    hostname: team5-vuln
+    networks:
+      ctf-network:
+        ipv4_address: 10.10.5.3
+    environment:
+      - TEAM_ID=5
+      - TEAM_NAME=Team 5
+      - SERVICE_PORT=${VULN_PORT:-8080}
+    volumes:
+      - team5-data:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "${TEAM_CPU_LIMIT:-2}"
+          memory: "${TEAM_MEM_LIMIT:-2g}"
+        reservations:
+          cpus: "0.5"
+          memory: 512m
+    restart: unless-stopped
+  team6-vuln:
+    image: "${VULN_IMAGE:?Set VULN_IMAGE to the vulnerable app image before starting}"
+    container_name: team6-vuln
+    hostname: team6-vuln
+    networks:
+      ctf-network:
+        ipv4_address: 10.10.6.3
+    environment:
+      - TEAM_ID=6
+      - TEAM_NAME=Team 6
+      - SERVICE_PORT=${VULN_PORT:-8080}
+    volumes:
+      - team6-data:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "${TEAM_CPU_LIMIT:-2}"
+          memory: "${TEAM_MEM_LIMIT:-2g}"
+        reservations:
+          cpus: "0.5"
+          memory: 512m
+    restart: unless-stopped
+  team7-vuln:
+    image: "${VULN_IMAGE:?Set VULN_IMAGE to the vulnerable app image before starting}"
+    container_name: team7-vuln
+    hostname: team7-vuln
+    networks:
+      ctf-network:
+        ipv4_address: 10.10.7.3
+    environment:
+      - TEAM_ID=7
+      - TEAM_NAME=Team 7
+      - SERVICE_PORT=${VULN_PORT:-8080}
+    volumes:
+      - team7-data:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "${TEAM_CPU_LIMIT:-2}"
+          memory: "${TEAM_MEM_LIMIT:-2g}"
+        reservations:
+          cpus: "0.5"
+          memory: 512m
+    restart: unless-stopped
+  team8-vuln:
+    image: "${VULN_IMAGE:?Set VULN_IMAGE to the vulnerable app image before starting}"
+    container_name: team8-vuln
+    hostname: team8-vuln
+    networks:
+      ctf-network:
+        ipv4_address: 10.10.8.3
+    environment:
+      - TEAM_ID=8
+      - TEAM_NAME=Team 8
+      - SERVICE_PORT=${VULN_PORT:-8080}
+    volumes:
+      - team8-data:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "${TEAM_CPU_LIMIT:-2}"
+          memory: "${TEAM_MEM_LIMIT:-2g}"
+        reservations:
+          cpus: "0.5"
+          memory: 512m
+    restart: unless-stopped
+  team9-vuln:
+    image: "${VULN_IMAGE:?Set VULN_IMAGE to the vulnerable app image before starting}"
+    container_name: team9-vuln
+    hostname: team9-vuln
+    networks:
+      ctf-network:
+        ipv4_address: 10.10.9.3
+    environment:
+      - TEAM_ID=9
+      - TEAM_NAME=Team 9
+      - SERVICE_PORT=${VULN_PORT:-8080}
+    volumes:
+      - team9-data:/app/data
+    deploy:
+      resources:
+        limits:
+          cpus: "${TEAM_CPU_LIMIT:-2}"
+          memory: "${TEAM_MEM_LIMIT:-2g}"
+        reservations:
+          cpus: "0.5"
+          memory: 512m
+    restart: unless-stopped
+  team10-vuln:
+    image: "${VULN_IMAGE:?Set VULN_IMAGE to the vulnerable app image before starting}"
+    container_name: team10-vuln
+    hostname: team10-vuln
+    networks:
+      ctf-network:
+        ipv4_address: 10.10.10.3
+    environment:
+      - TEAM_ID=10
+      - TEAM_NAME=Team 10
+      - SERVICE_PORT=${VULN_PORT:-8080}
+    volumes:
+      - team10-data:/app/data
     deploy:
       resources:
         limits:
@@ -158,6 +319,209 @@ services:
         ipv4_address: 10.10.3.2
     ports:
       - "2203:22"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    cap_add:
+      - NET_ADMIN
+    deploy:
+      resources:
+        limits:
+          cpus: "${TEAM_CPU_LIMIT:-2}"
+          memory: "${TEAM_MEM_LIMIT:-2g}"
+        reservations:
+          cpus: "0.5"
+          memory: 512m
+    restart: unless-stopped
+  team4-ssh:
+    build:
+      context: .
+      dockerfile: teams/ssh/Dockerfile
+      args:
+        TEAM_USER: ctfuser
+        TEAM_PASS: team4pass
+        TEAM_NAME: team4
+    image: sandcastle/team4-ssh-gateway
+    container_name: team4-ssh
+    hostname: team4
+    networks:
+      ctf-network:
+        ipv4_address: 10.10.4.2
+    ports:
+      - "2204:22"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    cap_add:
+      - NET_ADMIN
+    deploy:
+      resources:
+        limits:
+          cpus: "${TEAM_CPU_LIMIT:-2}"
+          memory: "${TEAM_MEM_LIMIT:-2g}"
+        reservations:
+          cpus: "0.5"
+          memory: 512m
+    restart: unless-stopped
+  team5-ssh:
+    build:
+      context: .
+      dockerfile: teams/ssh/Dockerfile
+      args:
+        TEAM_USER: ctfuser
+        TEAM_PASS: team5pass
+        TEAM_NAME: team5
+    image: sandcastle/team5-ssh-gateway
+    container_name: team5-ssh
+    hostname: team5
+    networks:
+      ctf-network:
+        ipv4_address: 10.10.5.2
+    ports:
+      - "2205:22"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    cap_add:
+      - NET_ADMIN
+    deploy:
+      resources:
+        limits:
+          cpus: "${TEAM_CPU_LIMIT:-2}"
+          memory: "${TEAM_MEM_LIMIT:-2g}"
+        reservations:
+          cpus: "0.5"
+          memory: 512m
+    restart: unless-stopped
+  team6-ssh:
+    build:
+      context: .
+      dockerfile: teams/ssh/Dockerfile
+      args:
+        TEAM_USER: ctfuser
+        TEAM_PASS: team6pass
+        TEAM_NAME: team6
+    image: sandcastle/team6-ssh-gateway
+    container_name: team6-ssh
+    hostname: team6
+    networks:
+      ctf-network:
+        ipv4_address: 10.10.6.2
+    ports:
+      - "2206:22"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    cap_add:
+      - NET_ADMIN
+    deploy:
+      resources:
+        limits:
+          cpus: "${TEAM_CPU_LIMIT:-2}"
+          memory: "${TEAM_MEM_LIMIT:-2g}"
+        reservations:
+          cpus: "0.5"
+          memory: 512m
+    restart: unless-stopped
+  team7-ssh:
+    build:
+      context: .
+      dockerfile: teams/ssh/Dockerfile
+      args:
+        TEAM_USER: ctfuser
+        TEAM_PASS: team7pass
+        TEAM_NAME: team7
+    image: sandcastle/team7-ssh-gateway
+    container_name: team7-ssh
+    hostname: team7
+    networks:
+      ctf-network:
+        ipv4_address: 10.10.7.2
+    ports:
+      - "2207:22"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    cap_add:
+      - NET_ADMIN
+    deploy:
+      resources:
+        limits:
+          cpus: "${TEAM_CPU_LIMIT:-2}"
+          memory: "${TEAM_MEM_LIMIT:-2g}"
+        reservations:
+          cpus: "0.5"
+          memory: 512m
+    restart: unless-stopped
+  team8-ssh:
+    build:
+      context: .
+      dockerfile: teams/ssh/Dockerfile
+      args:
+        TEAM_USER: ctfuser
+        TEAM_PASS: team8pass
+        TEAM_NAME: team8
+    image: sandcastle/team8-ssh-gateway
+    container_name: team8-ssh
+    hostname: team8
+    networks:
+      ctf-network:
+        ipv4_address: 10.10.8.2
+    ports:
+      - "2208:22"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    cap_add:
+      - NET_ADMIN
+    deploy:
+      resources:
+        limits:
+          cpus: "${TEAM_CPU_LIMIT:-2}"
+          memory: "${TEAM_MEM_LIMIT:-2g}"
+        reservations:
+          cpus: "0.5"
+          memory: 512m
+    restart: unless-stopped
+  team9-ssh:
+    build:
+      context: .
+      dockerfile: teams/ssh/Dockerfile
+      args:
+        TEAM_USER: ctfuser
+        TEAM_PASS: team9pass
+        TEAM_NAME: team9
+    image: sandcastle/team9-ssh-gateway
+    container_name: team9-ssh
+    hostname: team9
+    networks:
+      ctf-network:
+        ipv4_address: 10.10.9.2
+    ports:
+      - "2209:22"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    cap_add:
+      - NET_ADMIN
+    deploy:
+      resources:
+        limits:
+          cpus: "${TEAM_CPU_LIMIT:-2}"
+          memory: "${TEAM_MEM_LIMIT:-2g}"
+        reservations:
+          cpus: "0.5"
+          memory: 512m
+    restart: unless-stopped
+  team10-ssh:
+    build:
+      context: .
+      dockerfile: teams/ssh/Dockerfile
+      args:
+        TEAM_USER: ctfuser
+        TEAM_PASS: team10pass
+        TEAM_NAME: team10
+    image: sandcastle/team10-ssh-gateway
+    container_name: team10-ssh
+    hostname: team10
+    networks:
+      ctf-network:
+        ipv4_address: 10.10.10.2
+    ports:
+      - "2210:22"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     cap_add:

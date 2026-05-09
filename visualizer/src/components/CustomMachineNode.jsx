@@ -28,19 +28,32 @@ const CustomMachineNode = ({ data, selected }) => {
 
   return (
     <div
-      className={`machine-node machine-node--${data.kind || 'server'} ${selected ? 'is-selected' : ''}`}
+      className={[
+        'machine-node',
+        `machine-node--${data.relationRole || data.kind || 'server'}`,
+        selected ? 'is-selected' : '',
+        data.isHovered ? 'is-hovered' : '',
+        data.isRelated ? 'is-related' : '',
+        data.isDimmed ? 'is-dimmed' : '',
+      ]
+        .filter(Boolean)
+        .join(' ')}
       style={{ '--node-accent': data.accentColor || '#38bdf8' }}
     >
-      <Handle type="target" position={Position.Left} className="machine-node__handle" />
+      <Handle id="left" type="target" position={Position.Left} className="machine-node__handle" />
+      <Handle id="top" type="target" position={Position.Top} className="machine-node__handle" />
       <div className="machine-node__header">
-        <div className="machine-node__icon" aria-hidden="true">
-          <Icon size={20} strokeWidth={2.2} />
+        <div className="machine-node__badge" aria-hidden="true">
+          <span>{data.shortLabel}</span>
+          <Icon size={13} strokeWidth={2.2} />
         </div>
         <div className="machine-node__identity">
           <div className="machine-node__name" title={data.serviceName}>
             {data.serviceName}
           </div>
-          <div className="machine-node__kind">{data.kind || 'service'}</div>
+          <div className="machine-node__kind">
+            {data.relationRole === 'ssh' ? 'SSH container' : data.relationRole === 'vuln' ? 'Vulnerable app' : data.kind || 'service'}
+          </div>
         </div>
       </div>
 
@@ -57,7 +70,8 @@ const CustomMachineNode = ({ data, selected }) => {
         </div>
       )}
 
-      <Handle type="source" position={Position.Right} className="machine-node__handle" />
+      <Handle id="bottom" type="source" position={Position.Bottom} className="machine-node__handle" />
+      <Handle id="right" type="source" position={Position.Right} className="machine-node__handle" />
     </div>
   );
 };
