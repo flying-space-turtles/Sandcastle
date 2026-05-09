@@ -28,6 +28,7 @@ gradually as separate iterations.
 ├── teams/
 │   └── ssh/
 │       └── Dockerfile          # team SSH gateway image
+├── visualizer/                 # React Flow Docker architecture visualizer
 └── docs/
     └── architecture.md         # infrastructure topology notes
 ```
@@ -83,6 +84,20 @@ Reset volumes and restart:
 ```bash
 VULN_IMAGE=<image-name-or-tag> ./scripts/reset.sh
 ```
+
+## Visualize The Docker Architecture
+
+The `visualizer/` module is a standalone React + React Flow app that parses
+Compose YAML and renders the infrastructure as an interactive network topology:
+
+```bash
+cd visualizer
+npm install
+npm run dev
+```
+
+It loads the repository root `docker-compose.yml` by default and includes a
+YAML mode for pasted or uploaded Compose files.
 
 ## Future Vulnerable App Contract
 

@@ -38,6 +38,27 @@ jobs:
       - name: Lint
         run: ruff check scripts/
 
+  visualizer-build:
+    name: Build visualizer
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: visualizer
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: visualizer/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build visualizer
+        run: npm run build
+
   gen-compose:
     name: Validate compose generation
     runs-on: ubuntu-latest
@@ -48,8 +69,27 @@ jobs:
         with:
           python-version: "3.x"
 
+      - name: Detect committed team count
+        id: team-count
+        run: |
+          python3 - <<'PY' >> "$GITHUB_OUTPUT"
+          import re
+          from pathlib import Path
+
+          compose = Path("docker-compose.yml").read_text()
+          teams = sorted(
+              {int(match.group(1)) for match in re.finditer(r"^\s{2}team(\d+)-ssh:", compose, re.MULTILINE)}
+          )
+          if not teams:
+              raise SystemExit("No generated team SSH services found in docker-compose.yml")
+          expected = list(range(1, teams[-1] + 1))
+          if teams != expected:
+              raise SystemExit(f"Team ids must be contiguous from 1; found {teams}")
+          print(f"count={teams[-1]}")
+          PY
+
       - name: Generate docker-compose.yml
-        run: python3 scripts/gen_compose.py 3
+        run: python3 scripts/gen_compose.py "${{ steps.team-count.outputs.count }}"
 
       - name: Verify generated file matches committed version
         run: git diff --exit-code docker-compose.yml
