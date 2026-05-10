@@ -4,11 +4,13 @@
 `scripts/setup.sh` copies that template into each generated team directory:
 
 ```text
-teams/team<N>/service/
+teams/generated/team<N>/service/
 ```
 
 The top-level `docker-compose.yml` then builds every team service from its own
-copy. You do not need `VULN_IMAGE` for the generated team topology.
+copy, and the matching SSH container bind-mounts that same copy at
+`/home/team<N>/service`. You do not need `VULN_IMAGE` for the generated team
+topology.
 
 ```bash
 ./scripts/setup.sh --teams 4

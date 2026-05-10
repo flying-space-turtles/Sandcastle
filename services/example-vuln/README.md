@@ -24,9 +24,10 @@ services/example-vuln/
 └── exploits/                  # reference exploit scripts (one per vuln)
 ```
 
-The top-level scaffold copies this template into each `teams/team<N>/service`
-directory. Each `team<N>-vuln` service is built from that team's copy, gets its
-own `/app/data` volume, and seeds its own flag.
+The top-level scaffold copies this template into each
+`teams/generated/team<N>/service` directory. Each `team<N>-vuln` service is
+built from that team's copy, gets its own `/app/data` volume, and seeds its own
+flag.
 
 ## Running it standalone
 

@@ -11,6 +11,8 @@ __pycache__/
 .venv/
 venv/
 env/
+teams/generated/
+teams/team*/
 
 # Scaffold artefacts and per-host bits that should never be baked into an
 # image.

@@ -103,7 +103,7 @@ jobs:
       - name: Run hadolint
         uses: hadolint/hadolint-action@v3.1.0
         with:
-          dockerfile: teams/team1/ssh/Dockerfile
+          dockerfile: docker/ssh/Dockerfile
           failure-threshold: error
 
   compose-config:

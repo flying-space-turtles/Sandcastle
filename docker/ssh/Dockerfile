@@ -1,10 +1,18 @@
 # syntax=docker/dockerfile:1.6
 FROM ubuntu:22.04
 
+ARG TEAM_ID=0
+ARG TEAM_NAME=team0
+ARG TEAM_USER=team0
+ARG TEAM_PASS=changeme
+ARG TEAM_UID=1000
+
 ENV DEBIAN_FRONTEND=noninteractive \
-    TEAM_ID=1 \
-    TEAM_NAME=team1 \
-    TEAM_USER=team1
+    TEAM_ID=${TEAM_ID} \
+    TEAM_NAME=${TEAM_NAME} \
+    TEAM_USER=${TEAM_USER}
+
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -34,42 +42,49 @@ RUN install -m 0755 -d /etc/apt/keyrings \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
         docker-ce-cli \
+        docker-buildx-plugin \
         docker-compose-plugin \
     && rm -rf /var/lib/apt/lists/*
 
-RUN useradd -m -s /bin/bash team1 \
-    && echo 'team1:team1pass' | chpasswd \
-    && usermod -aG sudo team1 \
+RUN useradd -m -u "${TEAM_UID}" -s /bin/bash "${TEAM_USER}" \
+    && echo "${TEAM_USER}:${TEAM_PASS}" | chpasswd \
+    && usermod -aG sudo "${TEAM_USER}" \
     && groupadd -f docker \
-    && usermod -aG docker team1 \
-    && echo 'team1 ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/team1 \
-    && chmod 0440 /etc/sudoers.d/team1
+    && usermod -aG docker "${TEAM_USER}" \
+    && echo "${TEAM_USER} ALL=(ALL) NOPASSWD:ALL" > "/etc/sudoers.d/${TEAM_USER}" \
+    && chmod 0440 "/etc/sudoers.d/${TEAM_USER}" \
+    && mkdir -p "/home/${TEAM_USER}/service" \
+    && chown -R "${TEAM_USER}:${TEAM_USER}" "/home/${TEAM_USER}/service"
 
 RUN mkdir -p /run/sshd \
     && sed -i 's/#PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config \
     && sed -i 's/#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config \
     && sed -i 's/UsePAM yes/UsePAM no/' /etc/ssh/sshd_config
 
-COPY service /home/team1/service
-RUN chown -R team1:team1 /home/team1/service
+RUN cat > /usr/local/bin/redeploy-service <<'EOF' \
+    && chmod 0755 /usr/local/bin/redeploy-service
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "${HOME}/service"
+exec sudo env COMPOSE_IGNORE_ORPHANS=1 docker compose -p sandcastle -f sandcastle-compose.yml up -d --build
+EOF
 
 RUN printf '%s\n' \
     '' \
     '================================================================' \
-    '  Sandcastle CTF Infrastructure - Team 1' \
+    '  Sandcastle CTF Infrastructure - Team Box' \
     '' \
     '  This container is your team SSH gateway.' \
     '' \
-    '  Network layout:' \
-    '    - SSH gateway:         10.10.1.2' \
-    '    - Vulnerable service:  10.10.1.3' \
-    '    - Shared network:      10.10.0.0/16' \
-    '' \
-    '  Reach your vulnerable app from this box:' \
-    '    curl http://team1-vuln:8080/health' \
-    '' \
-    '  Service source is in:' \
+    '  Service source is bind-mounted at:' \
     '    ~/service' \
+    '' \
+    '  After patching, rebuild your vulnerable service with:' \
+    '    redeploy-service' \
+    '' \
+    '  Health check:' \
+    "    curl http://team${TEAM_ID}-vuln:8080/health" \
     '================================================================' \
     '' \
     > /etc/motd

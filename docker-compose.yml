@@ -24,7 +24,7 @@ volumes:
 services:
   team1-vuln:
     build:
-      context: ./teams/team1/service
+      context: ./teams/generated/team1/service
     image: sandcastle/team1-vuln:latest
     container_name: team1-vuln
     hostname: team1-vuln
@@ -42,8 +42,14 @@ services:
 
   team1-ssh:
     build:
-      context: ./teams/team1
-      dockerfile: ssh/Dockerfile
+      context: .
+      dockerfile: docker/ssh/Dockerfile
+      args:
+        TEAM_ID: "1"
+        TEAM_NAME: "team1"
+        TEAM_USER: "team1"
+        TEAM_PASS: "team1pass"
+        TEAM_UID: "1000"
     image: sandcastle/team1-ssh:latest
     container_name: team1-ssh
     hostname: team1-ssh
@@ -56,13 +62,14 @@ services:
       - "2201:22"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./teams/generated/team1/service:/home/team1/service
     cap_add:
       - NET_ADMIN
     restart: unless-stopped
 
   team2-vuln:
     build:
-      context: ./teams/team2/service
+      context: ./teams/generated/team2/service
     image: sandcastle/team2-vuln:latest
     container_name: team2-vuln
     hostname: team2-vuln
@@ -80,8 +87,14 @@ services:
 
   team2-ssh:
     build:
-      context: ./teams/team2
-      dockerfile: ssh/Dockerfile
+      context: .
+      dockerfile: docker/ssh/Dockerfile
+      args:
+        TEAM_ID: "2"
+        TEAM_NAME: "team2"
+        TEAM_USER: "team2"
+        TEAM_PASS: "team2pass"
+        TEAM_UID: "1000"
     image: sandcastle/team2-ssh:latest
     container_name: team2-ssh
     hostname: team2-ssh
@@ -94,13 +107,14 @@ services:
       - "2202:22"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./teams/generated/team2/service:/home/team2/service
     cap_add:
       - NET_ADMIN
     restart: unless-stopped
 
   team3-vuln:
     build:
-      context: ./teams/team3/service
+      context: ./teams/generated/team3/service
     image: sandcastle/team3-vuln:latest
     container_name: team3-vuln
     hostname: team3-vuln
@@ -118,8 +132,14 @@ services:
 
   team3-ssh:
     build:
-      context: ./teams/team3
-      dockerfile: ssh/Dockerfile
+      context: .
+      dockerfile: docker/ssh/Dockerfile
+      args:
+        TEAM_ID: "3"
+        TEAM_NAME: "team3"
+        TEAM_USER: "team3"
+        TEAM_PASS: "team3pass"
+        TEAM_UID: "1000"
     image: sandcastle/team3-ssh:latest
     container_name: team3-ssh
     hostname: team3-ssh
@@ -132,13 +152,14 @@ services:
       - "2203:22"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./teams/generated/team3/service:/home/team3/service
     cap_add:
       - NET_ADMIN
     restart: unless-stopped
 
   team4-vuln:
     build:
-      context: ./teams/team4/service
+      context: ./teams/generated/team4/service
     image: sandcastle/team4-vuln:latest
     container_name: team4-vuln
     hostname: team4-vuln
@@ -156,8 +177,14 @@ services:
 
   team4-ssh:
     build:
-      context: ./teams/team4
-      dockerfile: ssh/Dockerfile
+      context: .
+      dockerfile: docker/ssh/Dockerfile
+      args:
+        TEAM_ID: "4"
+        TEAM_NAME: "team4"
+        TEAM_USER: "team4"
+        TEAM_PASS: "team4pass"
+        TEAM_UID: "1000"
     image: sandcastle/team4-ssh:latest
     container_name: team4-ssh
     hostname: team4-ssh
@@ -170,6 +197,7 @@ services:
       - "2204:22"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./teams/generated/team4/service:/home/team4/service
     cap_add:
       - NET_ADMIN
     restart: unless-stopped

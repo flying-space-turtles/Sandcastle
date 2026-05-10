@@ -13,9 +13,47 @@ if [[ -f .env ]]; then
     set +a
 fi
 
+infer_team_count() {
+    local count=0
+    local line
+
+    while IFS= read -r line; do
+        if [[ "${line}" =~ ^[[:space:]]{2}team([0-9]+)-vuln: ]]; then
+            if ((BASH_REMATCH[1] > count)); then
+                count="${BASH_REMATCH[1]}"
+            fi
+        fi
+    done < docker-compose.yml
+
+    if ((count == 0)); then
+        count=3
+    fi
+
+    printf '%s\n' "${count}"
+}
+
+generated_contexts_missing() {
+    local teams="$1"
+    local i
+
+    for ((i = 1; i <= teams; i++)); do
+        if [[ ! -d "teams/generated/team${i}/service" ]]; then
+            return 0
+        fi
+    done
+
+    return 1
+}
+
 if [[ ! -f docker-compose.yml ]]; then
     echo "[*] No docker-compose.yml - running setup with default 3 teams"
     ./scripts/setup.sh --teams 3
+else
+    team_count="$(infer_team_count)"
+    if generated_contexts_missing "${team_count}"; then
+        echo "[*] Missing generated team service contexts - running setup for ${team_count} teams"
+        ./scripts/setup.sh --teams "${team_count}"
+    fi
 fi
 
 echo "[*] Building team images..."

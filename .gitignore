@@ -39,5 +39,9 @@ tmp/
 *.sqlite3
 *.db
 
+# Generated team workspaces. scripts/setup.sh recreates these from services/.
+teams/generated/
+teams/team*/
+
 # Local Docker Compose overrides
 docker-compose.override.yml
