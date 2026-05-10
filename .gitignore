@@ -13,6 +13,8 @@ Thumbs.db
 
 # Python
 __pycache__/
+**/__pycache__/
+__pycache__/**
 *.py[cod]
 *$py.class
 .pytest_cache/
@@ -36,6 +38,10 @@ tmp/
 *.sqlite
 *.sqlite3
 *.db
+
+# Generated team workspaces. scripts/setup.sh recreates these from services/.
+teams/generated/
+teams/team*/
 
 # Local Docker Compose overrides
 docker-compose.override.yml

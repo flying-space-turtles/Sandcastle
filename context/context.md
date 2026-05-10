@@ -4,6 +4,15 @@
 
 This document provides a comprehensive blueprint for simulating an Attack & Defense (A&D) Capture The Flag competition entirely on a single computer. It covers network topology, machine simulation, vulnerable service management, flag lifecycle, scoring, and operational procedures.
 
+> Current repository note: this document is a broad architecture blueprint. The
+> implemented scaffold keeps canonical vulnerable service templates under
+> `services/`, generates ignored per-team working copies under
+> `teams/generated/team<N>/service`, builds `team<N>-vuln` from that same
+> working copy, and uses one reusable SSH gateway image at
+> `docker/ssh/Dockerfile`. Older examples below that mention committed
+> `teams/team<N>` folders or a copied per-team SSH Dockerfile are conceptual,
+> not the current repo model.
+
 ---
 
 ## Table of Contents

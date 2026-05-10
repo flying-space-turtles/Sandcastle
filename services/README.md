@@ -1,22 +1,28 @@
 # Vulnerable Services
 
-No vulnerable application is bundled in this scaffold.
-
-Future services can live under this directory, for example:
+`services/example-vuln` is the bundled vulnerable service template. Running
+`scripts/setup.sh` copies that template into each generated team directory:
 
 ```text
-services/
-└── example-vuln/
-    ├── Dockerfile
-    └── ...
+teams/generated/team<N>/service/
 ```
 
-Build the service image yourself, then pass that image to the infrastructure:
+The top-level `docker-compose.yml` then builds every team service from its own
+copy, and the matching SSH container bind-mounts that same copy at
+`/home/team<N>/service`. You do not need `VULN_IMAGE` for the generated team
+topology.
 
 ```bash
-docker build -t sandcastle/example-vuln ./services/example-vuln
-VULN_IMAGE=sandcastle/example-vuln ./scripts/start.sh
+./scripts/setup.sh --teams 4
+docker compose up --build
 ```
 
-The generated Compose file will run the same image once per team as
-`team<N>-vuln`.
+To add a different challenge, put its template under `services/`, update
+the generated teams from that template, then regenerate the topology:
+
+```bash
+./scripts/setup.sh --teams 4 --template services/my-broken-service --overwrite-services
+```
+
+Omit `--overwrite-services` when you want to preserve existing team copies and
+only create missing teams.

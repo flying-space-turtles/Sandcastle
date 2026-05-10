@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import defaultComposeYaml from '../../docker-compose.yml?raw';
 import exampleComposeYaml from '../../services/example-vuln/docker-compose.yml?raw';
-import sshDockerfile from '../../teams/ssh/Dockerfile?raw';
+import sshDockerfile from '../../docker/ssh/Dockerfile?raw';
 import vulnDockerfile from '../../services/example-vuln/Dockerfile?raw';
 import DetailsPanel from './components/DetailsPanel.jsx';
 import DockerCanvas from './components/DockerCanvas.jsx';
@@ -10,10 +10,24 @@ import { parseDockerCompose } from './data/dockerComposeParser.js';
 import { buildDockerFlow } from './graph/dockerGraph.js';
 
 const dockerfileSources = {
-  'teams/ssh/Dockerfile': sshDockerfile,
-  './teams/ssh/Dockerfile': sshDockerfile,
+  'ssh/Dockerfile': sshDockerfile,
+  './ssh/Dockerfile': sshDockerfile,
+  'docker/ssh/Dockerfile': sshDockerfile,
+  './docker/ssh/Dockerfile': sshDockerfile,
   'services/example-vuln/Dockerfile': vulnDockerfile,
   './services/example-vuln/Dockerfile': vulnDockerfile,
+  'teams/generated/team1/service/Dockerfile': vulnDockerfile,
+  './teams/generated/team1/service/Dockerfile': vulnDockerfile,
+  'teams/generated/team2/service/Dockerfile': vulnDockerfile,
+  './teams/generated/team2/service/Dockerfile': vulnDockerfile,
+  'teams/generated/team3/service/Dockerfile': vulnDockerfile,
+  './teams/generated/team3/service/Dockerfile': vulnDockerfile,
+  'teams/generated/team4/service/Dockerfile': vulnDockerfile,
+  './teams/generated/team4/service/Dockerfile': vulnDockerfile,
+  'teams/generated/team5/service/Dockerfile': vulnDockerfile,
+  './teams/generated/team5/service/Dockerfile': vulnDockerfile,
+  'teams/generated/team6/service/Dockerfile': vulnDockerfile,
+  './teams/generated/team6/service/Dockerfile': vulnDockerfile,
   Dockerfile: vulnDockerfile,
   './Dockerfile': vulnDockerfile,
 };
