@@ -24,9 +24,9 @@ services/example-vuln/
 └── exploits/                  # reference exploit scripts (one per vuln)
 ```
 
-The top-level scaffold copies this template into each `teams/team<N>/service`
-directory. Each `team<N>-vuln` service is built from that team's copy, gets its
-own `/app/data` volume, and seeds its own flag.
+The image is reused as-is by the top-level scaffold. Each `team<N>-vuln`
+service that the scaffold spins up gets its own `/app/data` volume and its
+own freshly-seeded flag.
 
 ## Running it standalone
 
@@ -47,16 +47,16 @@ The standalone compose binds the app to host port `8080` by default. Set
 
 ## Running it through the Sandcastle scaffold
 
-Generate the team topology, then let Compose build the per-team copies:
+Build the image once, then point the scaffold at it:
 
 ```bash
-./scripts/setup.sh --teams 4
-docker compose up --build
+docker build -t sandcastle/example-vuln ./services/example-vuln
+VULN_IMAGE=sandcastle/example-vuln ./scripts/start.sh
 ```
 
-Each `team<N>-vuln` container boots with `TEAM_ID=<N>`, `TEAM_NAME=Team <N>`,
-`SERVICE_PORT=8080`, and a per-team `team<N>-data` volume mounted at
-`/app/data`.
+Each `team<N>-vuln` container will boot the same image with `TEAM_ID=<N>`,
+`TEAM_NAME=Team <N>`, `SERVICE_PORT=8080`, and a per-team `team<N>-data`
+volume mounted at `/app/data`.
 
 ## Data model
 

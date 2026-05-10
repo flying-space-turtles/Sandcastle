@@ -249,6 +249,8 @@ EOF
 
 EOF
     done
+
+    sed -i '${/^$/d;}' "${COMPOSE_FILE}"
 }
 
 print_summary() {

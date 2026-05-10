@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block body %}
+  <h2>Network diagnostics</h2>
+  <p class="muted">Operators only. Pings a host from inside the container.</p>
+  <form method="post">
+    <label>host <input name="host" value="{{ host or '' }}" placeholder="10.10.0.1" required></label>
+    <button type="submit">ping</button>
+  </form>
+  {% if output is not none %}
+    <h3>output</h3>
+    <pre>{{ output }}</pre>
+  {% endif %}
+{% endblock %}

@@ -77,7 +77,7 @@ Stop while keeping team data volumes:
 Reset volumes and restart:
 
 ```bash
-VULN_IMAGE=<image-name-or-tag> ./scripts/reset.sh
+./scripts/reset.sh
 ```
 
 ## Visualize The Docker Architecture
@@ -101,7 +101,7 @@ as a copy of `services/example-vuln`. Each service receives:
 
 - `TEAM_ID=<N>`
 - `TEAM_NAME=Team <N>`
-- `SERVICE_PORT=${VULN_PORT:-8080}`
+- `SERVICE_PORT=8080`
 - `SECRET_KEY=sandcastle-team<N>-dev-secret`
 - a persistent volume mounted at `/app/data`
 - network identity `team<N>-vuln` on `ctf-network`

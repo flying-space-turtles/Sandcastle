@@ -103,7 +103,7 @@ jobs:
       - name: Run hadolint
         uses: hadolint/hadolint-action@v3.1.0
         with:
-          dockerfile: teams/ssh/Dockerfile
+          dockerfile: teams/team1/ssh/Dockerfile
           failure-threshold: error
 
   compose-config:
@@ -114,8 +114,6 @@ jobs:
 
       - name: Validate compose syntax
         run: docker compose -f docker-compose.yml config --quiet
-        env:
-          VULN_IMAGE: placeholder:latest
 
   scripts-executable:
     name: Verify scripts are executable

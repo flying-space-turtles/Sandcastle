@@ -19,7 +19,7 @@ ctf-network (bridge, 10.10.0.0/16)
   ...
 
   teamN-ssh   10.10.N.2   host port 2200+N -> 22
-  teamN-vuln  10.10.N.3   image: ${VULN_IMAGE}
+  teamN-vuln  10.10.N.3   build: teams/teamN/service
 ```
 
 Docker Compose creates the shared bridge network and assigns deterministic IP
