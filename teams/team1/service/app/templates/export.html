@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block body %}
+  <h2>Export note</h2>
+  <p class="muted">Reads a saved note from the on-disk store under <code>/app/data/notes</code>. Try <code>note_1.txt</code>.</p>
+  <form method="get">
+    <label>file <input name="file" placeholder="note_1.txt" required></label>
+    <button type="submit">read</button>
+  </form>
+  {% if error %}
+    <div class="flash error">{{ error }}</div>
+  {% endif %}
+  {% if body is not none %}
+    <h3>contents</h3>
+    <pre>{{ body }}</pre>
+  {% endif %}
+{% endblock %}

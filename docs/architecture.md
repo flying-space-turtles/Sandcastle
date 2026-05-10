@@ -1,8 +1,9 @@
 # Infrastructure Architecture
 
-This repository is currently an infrastructure-only scaffold. It models the
-container layout for a local Attack & Defense CTF without bundling the
-vulnerable services or competition logic.
+This repository models the container layout for a local Attack & Defense CTF
+and includes a template vulnerable service that is copied into each generated
+team directory. It does not include competition logic such as checkers,
+scoreboards, or scoring.
 
 ## Topology
 
@@ -10,10 +11,10 @@ vulnerable services or competition logic.
 ctf-network (bridge, 10.10.0.0/16)
 
   team1-ssh   10.10.1.2   host port 2201 -> 22
-  team1-vuln  10.10.1.3   image: ${VULN_IMAGE}
+  team1-vuln  10.10.1.3   build: teams/team1/service
 
   team2-ssh   10.10.2.2   host port 2202 -> 22
-  team2-vuln  10.10.2.3   image: ${VULN_IMAGE}
+  team2-vuln  10.10.2.3   build: teams/team2/service
 
   ...
 
@@ -26,23 +27,23 @@ addresses so future checkers, gameservers, and teams can use stable targets.
 
 ## Generated Services
 
-`scripts/gen_compose.py` is the source of truth for `docker-compose.yml`.
-The generated file contains:
+`scripts/setup.sh` is the source of truth for generated team directories and
+`docker-compose.yml`. The generated file contains:
 
 - one persistent `team<N>-data` volume per team
-- one `team<N>-vuln` service per team using the externally supplied
-  `VULN_IMAGE`
-- one `team<N>-ssh` service per team built from `teams/ssh/Dockerfile`
+- one `team<N>-vuln` service per team built from `teams/team<N>/service`
+- one `team<N>-ssh` service per team built from `teams/team<N>/ssh/Dockerfile`
 - a mounted Docker socket in each SSH gateway for local orchestration
 
 No gameserver or scoreboard is generated in this iteration.
 
 ## Vulnerable App Slot Contract
 
-Future vulnerable app images should be safe to reuse across all teams. Compose
-passes `TEAM_ID`, `TEAM_NAME`, and `SERVICE_PORT`, and mounts `/app/data` for
-team-specific persistence. The recommended service port is `8080`, but the
-current infrastructure does not depend on any protocol.
+Future vulnerable app templates should be safe to copy per team. Compose passes
+`TEAM_ID`, `TEAM_NAME`, `SERVICE_PORT`, and `SECRET_KEY`, and mounts `/app/data`
+for team-specific persistence. The recommended service port is `8080`, but the
+current infrastructure does not depend on any protocol beyond the bundled
+template's health endpoint.
 
 ## Iteration Path
 
