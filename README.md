@@ -94,6 +94,20 @@ npm run dev
 It loads the repository root `docker-compose.yml` by default and includes a
 YAML mode for pasted or uploaded Compose files.
 
+## Visualize The Docker Architecture
+
+The `visualizer/` module is a standalone React + React Flow app that parses
+Compose YAML and renders the infrastructure as an interactive network topology:
+
+```bash
+cd visualizer
+npm install
+npm run dev
+```
+
+It loads the repository root `docker-compose.yml` by default and includes a
+YAML mode for pasted or uploaded Compose files.
+
 ## Future Vulnerable App Contract
 
 Every `team<N>-vuln` service is built from `teams/team<N>/service`, which starts
