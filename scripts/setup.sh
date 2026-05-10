@@ -5,10 +5,14 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TEAMS_DIR="${ROOT}/teams"
-SERVICE_TEMPLATE="${ROOT}/services/example-vuln"
+DEFAULT_SERVICE_TEMPLATE="${ROOT}/services/example-vuln"
 COMPOSE_FILE="${ROOT}/docker-compose.yml"
 DEFAULT_TEAMS=3
 MAX_TEAMS=250
+NUM_TEAMS="${DEFAULT_TEAMS}"
+TEMPLATE_DIR="${DEFAULT_SERVICE_TEMPLATE}"
+OVERWRITE_SERVICES=0
+PRUNE_EXTRA_TEAMS=1
 
 usage() {
     cat <<EOF
@@ -18,6 +22,10 @@ Usage:
 
 Options:
   --teams, -t   Number of teams to generate. Defaults to ${DEFAULT_TEAMS}.
+  --template    Service template directory to copy. Defaults to services/example-vuln.
+  --overwrite-services
+                Replace existing teams/team<N>/service directories with the template.
+  --no-prune    Keep generated teams/team<N> directories above the requested count.
   --help, -h    Show this help text.
 
 Compatibility:
@@ -47,6 +55,23 @@ parse_args() {
                 provided=1
                 shift
                 ;;
+            --template)
+                [[ $# -ge 2 ]] || die "$1 requires a value"
+                TEMPLATE_DIR="$2"
+                shift 2
+                ;;
+            --template=*)
+                TEMPLATE_DIR="${1#*=}"
+                shift
+                ;;
+            --overwrite-services)
+                OVERWRITE_SERVICES=1
+                shift
+                ;;
+            --no-prune)
+                PRUNE_EXTRA_TEAMS=0
+                shift
+                ;;
             -h|--help)
                 usage
                 exit 0
@@ -71,19 +96,58 @@ parse_args() {
     [[ "${value}" =~ ^[0-9]+$ ]] || die "team count must be a positive integer"
     value="$((10#${value}))"
     ((value >= 1 && value <= MAX_TEAMS)) || die "team count must be between 1 and ${MAX_TEAMS}"
-    echo "${value}"
+
+    if [[ "${TEMPLATE_DIR}" != /* ]]; then
+        TEMPLATE_DIR="${ROOT}/${TEMPLATE_DIR}"
+    fi
+    [[ -d "${TEMPLATE_DIR}" ]] || die "missing vulnerable service template: ${TEMPLATE_DIR}"
+
+    NUM_TEAMS="${value}"
+}
+
+is_generated_team_dir() {
+    local team_dir="$1"
+    [[ -f "${team_dir}/.sandcastle-generated" ]]
+}
+
+prune_extra_teams() {
+    local teams="$1"
+    local team_dir name team_num
+
+    [[ "${PRUNE_EXTRA_TEAMS}" -eq 1 ]] || return
+
+    shopt -s nullglob
+    for team_dir in "${TEAMS_DIR}"/team*; do
+        [[ -d "${team_dir}" ]] || continue
+        name="$(basename "${team_dir}")"
+        [[ "${name}" =~ ^team([0-9]+)$ ]] || continue
+        team_num="${BASH_REMATCH[1]}"
+        team_num="$((10#${team_num}))"
+
+        if ((team_num > teams)); then
+            if is_generated_team_dir "${team_dir}"; then
+                rm -rf "${team_dir}"
+            else
+                echo "[!] Keeping unmarked extra team directory: ${team_dir}" >&2
+            fi
+        fi
+    done
+    shopt -u nullglob
 }
 
 copy_service_template() {
     local team_dir="$1"
     local service_dir="${team_dir}/service"
 
-    if [[ -d "${service_dir}" ]]; then
+    if [[ -d "${service_dir}" && "${OVERWRITE_SERVICES}" -eq 0 ]]; then
         return
     fi
 
+    if [[ -d "${service_dir}" ]]; then
+        rm -rf "${service_dir}"
+    fi
     mkdir -p "${service_dir}"
-    cp -a "${SERVICE_TEMPLATE}/." "${service_dir}/"
+    cp -a "${TEMPLATE_DIR}/." "${service_dir}/"
 }
 
 write_ssh_dockerfile() {
@@ -274,11 +338,11 @@ print_summary() {
 
 main() {
     local teams
-    teams="$(parse_args "$@")"
-
-    [[ -d "${SERVICE_TEMPLATE}" ]] || die "missing vulnerable service template: ${SERVICE_TEMPLATE}"
+    parse_args "$@"
+    teams="${NUM_TEAMS}"
 
     mkdir -p "${TEAMS_DIR}"
+    prune_extra_teams "${teams}"
 
     local i team_dir
     for ((i = 1; i <= teams; i++)); do

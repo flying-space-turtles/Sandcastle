@@ -16,4 +16,11 @@ docker compose up --build
 ```
 
 To add a different challenge, put its template under `services/`, update
-`scripts/setup.sh` to copy that template, then regenerate the topology.
+the generated teams from that template, then regenerate the topology:
+
+```bash
+./scripts/setup.sh --teams 4 --template services/my-broken-service --overwrite-services
+```
+
+Omit `--overwrite-services` when you want to preserve existing team copies and
+only create missing teams.

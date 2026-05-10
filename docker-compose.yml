@@ -20,8 +20,6 @@ volumes:
   team2-data:
   team3-data:
   team4-data:
-  team5-data:
-  team6-data:
 
 services:
   team1-vuln:
@@ -170,82 +168,6 @@ services:
         ipv4_address: 10.10.4.2
     ports:
       - "2204:22"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    cap_add:
-      - NET_ADMIN
-    restart: unless-stopped
-
-  team5-vuln:
-    build:
-      context: ./teams/team5/service
-    image: sandcastle/team5-vuln:latest
-    container_name: team5-vuln
-    hostname: team5-vuln
-    networks:
-      ctf-network:
-        ipv4_address: 10.10.5.3
-    environment:
-      TEAM_ID: "5"
-      TEAM_NAME: "Team 5"
-      SERVICE_PORT: "8080"
-      SECRET_KEY: "sandcastle-team5-dev-secret"
-    volumes:
-      - team5-data:/app/data
-    restart: unless-stopped
-
-  team5-ssh:
-    build:
-      context: ./teams/team5
-      dockerfile: ssh/Dockerfile
-    image: sandcastle/team5-ssh:latest
-    container_name: team5-ssh
-    hostname: team5-ssh
-    depends_on:
-      - team5-vuln
-    networks:
-      ctf-network:
-        ipv4_address: 10.10.5.2
-    ports:
-      - "2205:22"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    cap_add:
-      - NET_ADMIN
-    restart: unless-stopped
-
-  team6-vuln:
-    build:
-      context: ./teams/team6/service
-    image: sandcastle/team6-vuln:latest
-    container_name: team6-vuln
-    hostname: team6-vuln
-    networks:
-      ctf-network:
-        ipv4_address: 10.10.6.3
-    environment:
-      TEAM_ID: "6"
-      TEAM_NAME: "Team 6"
-      SERVICE_PORT: "8080"
-      SECRET_KEY: "sandcastle-team6-dev-secret"
-    volumes:
-      - team6-data:/app/data
-    restart: unless-stopped
-
-  team6-ssh:
-    build:
-      context: ./teams/team6
-      dockerfile: ssh/Dockerfile
-    image: sandcastle/team6-ssh:latest
-    container_name: team6-ssh
-    hostname: team6-ssh
-    depends_on:
-      - team6-vuln
-    networks:
-      ctf-network:
-        ipv4_address: 10.10.6.2
-    ports:
-      - "2206:22"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     cap_add:

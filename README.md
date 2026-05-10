@@ -60,6 +60,23 @@ Each generated team has:
 The SSH username is `team<N>` and the password is `team<N>pass`; for example,
 Team 3 uses host port `2203`, username `team3`, and password `team3pass`.
 
+If you lower the team count, generated extra team directories are pruned. For
+example, running `./scripts/setup.sh --teams 4` after a 6-team setup removes
+generated `teams/team5` and `teams/team6` and rewrites `docker-compose.yml`.
+
+To seed teams from a different vulnerable-service template:
+
+```bash
+./scripts/setup.sh --teams 4 --template services/my-broken-service
+```
+
+Existing `teams/team<N>/service` directories are preserved by default so team
+patches are not overwritten. To intentionally replace them with the template:
+
+```bash
+./scripts/setup.sh --teams 4 --template services/my-broken-service --overwrite-services
+```
+
 ## Start And Stop
 
 ```bash
