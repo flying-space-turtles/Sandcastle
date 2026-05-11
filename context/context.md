@@ -7,11 +7,11 @@ This document provides a comprehensive blueprint for simulating an Attack & Defe
 > Current repository note: this document is a broad architecture blueprint. The
 > implemented scaffold keeps canonical vulnerable service templates under
 > `services/`, generates ignored per-team working copies under
-> `teams/generated/team<N>/service`, builds `team<N>-vuln` from that same
-> working copy, and uses one reusable SSH gateway image at
-> `docker/ssh/Dockerfile`. Older examples below that mention committed
-> `teams/team<N>` folders or a copied per-team SSH Dockerfile are conceptual,
-> not the current repo model.
+> `teams/generated/team<N>/example-vuln`, builds `team<N>-vuln` as a small
+> SSH-able Linux machine, and expects teams to start `team<N>-vuln-app` from
+> inside that machine with Docker Compose. Older examples below that mention
+> committed `teams/team<N>` folders or copied per-team Dockerfiles are
+> conceptual, not the current repo model.
 
 ---
 
@@ -276,19 +276,16 @@ deploy:
 
 ### 5.1 The Vulnerable Service
 
-Each team's vulnerable service is a Docker Compose project located at `/home/ctfuser/service/` inside their SSH container. Example structure:
+Each team's vulnerable service is a Docker Compose project located at `/home/ctfuser/example-vuln/` inside their vulnerable machine. Example structure:
 
 ```
-/home/ctfuser/service/
+/home/ctfuser/example-vuln/
 ├── docker-compose.yml
 ├── Dockerfile
-├── src/
+├── app/
 │   ├── app.py            # The vulnerable application
 │   ├── requirements.txt
 │   └── templates/
-│       └── index.html
-├── data/
-│   └── flag.txt          # Current flag (planted by gameserver)
 └── README.md             # Service documentation
 ```
 
@@ -297,44 +294,36 @@ Example `docker-compose.yml`:
 ```yaml
 version: "3.8"
 services:
-  webapp:
+  team1-vuln-app:
     build: .
-    container_name: team1-vuln
-    ports:
-      - "8080:8080"
+    container_name: team1-vuln-app
     volumes:
-      - ./data:/app/data
-    networks:
-      ctf-network:
-        ipv4_address: 10.10.1.3
+      - team-data:/app/data
+    network_mode: "container:team1-vuln"
     restart: unless-stopped
-
-networks:
-  ctf-network:
-    external: true
 ```
 
 ### 5.2 Running the Service
 
-From inside the SSH container:
+From inside the vulnerable machine:
 
 ```bash
-cd ~/service
+cd ~/example-vuln
 docker compose up -d
 ```
 
-The vulnerable service is now accessible to all other teams on the `ctf-network` at `10.10.1.3:8080`.
+The vulnerable service is now accessible to all other teams on the `ctf-network` at `10.10.1.3:8080` or `team1-vuln:8080`.
 
 ### 5.3 Patching the Service
 
-Teams SSH into their container, modify the source code, and rebuild:
+Teams SSH through the gateway into their vulnerable machine, modify the source code, and rebuild:
 
 ```bash
 # Edit the vulnerable code
-vim ~/service/src/app.py
+vim ~/example-vuln/app/app.py
 
 # Rebuild and restart
-cd ~/service
+cd ~/example-vuln
 docker compose up -d --build
 ```
 
@@ -343,7 +332,7 @@ docker compose up -d --build
 ### 5.4 Taking Down the Service
 
 ```bash
-cd ~/service
+cd ~/example-vuln
 docker compose down
 ```
 
@@ -352,7 +341,7 @@ docker compose down
 ### 5.5 Inspecting Logs
 
 ```bash
-cd ~/service
+cd ~/example-vuln
 docker compose logs -f
 ```
 

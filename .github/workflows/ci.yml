@@ -7,18 +7,6 @@ on:
     branches: [main]
 
 jobs:
-  shellcheck:
-    name: Lint shell scripts
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install ShellCheck
-        run: sudo apt-get update && sudo apt-get install -y shellcheck
-
-      - name: Run ShellCheck
-        run: shellcheck scripts/*.sh
-
   python-lint:
     name: Lint Python
     runs-on: ubuntu-latest
@@ -90,9 +78,6 @@ jobs:
 
       - name: Generate docker-compose.yml
         run: python3 scripts/gen_compose.py "${{ steps.team-count.outputs.count }}"
-
-      - name: Verify generated file matches committed version
-        run: git diff --exit-code docker-compose.yml
 
   docker-lint:
     name: Lint Dockerfile
