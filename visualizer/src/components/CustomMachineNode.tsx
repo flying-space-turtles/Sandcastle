@@ -1,8 +1,9 @@
-import { memo } from 'react';
-import { Handle, Position } from 'reactflow';
+import { memo, type CSSProperties } from 'react';
+import { Handle, Position, type NodeProps } from 'reactflow';
 import { Container, Database, Globe2, Router, Server, Shield } from 'lucide-react';
+import type { MachineNodeData } from '../types';
 
-const ICONS = {
+const ICONS: Record<string, typeof Globe2> = {
   database: Database,
   firewall: Shield,
   gateway: Router,
@@ -10,7 +11,7 @@ const ICONS = {
   server: Server,
 };
 
-const getNetworkLabel = (data) => {
+const getNetworkLabel = (data: MachineNodeData) => {
   if (data.ipAddress) {
     return data.ipAddress;
   }
@@ -23,7 +24,7 @@ const getNetworkLabel = (data) => {
   return 'dynamic address';
 };
 
-const CustomMachineNode = ({ data, selected }) => {
+const CustomMachineNode = ({ data, selected }: NodeProps<MachineNodeData>) => {
   const Icon = ICONS[data.kind] || Globe2;
 
   return (
@@ -38,7 +39,7 @@ const CustomMachineNode = ({ data, selected }) => {
       ]
         .filter(Boolean)
         .join(' ')}
-      style={{ '--node-accent': data.accentColor || '#38bdf8' }}
+      style={{ '--node-accent': data.accentColor || '#38bdf8' } as CSSProperties}
     >
       <Handle id="left" type="target" position={Position.Left} className="machine-node__handle" />
       <Handle id="top" type="target" position={Position.Top} className="machine-node__handle" />
@@ -52,7 +53,11 @@ const CustomMachineNode = ({ data, selected }) => {
             {data.serviceName}
           </div>
           <div className="machine-node__kind">
-            {data.relationRole === 'ssh' ? 'SSH container' : data.relationRole === 'vuln' ? 'Vulnerable app' : data.kind || 'service'}
+            {data.relationRole === 'ssh'
+              ? 'SSH container'
+              : data.relationRole === 'vuln'
+                ? 'Vulnerable app'
+                : data.kind || 'service'}
           </div>
         </div>
       </div>
