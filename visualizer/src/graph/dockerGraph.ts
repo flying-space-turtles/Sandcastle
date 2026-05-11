@@ -1,3 +1,12 @@
+import type { Edge, Node } from 'reactflow';
+import type {
+  MachineNodeData,
+  ParsedCompose,
+  ServiceDefinition,
+  TopologyEdgeData,
+  TopologyNodeData,
+} from '../types';
+
 const GROUP_PALETTE = [
   '#38bdf8',
   '#a78bfa',
@@ -20,18 +29,18 @@ const GROUP_GAP = 150;
 const GROUP_MAX_ROW_WIDTH = 2600;
 const MIN_NETWORK_WIDTH = 1160;
 
-const networkNodeId = (name) => `network:${name}`;
-const edgeKey = (source, target, kind) => `${source}->${target}:${kind}`;
+const networkNodeId = (name: string) => `network:${name}`;
+const edgeKey = (source: string, target: string, kind: string) => `${source}->${target}:${kind}`;
 
-const teamSortValue = (service) => {
-  const numeric = Number.parseInt(service.teamId, 10);
+const teamSortValue = (service: ServiceDefinition) => {
+  const numeric = Number.parseInt(service.teamId || '', 10);
   if (!Number.isNaN(numeric)) {
     return numeric;
   }
   return Number.MAX_SAFE_INTEGER;
 };
 
-const sortServices = (a, b) => {
+const sortServices = (a: ServiceDefinition, b: ServiceDefinition) => {
   const teamDelta = teamSortValue(a) - teamSortValue(b);
   if (teamDelta !== 0) {
     return teamDelta;
@@ -39,10 +48,10 @@ const sortServices = (a, b) => {
   return a.serviceName.localeCompare(b.serviceName);
 };
 
-const getTeamKey = (service) =>
+const getTeamKey = (service: ServiceDefinition) =>
   service.teamId ? `team-${service.teamId}` : `${service.teamName}:${service.serviceName}`;
 
-const getServiceRole = (service) => {
+const getServiceRole = (service: ServiceDefinition) => {
   const text = [service.serviceName, service.containerName, service.hostname, service.image]
     .filter(Boolean)
     .join(' ')
@@ -63,7 +72,7 @@ const getServiceRole = (service) => {
   return 'other';
 };
 
-const getShortLabel = (role, service) => {
+const getShortLabel = (role: string, service: ServiceDefinition) => {
   if (role === 'ssh') {
     return 'S';
   }
@@ -79,7 +88,7 @@ const getShortLabel = (role, service) => {
   return service.serviceName.slice(0, 2).toUpperCase();
 };
 
-const buildNetworkCatalog = (parsed) => {
+const buildNetworkCatalog = (parsed: ParsedCompose) => {
   const catalog = new Map(parsed.networks.map((network) => [network.name, network]));
 
   parsed.services.forEach((service) => {
@@ -88,6 +97,8 @@ const buildNetworkCatalog = (parsed) => {
       catalog.set(networkName, {
         name: networkName,
         driver: networkName === 'external' ? 'external' : 'default',
+        external: networkName === 'external',
+        raw: {},
       });
     }
   });
@@ -96,58 +107,39 @@ const buildNetworkCatalog = (parsed) => {
     catalog.set('external', {
       name: 'external',
       driver: 'external',
+      external: true,
+      raw: {},
     });
   }
 
   return [...catalog.values()];
 };
 
-const groupServicesByNetwork = (services) =>
+const groupServicesByNetwork = (services: ServiceDefinition[]) =>
   services.reduce((acc, service) => {
     const networkName = service.primaryNetwork || 'external';
     if (!acc.has(networkName)) {
       acc.set(networkName, []);
     }
-    acc.get(networkName).push(service);
+    acc.get(networkName)?.push(service);
     return acc;
-  }, new Map());
+  }, new Map<string, ServiceDefinition[]>());
 
-const createMachineData = (service) => {
+const createMachineData = (service: ServiceDefinition): MachineNodeData => {
   const relationRole = getServiceRole(service);
 
   return {
-    id: service.id,
-    serviceName: service.serviceName,
-    containerName: service.containerName,
-    hostname: service.hostname,
-    image: service.image,
-    build: service.build,
-    dockerfile: service.dockerfile,
-    kind: service.kind,
+    ...service,
     relationRole,
     shortLabel: getShortLabel(relationRole, service),
-    teamId: service.teamId,
-    teamName: service.teamName,
-    networks: service.networks,
-    primaryNetwork: service.primaryNetwork,
-    ipAddress: service.ipAddress,
-    dependsOn: service.dependsOn,
-    links: service.links,
-    ports: service.ports,
-    expose: service.expose,
-    environment: service.environment,
-    labels: service.labels,
-    command: service.command,
-    entrypoint: service.entrypoint,
-    restart: service.restart,
-    volumes: service.volumes,
-    capAdd: service.capAdd,
-    privileged: service.privileged,
-    raw: service.raw,
   };
 };
 
-const addEdge = (edges, seen, edge) => {
+type EdgeInput = Edge<TopologyEdgeData> & {
+  markerEnd?: Edge<TopologyEdgeData>['markerEnd'] | null;
+};
+
+const addEdge = (edges: Array<Edge<TopologyEdgeData>>, seen: Set<string>, edge: EdgeInput) => {
   const key = edgeKey(edge.source, edge.target, edge.data?.kind || edge.label || 'edge');
   if (seen.has(key) || edge.source === edge.target) {
     return;
@@ -171,7 +163,7 @@ const addEdge = (edges, seen, edge) => {
   });
 };
 
-const getGrid = (itemCount) => {
+const getGrid = (itemCount: number) => {
   if (itemCount <= 0) {
     return {
       columns: 1,
@@ -187,15 +179,25 @@ const getGrid = (itemCount) => {
   };
 };
 
-const buildTeamGroups = (services) => {
+type TeamGroup = {
+  teamKey: string;
+  teamId?: string;
+  teamName: string;
+  sshServices: ServiceDefinition[];
+  vulnServices: ServiceDefinition[];
+  otherServices: ServiceDefinition[];
+  services: ServiceDefinition[];
+};
+
+const buildTeamGroups = (services: ServiceDefinition[]): TeamGroup[] => {
   const grouped = services.reduce((acc, service) => {
     const teamKey = getTeamKey(service);
     if (!acc.has(teamKey)) {
       acc.set(teamKey, []);
     }
-    acc.get(teamKey).push(service);
+    acc.get(teamKey)?.push(service);
     return acc;
-  }, new Map());
+  }, new Map<string, ServiceDefinition[]>());
 
   return [...grouped.entries()]
     .map(([teamKey, teamServices]) => {
@@ -215,8 +217,8 @@ const buildTeamGroups = (services) => {
       };
     })
     .sort((a, b) => {
-      const aValue = Number.parseInt(a.teamId, 10);
-      const bValue = Number.parseInt(b.teamId, 10);
+      const aValue = Number.parseInt(a.teamId || '', 10);
+      const bValue = Number.parseInt(b.teamId || '', 10);
       if (!Number.isNaN(aValue) && !Number.isNaN(bValue) && aValue !== bValue) {
         return aValue - bValue;
       }
@@ -224,7 +226,7 @@ const buildTeamGroups = (services) => {
     });
 };
 
-const measureNetwork = (teamGroups) => {
+const measureNetwork = (teamGroups: TeamGroup[]) => {
   const grid = getGrid(teamGroups.length);
   const width = Math.max(
     MIN_NETWORK_WIDTH,
@@ -243,7 +245,7 @@ const measureNetwork = (teamGroups) => {
   };
 };
 
-const getTeamPosition = (index, layout) => {
+const getTeamPosition = (index: number, layout: { columns: number; width: number; count: number }) => {
   const row = Math.floor(index / layout.columns);
   const column = index % layout.columns;
   const itemsInRow = Math.min(layout.columns, layout.count - row * layout.columns);
@@ -257,8 +259,8 @@ const getTeamPosition = (index, layout) => {
   };
 };
 
-const placeTeamServices = (teamGroup, basePosition) => {
-  const placements = [];
+const placeTeamServices = (teamGroup: TeamGroup, basePosition: { x: number; y: number }) => {
+  const placements: Array<{ service: ServiceDefinition; x: number; y: number }> = [];
   const centerX = basePosition.x + (PAIR_WIDTH - MACHINE_WIDTH) / 2;
   const topY = basePosition.y;
   const bottomY = basePosition.y + MACHINE_HEIGHT + 64;
@@ -293,13 +295,13 @@ const placeTeamServices = (teamGroup, basePosition) => {
   return placements;
 };
 
-const getTeamId = (service) => service.teamId || service.teamName || service.serviceName;
+const getTeamId = (service: ServiceDefinition) => service.teamId || service.teamName || service.serviceName;
 
-export const buildDockerFlow = (parsed) => {
-  const nodes = [];
-  const edges = [];
-  const seenEdges = new Set();
-  const nodeDetailsById = {};
+export const buildDockerFlow = (parsed: ParsedCompose) => {
+  const nodes: Array<Node<TopologyNodeData>> = [];
+  const edges: Array<Edge<TopologyEdgeData>> = [];
+  const seenEdges = new Set<string>();
+  const nodeDetailsById: Record<string, MachineNodeData> = {};
   const servicesByNetwork = groupServicesByNetwork(parsed.services);
   const networks = buildNetworkCatalog(parsed);
 
@@ -352,12 +354,16 @@ export const buildDockerFlow = (parsed) => {
       const placements = placeTeamServices(teamGroup, basePosition);
 
       placements.forEach(({ service, x, y }) => {
-        const data = {
+        const data: MachineNodeData = {
           ...createMachineData(service),
-          accentColor: getServiceRole(service) === 'ssh' ? '#fbbf24' : getServiceRole(service) === 'vuln' ? '#f87171' : color,
+          accentColor: getServiceRole(service) === 'ssh'
+            ? '#fbbf24'
+            : getServiceRole(service) === 'vuln'
+              ? '#f87171'
+              : color,
         };
 
-        const node = {
+        const node: Node<TopologyNodeData> = {
           id: service.id,
           type: 'machineNode',
           parentNode: groupId,
@@ -374,7 +380,7 @@ export const buildDockerFlow = (parsed) => {
         };
 
         nodes.push(node);
-        nodeDetailsById[node.id] = node.data;
+        nodeDetailsById[node.id] = data;
       });
 
       teamGroup.sshServices.forEach((ssh) => {

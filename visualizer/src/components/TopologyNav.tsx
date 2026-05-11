@@ -1,9 +1,22 @@
-const MODES = [
+import type { Mode } from '../types';
+
+const MODES: Array<{ id: Mode; label: string }> = [
   { id: 'editor', label: 'Editor Mode' },
   { id: 'yaml', label: 'Yaml Mode' },
   { id: 'inspector', label: 'Inspector' },
   { id: 'monitor', label: 'Attack Monitor' },
 ];
+
+type TopologyNavProps = {
+  mode: Mode;
+  onModeChange: (mode: Mode) => void;
+  serviceCount: number;
+  networkCount: number;
+  edgeCount: number;
+  parseError: string | null;
+  monitorConnected: boolean;
+  monitorEventCount: number;
+};
 
 const TopologyNav = ({
   mode,
@@ -14,7 +27,7 @@ const TopologyNav = ({
   parseError,
   monitorConnected,
   monitorEventCount,
-}) => (
+}: TopologyNavProps) => (
   <header className="topology-nav">
     <div className="topology-nav__brand">
       <span className="topology-nav__mark" />
@@ -53,7 +66,7 @@ const TopologyNav = ({
         </>
       )}
       <span className={`topology-nav__monitor-status ${monitorConnected ? 'is-live' : 'is-offline'}`}>
-        {monitorConnected ? `● ${monitorEventCount} events` : '○ Monitor offline'}
+        {monitorConnected ? `Live ${monitorEventCount} events` : 'Monitor offline'}
       </span>
     </div>
   </header>

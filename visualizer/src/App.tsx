@@ -1,18 +1,19 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState, type ChangeEvent } from 'react';
 import defaultComposeYaml from '../../docker-compose.yml?raw';
 import exampleComposeYaml from '../../services/example-vuln/docker-compose.yml?raw';
 import sshDockerfile from '../../docker/ssh/Dockerfile?raw';
 import vulnMachineDockerfile from '../../docker/vuln/Dockerfile?raw';
 import vulnDockerfile from '../../services/example-vuln/Dockerfile?raw';
-import DetailsPanel from './components/DetailsPanel.jsx';
-import DockerCanvas from './components/DockerCanvas.jsx';
-import EventFeed from './components/EventFeed.jsx';
-import TopologyNav from './components/TopologyNav.jsx';
-import { parseDockerCompose } from './data/dockerComposeParser.js';
-import { buildDockerFlow } from './graph/dockerGraph.js';
-import { useNetworkEvents } from './hooks/useNetworkEvents.js';
+import DetailsPanel from './components/DetailsPanel';
+import DockerCanvas from './components/DockerCanvas';
+import EventFeed from './components/EventFeed';
+import TopologyNav from './components/TopologyNav';
+import { parseDockerCompose } from './data/dockerComposeParser';
+import { buildDockerFlow } from './graph/dockerGraph';
+import { useNetworkEvents } from './hooks/useNetworkEvents';
+import type { MachineNodeData, Mode, Topology } from './types';
 
-const dockerfileSources = {
+const dockerfileSources: Record<string, string> = {
   'ssh/Dockerfile': sshDockerfile,
   './ssh/Dockerfile': sshDockerfile,
   'docker/ssh/Dockerfile': sshDockerfile,
@@ -37,7 +38,7 @@ const dockerfileSources = {
   './Dockerfile': vulnDockerfile,
 };
 
-const buildTopology = (yamlSource) => {
+const buildTopology = (yamlSource: string): Topology => {
   const parsed = parseDockerCompose(yamlSource, dockerfileSources);
   const flow = buildDockerFlow(parsed);
 
@@ -48,11 +49,11 @@ const buildTopology = (yamlSource) => {
 };
 
 const App = () => {
-  const [mode, setMode] = useState('editor');
-  const [draftYaml, setDraftYaml] = useState(defaultComposeYaml);
-  const [topology, setTopology] = useState(() => buildTopology(defaultComposeYaml));
-  const [parseError, setParseError] = useState(null);
-  const [selectedNode, setSelectedNode] = useState(null);
+  const [mode, setMode] = useState<Mode>('editor');
+  const [draftYaml, setDraftYaml] = useState<string>(defaultComposeYaml);
+  const [topology, setTopology] = useState<Topology>(() => buildTopology(defaultComposeYaml));
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [selectedNode, setSelectedNode] = useState<MachineNodeData | null>(null);
 
   const { events, connected, liveEdges } = useNetworkEvents();
 
@@ -66,7 +67,7 @@ const App = () => {
   );
 
   const applyYaml = useCallback(
-    (yamlSource = draftYaml) => {
+    (yamlSource: string = draftYaml) => {
       try {
         const nextTopology = buildTopology(yamlSource);
         setTopology(nextTopology);
@@ -75,20 +76,21 @@ const App = () => {
         setSelectedNode(null);
         setMode('editor');
       } catch (error) {
-        setParseError(error.message);
+        const message = error instanceof Error ? error.message : 'Failed to parse YAML.';
+        setParseError(message);
         setMode('yaml');
       }
     },
     [draftYaml],
   );
 
-  const handlePreset = (yamlSource) => {
+  const handlePreset = (yamlSource: string) => {
     setDraftYaml(yamlSource);
     applyYaml(yamlSource);
   };
 
-  const handleFileUpload = async (event) => {
-    const file = event.target.files?.[0];
+  const handleFileUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
     if (!file) {
       return;
     }
@@ -96,10 +98,10 @@ const App = () => {
     const text = await file.text();
     setDraftYaml(text);
     applyYaml(text);
-    event.target.value = '';
+    event.currentTarget.value = '';
   };
 
-  const handleSelectNode = useCallback((node) => {
+  const handleSelectNode = useCallback((node: MachineNodeData | null) => {
     setSelectedNode(node);
   }, []);
 
