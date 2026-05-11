@@ -299,14 +299,8 @@ services:
     container_name: team1-vuln-app
     volumes:
       - team-data:/app/data
-    networks:
-      ctf-network:
-        ipv4_address: 10.10.1.4
+    network_mode: "container:team1-vuln"
     restart: unless-stopped
-
-networks:
-  ctf-network:
-    external: true
 ```
 
 ### 5.2 Running the Service
@@ -318,7 +312,7 @@ cd ~/example-vuln
 docker compose up -d
 ```
 
-The vulnerable service is now accessible to all other teams on the `ctf-network` at `10.10.1.4:8080` or `team1-vuln-app:8080`.
+The vulnerable service is now accessible to all other teams on the `ctf-network` at `10.10.1.3:8080` or `team1-vuln:8080`.
 
 ### 5.3 Patching the Service
 

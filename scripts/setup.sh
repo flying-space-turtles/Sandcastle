@@ -190,10 +190,7 @@ services:
       context: .
     image: sandcastle/team${team_num}-vuln-app:latest
     container_name: team${team_num}-vuln-app
-    hostname: team${team_num}-vuln-app
-    networks:
-      ctf-network:
-        ipv4_address: 10.10.${team_num}.4
+    network_mode: "container:team${team_num}-vuln"
     environment:
       TEAM_ID: "${team_num}"
       TEAM_NAME: "Team ${team_num}"
@@ -205,11 +202,6 @@ services:
       sandcastle.role: "vuln-app"
       sandcastle.team: "team${team_num}"
     restart: unless-stopped
-
-networks:
-  ctf-network:
-    external: true
-    name: sandcastle_ctf-network
 
 volumes:
   team-data:
@@ -308,11 +300,11 @@ print_summary() {
     echo
     echo "Generated ${teams} team(s)."
     echo
-    printf '%-8s %-15s %-15s %-15s %-9s %-12s %-12s\n' "Team" "SSH IP" "Vuln IP" "App IP" "SSH Port" "Username" "Password"
-    printf '%-8s %-15s %-15s %-15s %-9s %-12s %-12s\n' "----" "------" "-------" "------" "--------" "--------" "--------"
+    printf '%-8s %-15s %-15s %-9s %-12s %-12s\n' "Team" "SSH IP" "Vuln/App IP" "SSH Port" "Username" "Password"
+    printf '%-8s %-15s %-15s %-9s %-12s %-12s\n' "----" "------" "-----------" "--------" "--------" "--------"
     for ((i = 1; i <= teams; i++)); do
-        printf '%-8s %-15s %-15s %-15s %-9s %-12s %-12s\n' \
-            "team${i}" "10.10.${i}.2" "10.10.${i}.3" "10.10.${i}.4" "$((2200 + i))" "team${i}" "team${i}pass"
+        printf '%-8s %-15s %-15s %-9s %-12s %-12s\n' \
+            "team${i}" "10.10.${i}.2" "10.10.${i}.3" "$((2200 + i))" "team${i}" "team${i}pass"
     done
     echo
     echo "Next:"

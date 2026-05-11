@@ -13,19 +13,19 @@ ctf-network (bridge, 10.10.0.0/16)
   team1-ssh   10.10.1.2   host port 2201 -> 22
   team1-vuln  10.10.1.3   vulnerable Linux machine
   team1-vuln-app
-               10.10.1.4   started from team1-vuln
+               10.10.1.3   shares team1-vuln networking
 
   team2-ssh   10.10.2.2   host port 2202 -> 22
   team2-vuln  10.10.2.3   vulnerable Linux machine
   team2-vuln-app
-               10.10.2.4   started from team2-vuln
+               10.10.2.3   shares team2-vuln networking
 
   ...
 
   teamN-ssh   10.10.N.2   host port 2200+N -> 22
   teamN-vuln  10.10.N.3   vulnerable Linux machine
   teamN-vuln-app
-               10.10.N.4   started from teamN-vuln
+               10.10.N.3   shares teamN-vuln networking
 ```
 
 Docker Compose creates the shared bridge network and assigns deterministic IP
@@ -50,9 +50,10 @@ Future vulnerable app templates should be safe to copy per team. Setup copies
 the selected template into ignored generated workspaces, so teams can SSH from
 `team<N>-ssh` into `team<N>-vuln`, patch their own source, and run
 `docker compose up -d --build` without changing another team's source. The app
-container is named `team<N>-vuln-app`, gets `TEAM_ID`, `TEAM_NAME`,
-`SERVICE_PORT`, and `SECRET_KEY`, uses `sandcastle_team<N>-data` for
-`/app/data`, and receives static IP `10.10.<N>.4`.
+container is named `team<N>-vuln-app`, shares the `team<N>-vuln` network
+namespace, gets `TEAM_ID`, `TEAM_NAME`, `SERVICE_PORT`, and `SECRET_KEY`, uses
+`sandcastle_team<N>-data` for `/app/data`, and is reachable at
+`10.10.<N>.3:8080`.
 
 ## Iteration Path
 

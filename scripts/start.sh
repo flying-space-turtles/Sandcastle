@@ -68,6 +68,6 @@ echo "    Per-team SSH gateway:      ssh -p <2200+N> team<N>@localhost  (passwor
 echo "    Vulnerable machine:        ssh team<N>@team<N>-vuln from inside the gateway"
 echo "    App source on vuln box:    cd ~/example-vuln"
 echo "    Start vulnerable app:      docker compose up -d --build"
-echo "    App health after startup:  curl http://team<N>-vuln-app:8080/health"
+echo "    App health after startup:  curl http://team<N>-vuln:8080/health"
 echo
 echo "[*] Inspect containers with:  docker compose ps"

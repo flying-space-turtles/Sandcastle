@@ -76,7 +76,7 @@ RUN printf '%s\n' \
     '    cd ~/example-vuln && docker compose up -d --build' \
     '' \
     "  Health check after startup:" \
-    "    curl http://team${TEAM_ID}-vuln-app:8080/health" \
+    "    curl http://team${TEAM_ID}-vuln:8080/health" \
     '================================================================' \
     '' \
     > /etc/motd

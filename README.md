@@ -62,7 +62,7 @@ Each generated team has:
 |---|---:|---|
 | `team<N>-ssh` | `10.10.<N>.2` | SSH on host port `2200 + N` |
 | `team<N>-vuln` | `10.10.<N>.3` | SSH from `team<N>-ssh` |
-| `team<N>-vuln-app` | `10.10.<N>.4` | starts from inside `team<N>-vuln` |
+| `team<N>-vuln-app` | `10.10.<N>.3` | shares `team<N>-vuln` networking |
 
 The SSH username is `team<N>` and the password is `team<N>pass`; for example,
 Team 3 uses host port `2203`, username `team3`, and password `team3pass`.
@@ -113,7 +113,7 @@ ssh team1@team1-vuln
 cd ~/example-vuln
 vim app/app.py
 docker compose up -d --build
-curl http://team1-vuln-app:8080/health
+curl http://team1-vuln:8080/health
 ```
 
 The generated app Compose file recreates only that team's
@@ -164,8 +164,8 @@ inside that directory starts `team<N>-vuln-app`, which receives:
 - `SERVICE_PORT=8080`
 - `SECRET_KEY=sandcastle-team<N>-dev-secret`
 - a persistent volume named `sandcastle_team<N>-data` mounted at `/app/data`
-- network identity `team<N>-vuln-app` on `ctf-network`
-- static IP `10.10.<N>.4`
+- shared network identity with `team<N>-vuln` on `ctf-network`
+- static IP `10.10.<N>.3`
 
 The scaffold does not impose an HTTP API, flag format, checker behavior, or
 scoring model yet.
