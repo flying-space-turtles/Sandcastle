@@ -1,10 +1,10 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import defaultComposeYaml from '../../docker-compose.yml?raw';
 import exampleComposeYaml from '../../services/example-vuln/docker-compose.yml?raw';
 import sshDockerfile from '../../docker/ssh/Dockerfile?raw';
 import vulnDockerfile from '../../services/example-vuln/Dockerfile?raw';
-import DetailsPanel from './components/DetailsPanel.jsx';
 import DockerCanvas from './components/DockerCanvas.jsx';
+import RightPanel from './components/RightPanel.jsx';
 import TopologyNav from './components/TopologyNav.jsx';
 import { parseDockerCompose } from './data/dockerComposeParser.js';
 import { buildDockerFlow } from './graph/dockerGraph.js';
@@ -35,11 +35,29 @@ const dockerfileSources = {
 const buildTopology = (yamlSource) => {
   const parsed = parseDockerCompose(yamlSource, dockerfileSources);
   const flow = buildDockerFlow(parsed);
+  return { parsed, ...flow };
+};
 
-  return {
-    parsed,
-    ...flow,
-  };
+/** Stamp isBot=true on SSH-role nodes whose teamId is in botTeams. */
+const applyBotFlags = (nodes, botTeams) => {
+  if (!botTeams.length) return nodes;
+  const botSet = new Set(botTeams.map(String));
+  return nodes.map((n) => {
+    const isBot = botSet.has(String(n.data?.teamId)) && n.data?.relationRole === 'ssh';
+    if (isBot === Boolean(n.data?.isBot)) return n;
+    return { ...n, data: { ...n.data, isBot } };
+  });
+};
+
+const POLL_INTERVAL = 3000;
+const FLASH_TTL = 4000; // ms — how long an attack arrow stays visible
+
+const FLASH_COLOR = {
+  flag:      '#34d399',
+  probe:     '#60a5fa',
+  fail:      '#f87171',
+  ping_up:   '#4ade80',
+  ping_down: '#f87171',
 };
 
 const App = () => {
@@ -49,13 +67,85 @@ const App = () => {
   const [parseError, setParseError] = useState(null);
   const [selectedNode, setSelectedNode] = useState(null);
 
+  // Bot state from event server
+  const [botTeams, setBotTeams] = useState([]);
+  const [events, setEvents] = useState([]);
+  const [serverConnected, setServerConnected] = useState(false);
+  const pollRef = useRef(null);
+
+  useEffect(() => {
+    const poll = async () => {
+      try {
+        const res = await fetch('/api/state');
+        if (!res.ok) throw new Error('non-200');
+        const data = await res.json();
+        setBotTeams(data.botTeams ?? []);
+        setEvents(data.events ?? []);
+        setServerConnected(true);
+      } catch {
+        setServerConnected(false);
+      }
+    };
+    poll();
+    pollRef.current = setInterval(poll, POLL_INTERVAL);
+    return () => clearInterval(pollRef.current);
+  }, []);
+
+  // Flash edges — temporary animated arrows on the canvas for attack/ping events
+  const [flashEdges, setFlashEdges] = useState([]);
+  const seenEventKeys = useRef(new Set());
+
+  useEffect(() => {
+    const now = Date.now();
+    const newFlash = [];
+    for (const ev of events) {
+      const key = `${ev.ts}-${ev.attacker}-${ev.type}-${ev.victim ?? ''}`;
+      if (seenEventKeys.current.has(key)) continue;
+      seenEventKeys.current.add(key);
+      if (!ev.victim) continue;
+      if (!FLASH_COLOR[ev.type]) continue;
+      const color = FLASH_COLOR[ev.type];
+      newFlash.push({
+        id: `flash-${key}`,
+        source: `${ev.attacker}-ssh`,
+        target: `${ev.victim}-vuln`,
+        animated: true,
+        markerEnd: { type: 'arrowclosed', color, width: 16, height: 16 },
+        style: { stroke: color, strokeDasharray: '6 3', strokeWidth: 2.6, strokeOpacity: 0.9 },
+        data: { kind: 'flash', eventType: ev.type },
+        expiresAt: now + FLASH_TTL,
+      });
+    }
+    if (newFlash.length) {
+      setFlashEdges((prev) => [...prev, ...newFlash]);
+    }
+  }, [events]);
+
+  // Clean up expired flash edges every second
+  useEffect(() => {
+    const id = setInterval(() => {
+      const now = Date.now();
+      setFlashEdges((prev) => {
+        const next = prev.filter((e) => e.expiresAt > now);
+        return next.length === prev.length ? prev : next;
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Enrich topology nodes with isBot flag whenever botTeams changes
+  const enrichedTopology = useMemo(
+    () => ({ ...topology, nodes: applyBotFlags(topology.nodes, botTeams) }),
+    [topology, botTeams],
+  );
+
   const summary = useMemo(
     () => ({
-      serviceCount: topology.parsed.services.length,
-      networkCount: topology.parsed.networks.length || 1,
-      edgeCount: topology.edges.length,
+      serviceCount: enrichedTopology.parsed.services.length,
+      networkCount: enrichedTopology.parsed.networks.length || 1,
+      edgeCount: enrichedTopology.edges.length,
     }),
-    [topology],
+    [enrichedTopology],
   );
 
   const applyYaml = useCallback(
@@ -110,9 +200,9 @@ const App = () => {
       {mode === 'editor' && (
         <main className="workspace workspace--canvas">
           <section className="canvas-shell">
-            <DockerCanvas topology={topology} onSelectNode={handleSelectNode} />
+            <DockerCanvas topology={enrichedTopology} onSelectNode={handleSelectNode} flashEdges={flashEdges} />
           </section>
-          <DetailsPanel node={selectedNode} />
+          <RightPanel node={selectedNode} events={events} connected={serverConnected} />
         </main>
       )}
 
@@ -163,9 +253,9 @@ const App = () => {
             <pre>
               {JSON.stringify(
                 {
-                  services: topology.parsed.services,
-                  networks: topology.parsed.networks,
-                  edges: topology.edges.map(({ id, source, target, label, data }) => ({
+                  services: enrichedTopology.parsed.services,
+                  networks: enrichedTopology.parsed.networks,
+                  edges: enrichedTopology.edges.map(({ id, source, target, label, data }) => ({
                     id,
                     source,
                     target,

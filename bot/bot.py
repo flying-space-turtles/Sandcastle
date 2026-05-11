@@ -68,10 +68,23 @@ YELLOW = "\033[33m"
 CYAN   = "\033[36m"
 RESET  = "\033[0m"
 
-def ok(msg: str)   -> None: print(f"{GREEN}[+]{RESET} {msg}")
-def info(msg: str) -> None: print(f"{CYAN}[*]{RESET} {msg}")
-def warn(msg: str) -> None: print(f"{YELLOW}[!]{RESET} {msg}")
-def err(msg: str)  -> None: print(f"{RED}[-]{RESET} {msg}", file=sys.stderr)
+LOG_FILE = "/tmp/bot.log"
+
+def _tee(line: str, *, err: bool = False) -> None:
+    """Print to stdout/stderr AND append the plain (no ANSI) line to LOG_FILE."""
+    (sys.stderr if err else sys.stdout).write(line + "\n")
+    (sys.stderr if err else sys.stdout).flush()
+    try:
+        with open(LOG_FILE, "a") as _f:
+            _f.write(line + "\n")
+            _f.flush()
+    except OSError:
+        pass
+
+def ok(msg: str)   -> None: _tee(f"{GREEN}[+]{RESET} {msg}")
+def info(msg: str) -> None: _tee(f"{CYAN}[*]{RESET} {msg}")
+def warn(msg: str) -> None: _tee(f"{YELLOW}[!]{RESET} {msg}")
+def err(msg: str)  -> None: _tee(f"{RED}[-]{RESET} {msg}", err=True)
 
 # ─────────────────────────────── helpers ───────────────────────────────────
 
@@ -167,8 +180,10 @@ def ping_all(num_teams: int) -> None:
     for i in range(1, num_teams + 1):
         ip = f"10.10.{i}.3"
         alive = ping_team(i)
-        status = f"{GREEN}UP{RESET}" if alive else f"{RED}DOWN{RESET}"
-        print(f"  team{i:>2}  {ip}  {status}")
+        if alive:
+            ok(f"ping team{i} {ip} UP")
+        else:
+            fail(f"ping team{i} {ip} DOWN")
 
 # ─────────────────────────────── health check ──────────────────────────────
 

@@ -1,6 +1,6 @@
 import { memo } from 'react';
 import { Handle, Position } from 'reactflow';
-import { Container, Database, Globe2, Router, Server, Shield } from 'lucide-react';
+import { Bot, Container, Database, Globe2, Router, Server, Shield } from 'lucide-react';
 
 const ICONS = {
   database: Database,
@@ -55,6 +55,12 @@ const CustomMachineNode = ({ data, selected }) => {
             {data.relationRole === 'ssh' ? 'SSH container' : data.relationRole === 'vuln' ? 'Vulnerable app' : data.kind || 'service'}
           </div>
         </div>
+        {data.isBot && data.relationRole === 'ssh' && (
+          <div className="machine-node__bot-badge" title="Bot-controlled team">
+            <Bot size={12} strokeWidth={2.4} />
+            <span>BOT</span>
+          </div>
+        )}
       </div>
 
       <div className="machine-node__meta">

@@ -25,6 +25,7 @@ const defaultEdgeOptions = {
 };
 
 const shouldRevealEdge = (edge, hoveredId) => {
+  if (edge.data?.kind === 'flash') return true; // always show flash edges
   if (!hoveredId) {
     return Boolean(edge.data?.defaultVisible);
   }
@@ -70,7 +71,7 @@ const getHoverSummary = (node, edges) => {
   return `${node.data.serviceName} has ${relationCount} highlighted relation${relationCount === 1 ? '' : 's'}.`;
 };
 
-const CanvasInner = ({ topology, onSelectNode }) => {
+const CanvasInner = ({ topology, onSelectNode, flashEdges = [] }) => {
   const [hoveredNode, setHoveredNode] = useState(null);
   const nodeTypes = useMemo(
     () => ({
@@ -84,9 +85,17 @@ const CanvasInner = ({ topology, onSelectNode }) => {
 
   useEffect(() => {
     setNodes(topology.nodes);
-    setEdges(topology.edges);
+    setEdges([...topology.edges, ...flashEdges]);
     setHoveredNode(null);
-  }, [setEdges, setNodes, topology]);
+  }, [setEdges, setNodes, topology]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Merge flash edges whenever they change without a topology change
+  useEffect(() => {
+    setEdges((cur) => [
+      ...cur.filter((e) => e.data?.kind !== 'flash'),
+      ...flashEdges,
+    ]);
+  }, [flashEdges, setEdges]);
 
   const applyHoverState = useCallback(
     (hovered) => {
@@ -123,6 +132,7 @@ const CanvasInner = ({ topology, onSelectNode }) => {
 
       setEdges((currentEdges) =>
         currentEdges.map((edge) => {
+          if (edge.data?.kind === 'flash') return edge; // keep flash edges untouched
           const isVisible = shouldRevealEdge(edge, hoveredId);
           const isHighlighted = shouldHighlightEdge(edge, hoveredId);
           const isAttack = edge.data?.kind === 'attack';
