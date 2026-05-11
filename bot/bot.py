@@ -24,6 +24,8 @@ Deployed from the host via:
 from __future__ import annotations
 
 import argparse
+import http.client
+import json
 import os
 import re
 import socket
@@ -117,30 +119,63 @@ def _post_json(url: str, body: str, extra_headers: dict | None = None) -> tuple[
 
 # ─────────────────────────────── service watchdog ──────────────────────────
 
+# ── Docker socket helpers (no docker CLI needed) ──────────────────────────
+
+DOCKER_SOCK = "/var/run/docker.sock"
+
+
+class _UnixSocketHTTPConnection(http.client.HTTPConnection):
+    """HTTPConnection that speaks over a Unix domain socket."""
+    def __init__(self, sock_path: str) -> None:
+        super().__init__("localhost")
+        self._sock_path = sock_path
+
+    def connect(self) -> None:
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.connect(self._sock_path)
+        self.sock = s
+
+
+def _docker_get(path: str):
+    """GET from the Docker daemon via Unix socket; returns parsed JSON or None."""
+    try:
+        conn = _UnixSocketHTTPConnection(DOCKER_SOCK)
+        conn.request("GET", path, headers={"Host": "localhost"})
+        resp = conn.getresponse()
+        if resp.status == 200:
+            return json.loads(resp.read())
+    except Exception:
+        pass
+    return None
+
+
+def _docker_post(path: str) -> bool:
+    """POST to the Docker daemon via Unix socket; returns True on 2xx."""
+    try:
+        conn = _UnixSocketHTTPConnection(DOCKER_SOCK)
+        conn.request("POST", path, headers={"Host": "localhost", "Content-Length": "0"})
+        resp = conn.getresponse()
+        return 200 <= resp.status < 300
+    except Exception:
+        return False
+
+
 def is_own_service_running(my_team: int) -> bool:
-    """Check if teamN-vuln container is running (uses mounted Docker socket)."""
-    result = subprocess.run(
-        ["docker", "inspect", "--format", "{{.State.Running}}", f"team{my_team}-vuln"],
-        capture_output=True, text=True,
-    )
-    return result.returncode == 0 and result.stdout.strip() == "true"
+    """Check if teamN-vuln container is running via Docker socket (no CLI needed)."""
+    name = f"team{my_team}-vuln"
+    data = _docker_get(f"/containers/{name}/json")
+    return bool(data and data.get("State", {}).get("Running", False))
 
 
 def restart_own_service(my_team: int) -> None:
-    """
-    Bring teamN-vuln back up via sandcastle-compose.yml.
-    The service dir is bind-mounted at ~/service inside the SSH container.
-    """
-    import pathlib
-    service_dir = pathlib.Path(f"/home/team{my_team}/service")
-    if not service_dir.exists():
-        err(f"Service dir {service_dir} not found — cannot restart")
-        return
-    info(f"Restarting team{my_team}-vuln …")
-    subprocess.run(
-        ["docker", "compose", "-f", "sandcastle-compose.yml", "up", "-d", "--build"],
-        cwd=service_dir,
-    )
+    """Restart teamN-vuln via Docker socket (no CLI needed)."""
+    name = f"team{my_team}-vuln"
+    info(f"Restarting {name} …")
+    # Try a simple container restart first
+    if _docker_post(f"/containers/{name}/restart"):
+        info(f"{name} restarted successfully")
+    else:
+        err(f"Failed to restart {name} via Docker socket")
 
 
 def watchdog_tick(my_team: int) -> None:
