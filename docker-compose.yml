@@ -157,12 +157,106 @@ services:
       - NET_ADMIN
     restart: unless-stopped
 
-  monitor:
+  team4-vuln:
     build:
-      context: ./monitor
-    image: sandcastle/monitor:latest
-    container_name: sandcastle-monitor
-    hostname: sandcastle-monitor
+      context: .
+      dockerfile: docker/vuln/Dockerfile
+      args:
+        TEAM_ID: "4"
+        TEAM_NAME: "team4"
+        TEAM_USER: "team4"
+        TEAM_PASS: "team4pass"
+        TEAM_UID: "1000"
+    image: sandcastle/team4-vuln:latest
+    container_name: team4-vuln
+    hostname: team4-vuln
+    networks:
+      ctf-network:
+        ipv4_address: 10.10.4.3
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./teams/generated/team4/example-vuln:/home/team4/example-vuln
+    cap_add:
+      - NET_ADMIN
+    restart: unless-stopped
+
+  team4-ssh:
+    build:
+      context: .
+      dockerfile: docker/ssh/Dockerfile
+      args:
+        TEAM_ID: "4"
+        TEAM_NAME: "team4"
+        TEAM_USER: "team4"
+        TEAM_PASS: "team4pass"
+        TEAM_UID: "1000"
+    image: sandcastle/team4-ssh:latest
+    container_name: team4-ssh
+    hostname: team4-ssh
+    depends_on:
+      - team4-vuln
+    networks:
+      ctf-network:
+        ipv4_address: 10.10.4.2
+    ports:
+      - "2204:22"
+    cap_add:
+      - NET_ADMIN
+    restart: unless-stopped
+
+  team5-vuln:
+    build:
+      context: .
+      dockerfile: docker/vuln/Dockerfile
+      args:
+        TEAM_ID: "5"
+        TEAM_NAME: "team5"
+        TEAM_USER: "team5"
+        TEAM_PASS: "team5pass"
+        TEAM_UID: "1000"
+    image: sandcastle/team5-vuln:latest
+    container_name: team5-vuln
+    hostname: team5-vuln
+    networks:
+      ctf-network:
+        ipv4_address: 10.10.5.3
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./teams/generated/team5/example-vuln:/home/team5/example-vuln
+    cap_add:
+      - NET_ADMIN
+    restart: unless-stopped
+
+  team5-ssh:
+    build:
+      context: .
+      dockerfile: docker/ssh/Dockerfile
+      args:
+        TEAM_ID: "5"
+        TEAM_NAME: "team5"
+        TEAM_USER: "team5"
+        TEAM_PASS: "team5pass"
+        TEAM_UID: "1000"
+    image: sandcastle/team5-ssh:latest
+    container_name: team5-ssh
+    hostname: team5-ssh
+    depends_on:
+      - team5-vuln
+    networks:
+      ctf-network:
+        ipv4_address: 10.10.5.2
+    ports:
+      - "2205:22"
+    cap_add:
+      - NET_ADMIN
+    restart: unless-stopped
+
+  firewall:
+    build:
+      context: ./firewall
+    image: sandcastle/firewall:latest
+    container_name: sandcastle-firewall
+    hostname: sandcastle-firewall
     network_mode: host
     cap_add:
       - NET_ADMIN

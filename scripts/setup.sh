@@ -294,12 +294,12 @@ EOF
 
     cat >> "${COMPOSE_FILE}" <<'EOF'
 
-  monitor:
+  firewall:
     build:
-      context: ./monitor
-    image: sandcastle/monitor:latest
-    container_name: sandcastle-monitor
-    hostname: sandcastle-monitor
+      context: ./firewall
+    image: sandcastle/firewall:latest
+    container_name: sandcastle-firewall
+    hostname: sandcastle-firewall
     network_mode: host
     cap_add:
       - NET_ADMIN

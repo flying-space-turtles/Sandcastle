@@ -5,7 +5,7 @@ const MAX_EVENTS = 200;
 const LIVE_WINDOW_SEC = 30;
 
 // Higher number = more severe (determines which event type wins for a src→dst pair)
-const SEVERITY = { sqli: 5, cmdi: 4, 'path-traversal': 3, ssh: 2, http: 1, tcp: 0 };
+const SEVERITY = { sqli: 6, cmdi: 5, 'path-traversal': 4, ssh: 3, icmp: 2, http: 1, tcp: 0 };
 const severityOf = (type) => SEVERITY[type] ?? 0;
 
 export function useNetworkEvents() {

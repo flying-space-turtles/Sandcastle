@@ -750,9 +750,9 @@ button {
   }
 }
 
-/* ── Attack Monitor / Event Feed ──────────────────────────────────────────── */
+/* ── Firewall / Event Feed ───────────────────────────────────────────────── */
 
-.topology-nav__monitor-status {
+.topology-nav__firewall-status {
   display: inline-flex;
   align-items: center;
   min-height: 28px;
@@ -763,20 +763,20 @@ button {
   background: rgba(15, 23, 42, 0.76);
 }
 
-.topology-nav__monitor-status.is-live {
+.topology-nav__firewall-status.is-live {
   border-color: rgba(52, 211, 153, 0.34);
   color: #6ee7b7;
 }
 
-.topology-nav__monitor-status.is-offline {
+.topology-nav__firewall-status.is-offline {
   color: var(--muted);
 }
 
-.topology-nav__modes button.is-monitor-live {
+.topology-nav__modes button.is-firewall-live {
   position: relative;
 }
 
-.topology-nav__modes button.is-monitor-live::after {
+.topology-nav__modes button.is-firewall-live::after {
   position: absolute;
   top: 5px;
   right: 5px;
@@ -960,6 +960,15 @@ button {
 .event-item__time {
   color: var(--muted);
   font-size: 11px;
+  white-space: nowrap;
+}
+
+.event-item__mask {
+  grid-column: 2 / -1;
+  overflow: hidden;
+  color: #93c5fd;
+  font-size: 11px;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 

@@ -2,7 +2,7 @@ const MODES = [
   { id: 'editor', label: 'Editor Mode' },
   { id: 'yaml', label: 'Yaml Mode' },
   { id: 'inspector', label: 'Inspector' },
-  { id: 'monitor', label: 'Attack Monitor' },
+  { id: 'firewall', label: 'Firewall' },
 ];
 
 const TopologyNav = ({
@@ -12,8 +12,8 @@ const TopologyNav = ({
   networkCount,
   edgeCount,
   parseError,
-  monitorConnected,
-  monitorEventCount,
+  firewallConnected,
+  firewallEventCount,
 }) => (
   <header className="topology-nav">
     <div className="topology-nav__brand">
@@ -30,7 +30,7 @@ const TopologyNav = ({
           key={item.id}
           className={[
             mode === item.id ? 'is-active' : '',
-            item.id === 'monitor' && monitorConnected ? 'is-monitor-live' : '',
+            item.id === 'firewall' && firewallConnected ? 'is-firewall-live' : '',
           ]
             .filter(Boolean)
             .join(' ')}
@@ -52,8 +52,8 @@ const TopologyNav = ({
           <span>{edgeCount} edges</span>
         </>
       )}
-      <span className={`topology-nav__monitor-status ${monitorConnected ? 'is-live' : 'is-offline'}`}>
-        {monitorConnected ? `● ${monitorEventCount} events` : '○ Monitor offline'}
+      <span className={`topology-nav__firewall-status ${firewallConnected ? 'is-live' : 'is-offline'}`}>
+        {firewallConnected ? `● ${firewallEventCount} events` : '○ Firewall offline'}
       </span>
     </div>
   </header>

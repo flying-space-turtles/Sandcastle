@@ -19,6 +19,7 @@ const PAIR_ROW_GAP = 116;
 const GROUP_GAP = 150;
 const GROUP_MAX_ROW_WIDTH = 2600;
 const MIN_NETWORK_WIDTH = 1160;
+const FIREWALL_MIN_NETWORK_HEIGHT = 780;
 
 const networkNodeId = (name) => `network:${name}`;
 const edgeKey = (source, target, kind) => `${source}->${target}:${kind}`;
@@ -79,11 +80,14 @@ const getShortLabel = (role, service) => {
   return service.serviceName.slice(0, 2).toUpperCase();
 };
 
-const buildNetworkCatalog = (parsed) => {
+const getDisplayNetworkName = (service, firewallNetworkName) =>
+  getServiceRole(service) === 'firewall' ? firewallNetworkName : service.primaryNetwork || 'external';
+
+const buildNetworkCatalog = (parsed, firewallNetworkName) => {
   const catalog = new Map(parsed.networks.map((network) => [network.name, network]));
 
   parsed.services.forEach((service) => {
-    const networkName = service.primaryNetwork || 'external';
+    const networkName = getDisplayNetworkName(service, firewallNetworkName);
     if (!catalog.has(networkName)) {
       catalog.set(networkName, {
         name: networkName,
@@ -102,9 +106,9 @@ const buildNetworkCatalog = (parsed) => {
   return [...catalog.values()];
 };
 
-const groupServicesByNetwork = (services) =>
+const groupServicesByNetwork = (services, firewallNetworkName) =>
   services.reduce((acc, service) => {
-    const networkName = service.primaryNetwork || 'external';
+    const networkName = getDisplayNetworkName(service, firewallNetworkName);
     if (!acc.has(networkName)) {
       acc.set(networkName, []);
     }
@@ -293,6 +297,50 @@ const placeTeamServices = (teamGroup, basePosition) => {
   return placements;
 };
 
+const measureFirewallNetwork = (teamGroups) => {
+  const count = Math.max(1, teamGroups.length);
+  const radiusX = Math.max(360, Math.min(900, 300 + count * 58));
+  const radiusY = Math.max(250, Math.min(560, 220 + count * 38));
+  const width = Math.max(MIN_NETWORK_WIDTH, NETWORK_PADDING_X * 2 + radiusX * 2 + PAIR_WIDTH);
+  const centerX = width / 2 - MACHINE_WIDTH / 2;
+  const centerY = NETWORK_HEADER + radiusY - MACHINE_HEIGHT / 2 + 28;
+  const height = Math.max(
+    FIREWALL_MIN_NETWORK_HEIGHT,
+    centerY + MACHINE_HEIGHT / 2 + radiusY + PAIR_HEIGHT / 2 + NETWORK_PADDING_BOTTOM,
+  );
+
+  return {
+    columns: 1,
+    rows: 1,
+    width,
+    height,
+    radiusX,
+    radiusY,
+    centerX,
+    centerY,
+  };
+};
+
+const getFirewallTeamPosition = (index, count, layout) => {
+  if (count === 1) {
+    return {
+      x: layout.centerX,
+      y: NETWORK_HEADER + 20,
+    };
+  }
+
+  const angle = -Math.PI / 2 + (index * 2 * Math.PI) / count;
+  const centerX = layout.centerX + MACHINE_WIDTH / 2;
+  const centerY = layout.centerY + MACHINE_HEIGHT / 2;
+  const x = centerX + Math.cos(angle) * layout.radiusX - PAIR_WIDTH / 2;
+  const y = centerY + Math.sin(angle) * layout.radiusY - PAIR_HEIGHT / 2;
+
+  return {
+    x: Math.max(NETWORK_PADDING_X, Math.min(layout.width - NETWORK_PADDING_X - PAIR_WIDTH, x)),
+    y: Math.max(NETWORK_HEADER, Math.min(layout.height - NETWORK_PADDING_BOTTOM - PAIR_HEIGHT, y)),
+  };
+};
+
 const getTeamId = (service) => service.teamId || service.teamName || service.serviceName;
 
 export const buildDockerFlow = (parsed) => {
@@ -300,8 +348,11 @@ export const buildDockerFlow = (parsed) => {
   const edges = [];
   const seenEdges = new Set();
   const nodeDetailsById = {};
-  const servicesByNetwork = groupServicesByNetwork(parsed.services);
-  const networks = buildNetworkCatalog(parsed);
+  const firewallNetworkName = parsed.networks.find((network) => network.name !== 'external')?.name || parsed.networks[0]?.name || 'external';
+  const servicesByNetwork = groupServicesByNetwork(parsed.services, firewallNetworkName);
+  const networks = buildNetworkCatalog(parsed, firewallNetworkName);
+  const firewallService = parsed.services.find((service) => getServiceRole(service) === 'firewall');
+  const firewallNodeId = firewallService?.serviceName;
 
   let cursorX = 0;
   let cursorY = 0;
@@ -310,8 +361,11 @@ export const buildDockerFlow = (parsed) => {
   networks.forEach((network, index) => {
     const color = GROUP_PALETTE[index % GROUP_PALETTE.length];
     const services = [...(servicesByNetwork.get(network.name) || [])].sort(sortServices);
-    const teamGroups = buildTeamGroups(services);
-    const size = measureNetwork(teamGroups);
+    const firewallServices = services.filter((service) => getServiceRole(service) === 'firewall');
+    const nonFirewallServices = services.filter((service) => getServiceRole(service) !== 'firewall');
+    const teamGroups = buildTeamGroups(nonFirewallServices);
+    const hasFirewall = firewallServices.length > 0;
+    const size = hasFirewall ? measureFirewallNetwork(teamGroups) : measureNetwork(teamGroups);
 
     if (cursorX > 0 && cursorX + size.width > GROUP_MAX_ROW_WIDTH) {
       cursorX = 0;
@@ -344,11 +398,38 @@ export const buildDockerFlow = (parsed) => {
       },
     });
 
+    firewallServices.forEach((service, firewallIndex) => {
+      const data = {
+        ...createMachineData(service),
+        accentColor: '#60a5fa',
+      };
+      const node = {
+        id: service.id,
+        type: 'machineNode',
+        parentNode: groupId,
+        extent: 'parent',
+        position: {
+          x: size.centerX + firewallIndex * 18,
+          y: size.centerY + firewallIndex * 16,
+        },
+        data,
+        style: {
+          width: MACHINE_WIDTH,
+          height: MACHINE_HEIGHT,
+        },
+      };
+
+      nodes.push(node);
+      nodeDetailsById[node.id] = node.data;
+    });
+
     teamGroups.forEach((teamGroup, teamIndex) => {
-      const basePosition = getTeamPosition(teamIndex, {
-        ...size,
-        count: teamGroups.length,
-      });
+      const basePosition = hasFirewall
+        ? getFirewallTeamPosition(teamIndex, teamGroups.length, size)
+        : getTeamPosition(teamIndex, {
+            ...size,
+            count: teamGroups.length,
+          });
       const placements = placeTeamServices(teamGroup, basePosition);
 
       placements.forEach(({ service, x, y }) => {
@@ -473,13 +554,13 @@ export const buildDockerFlow = (parsed) => {
 
       addEdge(edges, seenEdges, {
         source: ssh.serviceName,
-        target: vuln.serviceName,
+        target: firewallNodeId || vuln.serviceName,
         sourceHandle: 'right',
         targetHandle: 'left',
         hidden: true,
         data: {
           kind: 'attack',
-          label: 'can attack',
+          label: firewallNodeId ? 'to firewall' : 'can attack',
           revealOnHover: true,
         },
         animated: true,
@@ -490,6 +571,28 @@ export const buildDockerFlow = (parsed) => {
           strokeDasharray: '8 8',
         },
       });
+
+      if (firewallNodeId) {
+        addEdge(edges, seenEdges, {
+          source: firewallNodeId,
+          target: vuln.serviceName,
+          sourceHandle: 'right',
+          targetHandle: 'left',
+          hidden: true,
+          data: {
+            kind: 'attack',
+            label: 'forwarded',
+            revealOnHover: true,
+          },
+          animated: true,
+          style: {
+            stroke: '#fb7185',
+            strokeWidth: 2.2,
+            strokeOpacity: 0.34,
+            strokeDasharray: '8 8',
+          },
+        });
+      }
     });
   });
 
@@ -497,5 +600,6 @@ export const buildDockerFlow = (parsed) => {
     nodes,
     edges,
     nodeDetailsById,
+    firewallNodeId,
   };
 };
