@@ -4,17 +4,21 @@
 `scripts/setup.sh` copies that template into each generated team directory:
 
 ```text
-teams/generated/team<N>/service/
+teams/generated/team<N>/example-vuln/
 ```
 
-The top-level `docker-compose.yml` then builds every team service from its own
-copy, and the matching SSH container bind-mounts that same copy at
-`/home/team<N>/service`. You do not need `VULN_IMAGE` for the generated team
-topology.
+The top-level `docker-compose.yml` builds a small `team<N>-vuln` Linux machine
+for each team and bind-mounts that team's copy at
+`/home/team<N>/example-vuln`. From inside that vulnerable machine, teams run
+`docker compose up -d --build` to start `team<N>-vuln-app`.
 
 ```bash
 ./scripts/setup.sh --teams 4
 docker compose up --build
+ssh -p 2201 team1@localhost
+ssh team1@team1-vuln
+cd ~/example-vuln
+docker compose up -d --build
 ```
 
 To add a different challenge, put its template under `services/`, update

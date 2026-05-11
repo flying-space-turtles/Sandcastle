@@ -37,7 +37,7 @@ generated_contexts_missing() {
     local i
 
     for ((i = 1; i <= teams; i++)); do
-        if [[ ! -d "teams/generated/team${i}/service" ]]; then
+        if [[ ! -d "teams/generated/team${i}/example-vuln" ]]; then
             return 0
         fi
     done
@@ -51,7 +51,7 @@ if [[ ! -f docker-compose.yml ]]; then
 else
     team_count="$(infer_team_count)"
     if generated_contexts_missing "${team_count}"; then
-        echo "[*] Missing generated team service contexts - running setup for ${team_count} teams"
+        echo "[*] Missing generated vulnerable app workspaces - running setup for ${team_count} teams"
         ./scripts/setup.sh --teams "${team_count}"
     fi
 fi
@@ -64,9 +64,10 @@ docker compose up -d
 
 echo
 echo "[+] Up. Useful access points:"
-echo "    Per-team SSH:          ssh -p <2200+N> team<N>@localhost  (password team<N>pass)"
-echo "    Vulnerable app slots:  team<N>-vuln at 10.10.<N>.3"
-echo "    Inside team SSH box:   curl http://team<N>-vuln:8080/health"
-echo "                           cd ~/service && ls   # source for patching"
+echo "    Per-team SSH gateway:      ssh -p <2200+N> team<N>@localhost  (password team<N>pass)"
+echo "    Vulnerable machine:        ssh team<N>@team<N>-vuln from inside the gateway"
+echo "    App source on vuln box:    cd ~/example-vuln"
+echo "    Start vulnerable app:      docker compose up -d --build"
+echo "    App health after startup:  curl http://team<N>-vuln-app:8080/health"
 echo
 echo "[*] Inspect containers with:  docker compose ps"

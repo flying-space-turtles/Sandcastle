@@ -11,15 +11,21 @@ scoreboards, or scoring.
 ctf-network (bridge, 10.10.0.0/16)
 
   team1-ssh   10.10.1.2   host port 2201 -> 22
-  team1-vuln  10.10.1.3   build: teams/generated/team1/service
+  team1-vuln  10.10.1.3   vulnerable Linux machine
+  team1-vuln-app
+               10.10.1.4   started from team1-vuln
 
   team2-ssh   10.10.2.2   host port 2202 -> 22
-  team2-vuln  10.10.2.3   build: teams/generated/team2/service
+  team2-vuln  10.10.2.3   vulnerable Linux machine
+  team2-vuln-app
+               10.10.2.4   started from team2-vuln
 
   ...
 
   teamN-ssh   10.10.N.2   host port 2200+N -> 22
-  teamN-vuln  10.10.N.3   build: teams/generated/teamN/service
+  teamN-vuln  10.10.N.3   vulnerable Linux machine
+  teamN-vuln-app
+               10.10.N.4   started from teamN-vuln
 ```
 
 Docker Compose creates the shared bridge network and assigns deterministic IP
@@ -30,23 +36,23 @@ addresses so future checkers, gameservers, and teams can use stable targets.
 `scripts/setup.sh` is the source of truth for generated team directories and
 `docker-compose.yml`. The generated file contains:
 
-- one persistent `team<N>-data` volume per team
-- one `team<N>-vuln` service per team built from `teams/generated/team<N>/service`
+- one `team<N>-vuln` machine per team built from `docker/vuln/Dockerfile`
 - one `team<N>-ssh` service per team built from `docker/ssh/Dockerfile`
-- one bind mount from `teams/generated/team<N>/service` to `/home/team<N>/service`
-- a mounted Docker socket in each SSH gateway for local orchestration
+- one bind mount from `teams/generated/team<N>/example-vuln` to
+  `/home/team<N>/example-vuln` in the vulnerable machine
+- a mounted Docker socket in each vulnerable machine for local app orchestration
 
 No gameserver or scoreboard is generated in this iteration.
 
 ## Vulnerable App Slot Contract
 
 Future vulnerable app templates should be safe to copy per team. Setup copies
-the selected template into ignored generated workspaces, so teams can patch
-their own source over SSH without changing another team's source. Compose passes
-`TEAM_ID`, `TEAM_NAME`, `SERVICE_PORT`, and `SECRET_KEY`, and mounts `/app/data`
-for team-specific persistence. The recommended service port is `8080`, but the
-current infrastructure does not depend on any protocol beyond the bundled
-template's health endpoint.
+the selected template into ignored generated workspaces, so teams can SSH from
+`team<N>-ssh` into `team<N>-vuln`, patch their own source, and run
+`docker compose up -d --build` without changing another team's source. The app
+container is named `team<N>-vuln-app`, gets `TEAM_ID`, `TEAM_NAME`,
+`SERVICE_PORT`, and `SECRET_KEY`, uses `sandcastle_team<N>-data` for
+`/app/data`, and receives static IP `10.10.<N>.4`.
 
 ## Iteration Path
 
