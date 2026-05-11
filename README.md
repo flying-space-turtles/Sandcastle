@@ -5,9 +5,9 @@ CTF environment. This stripped version keeps only the infrastructure layer:
 
 - a deterministic Docker bridge network at `10.10.0.0/16`
 - one SSH gateway container per team
-- one vulnerable-application container slot per team scripts that generate, start, stop, and reset the topology a template vulnerable service copied into each generated team workspace
-
-test``
+- one vulnerable-application container slot per team
+- scripts that generate, start, stop, and reset the topology
+- a template vulnerable service copied into each generated team workspace
 
 It intentionally does not include a gameserver, checker, scoreboard, dashboard,
 or scoring logic. Those pieces should be added back in gradually as separate
