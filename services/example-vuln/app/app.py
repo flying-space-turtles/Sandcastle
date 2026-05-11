@@ -220,6 +220,7 @@ def register_routes(app: Flask) -> None:
 
     @app.get("/health")
     def health():
+        logger.info("health check from %s", request.remote_addr)
         return {"status": "ok"}
 
     # -- auth ---------------------------------------------------------------

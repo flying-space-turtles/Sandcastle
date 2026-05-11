@@ -2,7 +2,7 @@ FROM python:3.12-slim
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-        libpcap-dev \
+        iptables \
         iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -11,6 +11,6 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY monitor.py .
+COPY firewall.py .
 
-CMD ["python", "-u", "monitor.py"]
+CMD ["python", "-u", "firewall.py"]

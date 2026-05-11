@@ -68,5 +68,6 @@ echo "    Vulnerable machine:        ssh team<N>@team<N>-vuln from inside the ga
 echo "    App source on vuln box:    cd ~/example-vuln"
 echo "    Start vulnerable app:      docker compose up -d --build"
 echo "    App health after startup:  curl http://team<N>-vuln:8080/health"
+echo "    Firewall activity feed:    ws://localhost:6789"
 echo
 echo "[*] Inspect containers with:  docker compose ps"

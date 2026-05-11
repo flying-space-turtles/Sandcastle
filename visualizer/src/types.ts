@@ -1,8 +1,8 @@
 import type { Edge, Node } from 'reactflow';
 
-export type Mode = 'editor' | 'yaml' | 'inspector' | 'monitor';
+export type Mode = 'editor' | 'yaml' | 'inspector' | 'firewall';
 
-export type EventType = 'sqli' | 'cmdi' | 'path-traversal' | 'ssh' | 'http' | 'tcp';
+export type EventType = 'sqli' | 'cmdi' | 'path-traversal' | 'ssh' | 'icmp' | 'http' | 'tcp';
 
 export interface LiveEvent {
   id: string;
@@ -12,6 +12,7 @@ export interface LiveEvent {
   ts: number;
   port?: number | string;
   detail?: string;
+  maskedSrcIp?: string;
   _received?: number;
 }
 
@@ -142,4 +143,5 @@ export interface Topology {
   nodes: Array<Node<TopologyNodeData>>;
   edges: Array<Edge<TopologyEdgeData>>;
   nodeDetailsById: Record<string, MachineNodeData>;
+  firewallNodeId?: string;
 }

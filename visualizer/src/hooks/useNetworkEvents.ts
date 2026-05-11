@@ -6,7 +6,7 @@ const MAX_EVENTS = 200;
 const LIVE_WINDOW_SEC = 30;
 
 // Higher number = more severe (determines which event type wins for a src->dst pair)
-const SEVERITY: Record<string, number> = { sqli: 5, cmdi: 4, 'path-traversal': 3, ssh: 2, http: 1, tcp: 0 };
+const SEVERITY: Record<string, number> = { sqli: 6, cmdi: 5, 'path-traversal': 4, ssh: 3, icmp: 2, http: 1, tcp: 0 };
 const severityOf = (type: string) => SEVERITY[type] ?? 0;
 
 const buildEvent = (raw: Record<string, unknown>): LiveEvent => {
@@ -17,6 +17,7 @@ const buildEvent = (raw: Record<string, unknown>): LiveEvent => {
   const id = typeof raw.id === 'string' ? raw.id : `${src}-${dst}-${type}-${ts}`;
   const port = typeof raw.port === 'number' || typeof raw.port === 'string' ? raw.port : undefined;
   const detail = typeof raw.detail === 'string' ? raw.detail : undefined;
+  const maskedSrcIp = typeof raw.maskedSrcIp === 'string' ? raw.maskedSrcIp : undefined;
 
   return {
     id,
@@ -26,6 +27,7 @@ const buildEvent = (raw: Record<string, unknown>): LiveEvent => {
     ts,
     port,
     detail,
+    maskedSrcIp,
     _received: Date.now(),
   };
 };

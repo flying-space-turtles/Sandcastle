@@ -20,6 +20,7 @@ const LIVE_EDGE_COLORS: Record<string, string> = {
   cmdi: '#f97316',
   'path-traversal': '#a855f7',
   ssh: '#fbbf24',
+  icmp: '#22c55e',
   http: '#38bdf8',
   tcp: '#64748b',
 };
@@ -57,6 +58,49 @@ const shouldRevealEdge = (edge: Edge<TopologyEdgeData>, hoveredId?: string | nul
 const shouldHighlightEdge = (edge: Edge<TopologyEdgeData>, hoveredId?: string | null) =>
   Boolean(hoveredId) && (edge.source === hoveredId || edge.target === hoveredId);
 
+type LiveEdgeInput = {
+  id: string;
+  source: string;
+  target: string;
+  event: LiveEvent;
+  label: string;
+  sourceHandle?: string;
+  targetHandle?: string;
+};
+
+const makeLiveEdge = ({
+  id,
+  source,
+  target,
+  event,
+  label,
+  sourceHandle,
+  targetHandle,
+}: LiveEdgeInput): Edge<TopologyEdgeData> => ({
+  id,
+  source,
+  target,
+  sourceHandle,
+  targetHandle,
+  type: 'smoothstep',
+  animated: true,
+  selectable: false,
+  focusable: false,
+  data: { kind: 'live', eventType: event.type },
+  style: {
+    stroke: LIVE_EDGE_COLORS[event.type] || '#64748b',
+    strokeWidth: 3,
+    strokeOpacity: 0.92,
+  },
+  markerEnd: {
+    type: 'arrowclosed',
+    width: 14,
+    height: 14,
+    color: LIVE_EDGE_COLORS[event.type] || '#64748b',
+  },
+  label,
+});
+
 const getHoverSummary = (node: Node<MachineNodeData> | null, edges: Array<Edge<TopologyEdgeData>>) => {
   if (!node) {
     return null;
@@ -79,6 +123,10 @@ const getHoverSummary = (node: Node<MachineNodeData> | null, edges: Array<Edge<T
 
   if (node.data?.relationRole === 'vuln') {
     return `${node.data.serviceName} is reachable from ${attackEdges.length} opposing SSH container${attackEdges.length === 1 ? '' : 's'}.`;
+  }
+
+  if (node.data?.relationRole === 'firewall') {
+    return `${node.data.serviceName} routes and masks team-to-team traffic.`;
   }
 
   const relationCount = dependencyEdges.length + localEdges.length;
@@ -115,31 +163,44 @@ const CanvasInner = ({ topology, onSelectNode, liveEdges }: DockerCanvasProps) =
   const [liveFlowEdges, setLiveFlowEdges] = useState<Array<Edge<TopologyEdgeData>>>([]);
 
   useEffect(() => {
+    const firewallNodeId = topology.firewallNodeId;
     setLiveFlowEdges(
-      (liveEdges || []).map((event) => ({
-        id: `live:${event.src}||${event.dst}`,
-        source: event.src,
-        target: event.dst,
-        type: 'smoothstep',
-        animated: true,
-        selectable: false,
-        focusable: false,
-        data: { kind: 'live', eventType: event.type },
-        style: {
-          stroke: LIVE_EDGE_COLORS[event.type] || '#64748b',
-          strokeWidth: 3,
-          strokeOpacity: 0.92,
-        },
-        markerEnd: {
-          type: 'arrowclosed',
-          width: 14,
-          height: 14,
-          color: LIVE_EDGE_COLORS[event.type] || '#64748b',
-        },
-        label: (event.type || 'tcp').toUpperCase(),
-      })),
+      (liveEdges || []).flatMap((event) => {
+        if (!firewallNodeId || event.src === firewallNodeId || event.dst === firewallNodeId) {
+          return [
+            makeLiveEdge({
+              id: `live:${event.src}||${event.dst}`,
+              source: event.src,
+              target: event.dst,
+              event,
+              label: (event.type || 'tcp').toUpperCase(),
+            }),
+          ];
+        }
+
+        return [
+          makeLiveEdge({
+            id: `live:${event.src}||${firewallNodeId}`,
+            source: event.src,
+            target: firewallNodeId,
+            event,
+            label: (event.type || 'tcp').toUpperCase(),
+            sourceHandle: 'right',
+            targetHandle: 'left',
+          }),
+          makeLiveEdge({
+            id: `live:${firewallNodeId}||${event.dst}`,
+            source: firewallNodeId,
+            target: event.dst,
+            event,
+            label: event.maskedSrcIp ? `MASK ${event.maskedSrcIp}` : 'MASKED',
+            sourceHandle: 'right',
+            targetHandle: 'left',
+          }),
+        ];
+      })
     );
-  }, [liveEdges]);
+  }, [liveEdges, topology.firewallNodeId]);
 
   useEffect(() => {
     setNodes(topology.nodes);

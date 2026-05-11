@@ -3,6 +3,7 @@ import defaultComposeYaml from '../../docker-compose.yml?raw';
 import exampleComposeYaml from '../../services/example-vuln/docker-compose.yml?raw';
 import sshDockerfile from '../../docker/ssh/Dockerfile?raw';
 import vulnMachineDockerfile from '../../docker/vuln/Dockerfile?raw';
+import firewallDockerfile from '../../firewall/Dockerfile?raw';
 import vulnDockerfile from '../../services/example-vuln/Dockerfile?raw';
 import DetailsPanel from './components/DetailsPanel';
 import DockerCanvas from './components/DockerCanvas';
@@ -20,6 +21,8 @@ const dockerfileSources: Record<string, string> = {
   './docker/ssh/Dockerfile': sshDockerfile,
   'docker/vuln/Dockerfile': vulnMachineDockerfile,
   './docker/vuln/Dockerfile': vulnMachineDockerfile,
+  'firewall/Dockerfile': firewallDockerfile,
+  './firewall/Dockerfile': firewallDockerfile,
   'services/example-vuln/Dockerfile': vulnDockerfile,
   './services/example-vuln/Dockerfile': vulnDockerfile,
   'teams/generated/team1/example-vuln/Dockerfile': vulnDockerfile,
@@ -114,8 +117,8 @@ const App = () => {
         serviceCount={summary.serviceCount}
         networkCount={summary.networkCount}
         edgeCount={summary.edgeCount}
-        monitorConnected={connected}
-        monitorEventCount={events.length}
+        firewallConnected={connected}
+        firewallEventCount={events.length}
       />
 
       {mode === 'editor' && (
@@ -127,7 +130,7 @@ const App = () => {
         </main>
       )}
 
-      {mode === 'monitor' && (
+      {mode === 'firewall' && (
         <main className="workspace workspace--canvas">
           <section className="canvas-shell">
             <DockerCanvas topology={topology} onSelectNode={handleSelectNode} liveEdges={liveEdges} />

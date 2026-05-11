@@ -26,10 +26,16 @@ ctf-network (bridge, 10.10.0.0/16)
   teamN-vuln  10.10.N.3   vulnerable Linux machine
   teamN-vuln-app
                10.10.N.3   shares teamN-vuln networking
+
+  sandcastle-firewall
+               host net     masks team-to-team TCP source IPs
 ```
 
 Docker Compose creates the shared bridge network and assigns deterministic IP
 addresses so future checkers, gameservers, and teams can use stable targets.
+All team-to-team TCP traffic is transparently redirected through the firewall,
+so destination services see the firewall's shared source IP while organizers
+still see original endpoints in the activity stream.
 
 ## Generated Services
 
@@ -41,6 +47,7 @@ addresses so future checkers, gameservers, and teams can use stable targets.
 - one bind mount from `teams/generated/team<N>/example-vuln` to
   `/home/team<N>/example-vuln` in the vulnerable machine
 - a mounted Docker socket in each vulnerable machine for local app orchestration
+- one `firewall` service built from `firewall/Dockerfile`
 
 No gameserver or scoreboard is generated in this iteration.
 

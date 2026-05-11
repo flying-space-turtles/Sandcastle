@@ -6,6 +6,7 @@ const TYPE_META: Record<EventType, { label: string; color: string }> = {
   cmdi: { label: 'CMDi', color: '#f97316' },
   'path-traversal': { label: 'Traversal', color: '#a855f7' },
   ssh: { label: 'SSH', color: '#fbbf24' },
+  icmp: { label: 'ICMP', color: '#22c55e' },
   http: { label: 'HTTP', color: '#38bdf8' },
   tcp: { label: 'TCP', color: '#64748b' },
 };
@@ -19,7 +20,7 @@ type EventFeedProps = {
 
 const EventFeed = ({ events, connected }: EventFeedProps) => {
   const [activeTypes, setActiveTypes] = useState<Set<EventType>>(
-    () => new Set<EventType>(['sqli', 'cmdi', 'path-traversal', 'http']),
+    () => new Set<EventType>(['sqli', 'cmdi', 'path-traversal', 'ssh', 'icmp', 'http', 'tcp']),
   );
 
   const toggleType = (type: EventType) =>
@@ -36,7 +37,7 @@ const EventFeed = ({ events, connected }: EventFeedProps) => {
   return (
     <aside className="event-feed">
       <div className="event-feed__header">
-        <h2>Live Events</h2>
+        <h2>Activity Log</h2>
         <span className={`event-feed__dot ${connected ? 'is-live' : 'is-offline'}`}>
           {connected ? 'Live' : 'Offline'}
         </span>
@@ -65,7 +66,7 @@ const EventFeed = ({ events, connected }: EventFeedProps) => {
             ? activeTypes.size === 0
               ? 'All types filtered out.'
               : 'Waiting for matching events\u2026'
-            : 'Monitor container is not running.'}
+            : 'Firewall container is not running.'}
         </p>
       ) : (
         <div className="event-feed__list">
@@ -85,7 +86,12 @@ const EventFeed = ({ events, connected }: EventFeedProps) => {
                 <span className="event-item__time">
                   {new Date(event.ts * 1000).toLocaleTimeString()}
                 </span>
-                {event.detail && <code className="event-item__detail">{event.detail}</code>}
+                {event.maskedSrcIp && (
+                  <span className="event-item__mask">masked as {event.maskedSrcIp}</span>
+                )}
+                {event.detail && (
+                  <code className="event-item__detail">{event.detail}</code>
+                )}
               </div>
             );
           })}

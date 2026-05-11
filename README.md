@@ -6,6 +6,7 @@ CTF environment. This stripped version keeps only the infrastructure layer:
 - a deterministic Docker bridge network at `10.10.0.0/16`
 - one SSH gateway container per team
 - one vulnerable Linux machine container per team
+- one transparent firewall that masks team-to-team TCP source IPs and streams activity events
 - scripts that generate, start, stop, and reset the topology
 - a template vulnerable service copied into each generated team workspace
 
@@ -23,12 +24,14 @@ iterations.
 │   │   └── Dockerfile          # reusable SSH gateway image
 │   └── vuln/
 │       └── Dockerfile          # reusable vulnerable-machine image
+├── firewall/                   # transparent firewall + activity WebSocket
 ├── scripts/
 │   ├── gen_compose.py          # compatibility wrapper for setup.sh
 │   ├── setup.sh                # generate team directories + compose
 │   ├── start.sh                # build SSH images + start infrastructure
 │   ├── stop.sh                 # docker compose down
-│   └── reset.sh                # docker compose down -v + start
+│   ├── reset.sh                # docker compose down -v + start
+│   └── cleanup.sh              # remove all Sandcastle Docker resources
 ├── services/
 │   └── example-vuln/           # vulnerable service template
 ├── teams/
@@ -63,9 +66,13 @@ Each generated team has:
 | `team<N>-ssh` | `10.10.<N>.2` | SSH on host port `2200 + N` |
 | `team<N>-vuln` | `10.10.<N>.3` | SSH from `team<N>-ssh` |
 | `team<N>-vuln-app` | `10.10.<N>.3` | shares `team<N>-vuln` networking |
+| `sandcastle-firewall` | host network | transparent TCP proxy + activity feed |
 
 The SSH username is `team<N>` and the password is `team<N>pass`; for example,
 Team 3 uses host port `2203`, username `team3`, and password `team3pass`.
+All TCP requests between team containers are transparently routed through the
+firewall. Destinations see the same masked source IP, while the visualizer keeps
+the original source and destination in the activity log.
 
 If you lower the team count, generated extra team directories are pruned. For
 example, running `./scripts/setup.sh --teams 4` after a 6-team setup removes
@@ -137,6 +144,18 @@ Reset volumes and restart:
 
 ```bash
 ./scripts/reset.sh
+```
+
+Remove all Sandcastle containers, volumes, networks, and images:
+
+```bash
+./scripts/cleanup.sh
+```
+
+Keep built images while cleaning containers, volumes, and networks:
+
+```bash
+./scripts/cleanup.sh --keep-images
 ```
 
 ## Visualize The Docker Architecture
