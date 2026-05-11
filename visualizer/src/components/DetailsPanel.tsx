@@ -1,11 +1,15 @@
 import { ChevronDown } from 'lucide-react';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
+import type { MachineNodeData } from '../types';
 
-const SECTIONS = ['Device', 'Commands', 'Network Policy', 'Env Vars', 'Labels'];
+const SECTIONS = ['Device', 'Commands', 'Network Policy', 'Env Vars', 'Labels'] as const;
+type Section = (typeof SECTIONS)[number];
 
-const EmptyState = ({ children = 'No data defined.' }) => <div className="details-empty">{children}</div>;
+const EmptyState = ({ children = 'No data defined.' }: { children?: ReactNode }) => (
+  <div className="details-empty">{children}</div>
+);
 
-const KeyValueRows = ({ values }) => {
+const KeyValueRows = ({ values }: { values?: Record<string, string> }) => {
   const entries = Object.entries(values || {});
 
   if (entries.length === 0) {
@@ -24,23 +28,30 @@ const KeyValueRows = ({ values }) => {
   );
 };
 
-const ValueList = ({ values }) => {
+type ValueEntry = string | { raw: string };
+
+const ValueList = ({ values }: { values?: ValueEntry[] }) => {
   if (!values || values.length === 0) {
     return <EmptyState />;
   }
 
   return (
     <div className="value-list">
-      {values.map((value, index) => (
-        <code key={`${typeof value === 'string' ? value : value.raw}-${index}`}>
-          {typeof value === 'string' ? value : value.raw}
-        </code>
-      ))}
+      {values.map((value, index) => {
+        const rendered = typeof value === 'string' ? value : value.raw;
+        return (
+          <code key={`${rendered}-${index}`}>
+            {rendered}
+          </code>
+        );
+      })}
     </div>
   );
 };
 
-const Field = ({ label, value }) => {
+type FieldValue = string | number | boolean | Array<string | number | boolean> | null | undefined;
+
+const Field = ({ label, value }: { label: string; value: FieldValue }) => {
   if (value === undefined || value === null || value === '' || (Array.isArray(value) && value.length === 0)) {
     return null;
   }
@@ -53,7 +64,17 @@ const Field = ({ label, value }) => {
   );
 };
 
-const Accordion = ({ title, isOpen, onToggle, children }) => (
+const Accordion = ({
+  title,
+  isOpen,
+  onToggle,
+  children,
+}: {
+  title: string;
+  isOpen: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) => (
   <section className="details-accordion">
     <button type="button" className="details-accordion__trigger" onClick={onToggle}>
       <span>{title}</span>
@@ -63,10 +84,12 @@ const Accordion = ({ title, isOpen, onToggle, children }) => (
   </section>
 );
 
-const DetailsPanel = ({ node }) => {
-  const [openSections, setOpenSections] = useState(() => new Set(['Device', 'Network Policy']));
+const DetailsPanel = ({ node }: { node: MachineNodeData | null }) => {
+  const [openSections, setOpenSections] = useState<Set<Section>>(
+    () => new Set<Section>(['Device', 'Network Policy']),
+  );
 
-  const toggleSection = (section) => {
+  const toggleSection = (section: Section) => {
     setOpenSections((current) => {
       const next = new Set(current);
       if (next.has(section)) {
@@ -112,8 +135,8 @@ const DetailsPanel = ({ node }) => {
 
               {section === 'Commands' && (
                 <>
-                  <Field label="Command" value={node.command} />
-                  <Field label="Entrypoint" value={node.entrypoint} />
+                  <Field label="Command" value={node.command as FieldValue} />
+                  <Field label="Entrypoint" value={node.entrypoint as FieldValue} />
                   <Field label="Dockerfile CMD" value={node.dockerfile?.metadata?.command} />
                   <Field label="Dockerfile ENTRYPOINT" value={node.dockerfile?.metadata?.entrypoint} />
                   <Field label="Exposed ports" value={node.dockerfile?.metadata?.exposedPorts} />

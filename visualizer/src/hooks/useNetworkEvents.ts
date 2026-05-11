@@ -1,20 +1,44 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { LiveEvent } from '../types';
 
 const WS_URL = 'ws://localhost:6789';
 const MAX_EVENTS = 200;
 const LIVE_WINDOW_SEC = 30;
 
-// Higher number = more severe (determines which event type wins for a src→dst pair)
-const SEVERITY = { sqli: 6, cmdi: 5, 'path-traversal': 4, ssh: 3, icmp: 2, http: 1, tcp: 0 };
-const severityOf = (type) => SEVERITY[type] ?? 0;
+// Higher number = more severe (determines which event type wins for a src->dst pair)
+const SEVERITY: Record<string, number> = { sqli: 6, cmdi: 5, 'path-traversal': 4, ssh: 3, icmp: 2, http: 1, tcp: 0 };
+const severityOf = (type: string) => SEVERITY[type] ?? 0;
+
+const buildEvent = (raw: Record<string, unknown>): LiveEvent => {
+  const src = typeof raw.src === 'string' ? raw.src : 'unknown';
+  const dst = typeof raw.dst === 'string' ? raw.dst : 'unknown';
+  const type = typeof raw.type === 'string' ? raw.type : 'tcp';
+  const ts = typeof raw.ts === 'number' ? raw.ts : Math.floor(Date.now() / 1000);
+  const id = typeof raw.id === 'string' ? raw.id : `${src}-${dst}-${type}-${ts}`;
+  const port = typeof raw.port === 'number' || typeof raw.port === 'string' ? raw.port : undefined;
+  const detail = typeof raw.detail === 'string' ? raw.detail : undefined;
+  const maskedSrcIp = typeof raw.maskedSrcIp === 'string' ? raw.maskedSrcIp : undefined;
+
+  return {
+    id,
+    src,
+    dst,
+    type,
+    ts,
+    port,
+    detail,
+    maskedSrcIp,
+    _received: Date.now(),
+  };
+};
 
 export function useNetworkEvents() {
-  const [events, setEvents] = useState([]);
+  const [events, setEvents] = useState<LiveEvent[]>([]);
   const [connected, setConnected] = useState(false);
   // Increment every 5s so liveEdges ages out stale entries even without new events
   const [tick, setTick] = useState(0);
-  const wsRef = useRef(null);
-  const reconnectRef = useRef(null);
+  const wsRef = useRef<WebSocket | null>(null);
+  const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const connect = useCallback(() => {
     const ws = new WebSocket(WS_URL);
@@ -31,7 +55,8 @@ export function useNetworkEvents() {
 
     ws.onmessage = (e) => {
       try {
-        const event = { ...JSON.parse(e.data), _received: Date.now() };
+        const parsed = JSON.parse(e.data) as Record<string, unknown>;
+        const event = buildEvent(parsed);
         setEvents((prev) => [event, ...prev].slice(0, MAX_EVENTS));
       } catch {
         // ignore malformed messages
@@ -44,24 +69,27 @@ export function useNetworkEvents() {
     const ticker = setInterval(() => setTick((n) => n + 1), 5000);
     return () => {
       clearInterval(ticker);
-      clearTimeout(reconnectRef.current);
+      if (reconnectRef.current) {
+        clearTimeout(reconnectRef.current);
+      }
       wsRef.current?.close();
     };
   }, [connect]);
 
-  // Derive unique src→dst live edges: keep the highest-severity event per pair
+  // Derive unique src->dst live edges: keep the highest-severity event per pair
   // within the last LIVE_WINDOW_SEC seconds. Re-evaluated on new events and on
   // each 5-second tick so stale edges disappear automatically.
-  const liveEdges = useMemo(() => {
-    void tick;
+  const liveEdges = useMemo<LiveEvent[]>(() => {
     const now = Date.now() / 1000;
-    const pairs = new Map();
-    for (const e of events) {
-      if (now - e.ts > LIVE_WINDOW_SEC) continue;
-      const key = `${e.src}||${e.dst}`;
+    const pairs = new Map<string, LiveEvent>();
+    for (const event of events) {
+      if (now - event.ts > LIVE_WINDOW_SEC) {
+        continue;
+      }
+      const key = `${event.src}||${event.dst}`;
       const existing = pairs.get(key);
-      if (!existing || severityOf(e.type) > severityOf(existing.type)) {
-        pairs.set(key, e);
+      if (!existing || severityOf(event.type) > severityOf(existing.type)) {
+        pairs.set(key, event);
       }
     }
     return [...pairs.values()];

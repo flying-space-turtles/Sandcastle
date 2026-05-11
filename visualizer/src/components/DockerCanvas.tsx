@@ -1,6 +1,21 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import ReactFlow, {
+  Background,
+  Controls,
+  MiniMap,
+  ReactFlowProvider,
+  useEdgesState,
+  useNodesState,
+  type DefaultEdgeOptions,
+  type Edge,
+  type Node,
+  type NodeTypes,
+} from 'reactflow';
+import CustomMachineNode from './CustomMachineNode';
+import CustomNetworkGroup from './CustomNetworkGroup';
+import type { LiveEvent, MachineNodeData, Topology, TopologyEdgeData, TopologyNodeData } from '../types';
 
-const LIVE_EDGE_COLORS = {
+const LIVE_EDGE_COLORS: Record<string, string> = {
   sqli: '#ef4444',
   cmdi: '#f97316',
   'path-traversal': '#a855f7',
@@ -9,18 +24,8 @@ const LIVE_EDGE_COLORS = {
   http: '#38bdf8',
   tcp: '#64748b',
 };
-import ReactFlow, {
-  Background,
-  Controls,
-  MiniMap,
-  ReactFlowProvider,
-  useEdgesState,
-  useNodesState,
-} from 'reactflow';
-import CustomMachineNode from './CustomMachineNode.jsx';
-import CustomNetworkGroup from './CustomNetworkGroup.jsx';
 
-const defaultEdgeOptions = {
+const defaultEdgeOptions: DefaultEdgeOptions = {
   labelBgPadding: [8, 4],
   labelBgBorderRadius: 4,
   labelBgStyle: {
@@ -34,7 +39,7 @@ const defaultEdgeOptions = {
   },
 };
 
-const shouldRevealEdge = (edge, hoveredId) => {
+const shouldRevealEdge = (edge: Edge<TopologyEdgeData>, hoveredId?: string | null) => {
   if (!hoveredId) {
     return Boolean(edge.data?.defaultVisible);
   }
@@ -50,10 +55,28 @@ const shouldRevealEdge = (edge, hoveredId) => {
   return Boolean(edge.data?.defaultVisible);
 };
 
-const shouldHighlightEdge = (edge, hoveredId) =>
+const shouldHighlightEdge = (edge: Edge<TopologyEdgeData>, hoveredId?: string | null) =>
   Boolean(hoveredId) && (edge.source === hoveredId || edge.target === hoveredId);
 
-const makeLiveEdge = ({ id, source, target, event, label, sourceHandle, targetHandle }) => ({
+type LiveEdgeInput = {
+  id: string;
+  source: string;
+  target: string;
+  event: LiveEvent;
+  label: string;
+  sourceHandle?: string;
+  targetHandle?: string;
+};
+
+const makeLiveEdge = ({
+  id,
+  source,
+  target,
+  event,
+  label,
+  sourceHandle,
+  targetHandle,
+}: LiveEdgeInput): Edge<TopologyEdgeData> => ({
   id,
   source,
   target,
@@ -78,7 +101,7 @@ const makeLiveEdge = ({ id, source, target, event, label, sourceHandle, targetHa
   label,
 });
 
-const getHoverSummary = (node, edges) => {
+const getHoverSummary = (node: Node<MachineNodeData> | null, edges: Array<Edge<TopologyEdgeData>>) => {
   if (!node) {
     return null;
   }
@@ -90,7 +113,8 @@ const getHoverSummary = (node, edges) => {
     (edge) => edge.data?.kind === 'team-pair' && (edge.source === node.id || edge.target === node.id),
   );
   const dependencyEdges = edges.filter(
-    (edge) => ['depends_on', 'link'].includes(edge.data?.kind) && (edge.source === node.id || edge.target === node.id),
+    (edge) => ['depends_on', 'link'].includes(edge.data?.kind || '') &&
+      (edge.source === node.id || edge.target === node.id),
   );
 
   if (node.data?.relationRole === 'ssh') {
@@ -109,9 +133,25 @@ const getHoverSummary = (node, edges) => {
   return `${node.data.serviceName} has ${relationCount} highlighted relation${relationCount === 1 ? '' : 's'}.`;
 };
 
-const CanvasInner = ({ topology, onSelectNode, liveEdges }) => {
-  const [hoveredNode, setHoveredNode] = useState(null);
-  const nodeTypes = useMemo(
+type DockerCanvasProps = {
+  topology: Topology;
+  onSelectNode: (node: MachineNodeData | null) => void;
+  liveEdges: LiveEvent[];
+};
+
+const getNodeColor = (node: Node<TopologyNodeData>) => {
+  if (node.data && 'accentColor' in node.data && node.data.accentColor) {
+    return node.data.accentColor;
+  }
+  if (node.data && 'color' in node.data && node.data.color) {
+    return node.data.color;
+  }
+  return '#38bdf8';
+};
+
+const CanvasInner = ({ topology, onSelectNode, liveEdges }: DockerCanvasProps) => {
+  const [hoveredNode, setHoveredNode] = useState<Node<MachineNodeData> | null>(null);
+  const nodeTypes = useMemo<NodeTypes>(
     () => ({
       machineNode: CustomMachineNode,
       networkGroup: CustomNetworkGroup,
@@ -120,7 +160,7 @@ const CanvasInner = ({ topology, onSelectNode, liveEdges }) => {
   );
   const [nodes, setNodes, onNodesChange] = useNodesState(topology.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(topology.edges);
-  const [liveFlowEdges, setLiveFlowEdges] = useState([]);
+  const [liveFlowEdges, setLiveFlowEdges] = useState<Array<Edge<TopologyEdgeData>>>([]);
 
   useEffect(() => {
     const firewallNodeId = topology.firewallNodeId;
@@ -169,7 +209,7 @@ const CanvasInner = ({ topology, onSelectNode, liveEdges }) => {
   }, [setEdges, setNodes, topology]);
 
   const applyHoverState = useCallback(
-    (hovered) => {
+    (hovered: Node<MachineNodeData> | null) => {
       const hoveredId = hovered?.id;
       const relatedNodeIds = new Set(hoveredId ? [hoveredId] : []);
 
@@ -228,11 +268,11 @@ const CanvasInner = ({ topology, onSelectNode, liveEdges }) => {
   );
 
   const handleNodeClick = useCallback(
-    (_event, node) => {
+    (_event: ReactMouseEvent, node: Node<TopologyNodeData>) => {
       if (node.type !== 'machineNode') {
         return;
       }
-      onSelectNode(node.data, node.id);
+      onSelectNode(node.data as MachineNodeData);
     },
     [onSelectNode],
   );
@@ -241,10 +281,7 @@ const CanvasInner = ({ topology, onSelectNode, liveEdges }) => {
     onSelectNode(null);
   }, [onSelectNode]);
 
-  const displayEdges = useMemo(
-    () => [...edges, ...liveFlowEdges],
-    [edges, liveFlowEdges],
-  );
+  const displayEdges = useMemo(() => [...edges, ...liveFlowEdges], [edges, liveFlowEdges]);
 
   return (
     <>
@@ -257,7 +294,7 @@ const CanvasInner = ({ topology, onSelectNode, liveEdges }) => {
         onNodeClick={handleNodeClick}
         onNodeMouseEnter={(_event, node) => {
           if (node.type === 'machineNode') {
-            applyHoverState(node);
+            applyHoverState(node as Node<MachineNodeData>);
           }
         }}
         onNodeMouseLeave={() => applyHoverState(null)}
@@ -276,7 +313,7 @@ const CanvasInner = ({ topology, onSelectNode, liveEdges }) => {
           pannable
           zoomable
           nodeBorderRadius={6}
-          nodeColor={(node) => node.data?.accentColor || node.data?.color || '#38bdf8'}
+          nodeColor={getNodeColor}
           maskColor="rgba(2, 6, 23, 0.74)"
         />
       </ReactFlow>
@@ -285,7 +322,7 @@ const CanvasInner = ({ topology, onSelectNode, liveEdges }) => {
   );
 };
 
-const DockerCanvas = ({ topology, onSelectNode, liveEdges }) => (
+const DockerCanvas = ({ topology, onSelectNode, liveEdges }: DockerCanvasProps) => (
   <ReactFlowProvider>
     <CanvasInner topology={topology} onSelectNode={onSelectNode} liveEdges={liveEdges} />
   </ReactFlowProvider>

@@ -1,9 +1,22 @@
-const MODES = [
+import type { Mode } from '../types';
+
+const MODES: Array<{ id: Mode; label: string }> = [
   { id: 'editor', label: 'Editor Mode' },
   { id: 'yaml', label: 'Yaml Mode' },
   { id: 'inspector', label: 'Inspector' },
   { id: 'firewall', label: 'Firewall' },
 ];
+
+type TopologyNavProps = {
+  mode: Mode;
+  onModeChange: (mode: Mode) => void;
+  serviceCount: number;
+  networkCount: number;
+  edgeCount: number;
+  parseError: string | null;
+  firewallConnected: boolean;
+  firewallEventCount: number;
+};
 
 const TopologyNav = ({
   mode,
@@ -14,7 +27,7 @@ const TopologyNav = ({
   parseError,
   firewallConnected,
   firewallEventCount,
-}) => (
+}: TopologyNavProps) => (
   <header className="topology-nav">
     <div className="topology-nav__brand">
       <span className="topology-nav__mark" />

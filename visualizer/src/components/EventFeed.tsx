@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, type CSSProperties } from 'react';
+import type { EventType, LiveEvent } from '../types';
 
-const TYPE_META = {
+const TYPE_META: Record<EventType, { label: string; color: string }> = {
   sqli: { label: 'SQLi', color: '#ef4444' },
   cmdi: { label: 'CMDi', color: '#f97316' },
   'path-traversal': { label: 'Traversal', color: '#a855f7' },
@@ -10,14 +11,19 @@ const TYPE_META = {
   tcp: { label: 'TCP', color: '#64748b' },
 };
 
-const ALL_TYPES = Object.keys(TYPE_META);
+const ALL_TYPES = Object.keys(TYPE_META) as EventType[];
 
-const EventFeed = ({ events, connected }) => {
-  const [activeTypes, setActiveTypes] = useState(
-    () => new Set(['sqli', 'cmdi', 'path-traversal', 'ssh', 'icmp', 'http', 'tcp']),
+type EventFeedProps = {
+  events: LiveEvent[];
+  connected: boolean;
+};
+
+const EventFeed = ({ events, connected }: EventFeedProps) => {
+  const [activeTypes, setActiveTypes] = useState<Set<EventType>>(
+    () => new Set<EventType>(['sqli', 'cmdi', 'path-traversal', 'ssh', 'icmp', 'http', 'tcp']),
   );
 
-  const toggleType = (type) =>
+  const toggleType = (type: EventType) =>
     setActiveTypes((prev) => {
       const next = new Set(prev);
       next.has(type) ? next.delete(type) : next.add(type);
@@ -25,7 +31,7 @@ const EventFeed = ({ events, connected }) => {
     });
 
   const visible = events
-    .filter((e) => activeTypes.has(e.type))
+    .filter((event) => activeTypes.has(event.type as EventType))
     .sort((a, b) => (b._received ?? b.ts) - (a._received ?? a.ts));
 
   return (
@@ -45,7 +51,7 @@ const EventFeed = ({ events, connected }) => {
               key={type}
               type="button"
               className={`event-filter-btn ${activeTypes.has(type) ? 'is-active' : ''}`}
-              style={{ '--badge': meta.color }}
+              style={{ '--badge': meta.color } as CSSProperties}
               onClick={() => toggleType(type)}
             >
               {meta.label}
@@ -65,10 +71,10 @@ const EventFeed = ({ events, connected }) => {
       ) : (
         <div className="event-feed__list">
           {visible.map((event) => {
-            const meta = TYPE_META[event.type] ?? { label: event.type, color: '#64748b' };
+            const meta = TYPE_META[event.type as EventType] ?? { label: event.type, color: '#64748b' };
             return (
               <div key={event.id} className="event-item">
-                <span className="event-item__badge" style={{ '--badge': meta.color }}>
+                <span className="event-item__badge" style={{ '--badge': meta.color } as CSSProperties}>
                   {meta.label}
                 </span>
                 <div className="event-item__route">

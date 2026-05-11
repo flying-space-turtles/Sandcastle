@@ -1,7 +1,9 @@
-import { memo } from 'react';
+import { memo, type CSSProperties } from 'react';
+import type { NodeProps } from 'reactflow';
+import type { NetworkGroupData } from '../types';
 
-const CustomNetworkGroup = ({ data }) => (
-  <div className="network-group" style={{ '--group-color': data.color || '#38bdf8' }}>
+const CustomNetworkGroup = ({ data }: NodeProps<NetworkGroupData>) => (
+  <div className="network-group" style={{ '--group-color': data.color || '#38bdf8' } as CSSProperties}>
     <div className="network-group__header">
       <div>
         <div className="network-group__eyebrow">Network Zone</div>
