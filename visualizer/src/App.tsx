@@ -6,12 +6,12 @@ import vulnMachineDockerfile from '../../docker/vuln/Dockerfile?raw';
 import firewallDockerfile from '../../firewall/Dockerfile?raw';
 import vulnDockerfile from '../../services/example-vuln/Dockerfile?raw';
 import DetailsPanel from './components/DetailsPanel.jsx';
-import DockerCanvas from './components/DockerCanvas.jsx';
-import EventFeed from './components/EventFeed.jsx';
-import TopologyNav from './components/TopologyNav.jsx';
+import DockerCanvas from './components/DockerCanvas.tsx';
+import EventFeed from './components/EventFeed.tsx';
+import TopologyNav from './components/TopologyNav.tsx';
 import { parseDockerCompose } from './data/dockerComposeParser.js';
-import { buildDockerFlow } from './graph/dockerGraph.js';
-import { useNetworkEvents } from './hooks/useNetworkEvents.js';
+import { buildDockerFlow } from './graph/dockerGraph.ts';
+import { useNetworkEvents } from './hooks/useNetworkEvents.ts';
 
 const dockerfileSources = {
   'ssh/Dockerfile': sshDockerfile,
