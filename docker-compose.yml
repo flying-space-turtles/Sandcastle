@@ -19,7 +19,6 @@ volumes:
   team1-data:
   team2-data:
   team3-data:
-  team4-data:
 
 services:
   team1-vuln:
@@ -157,47 +156,3 @@ services:
       - NET_ADMIN
     restart: unless-stopped
 
-  team4-vuln:
-    build:
-      context: ./teams/generated/team4/service
-    image: sandcastle/team4-vuln:latest
-    container_name: team4-vuln
-    hostname: team4-vuln
-    networks:
-      ctf-network:
-        ipv4_address: 10.10.4.3
-    environment:
-      TEAM_ID: "4"
-      TEAM_NAME: "Team 4"
-      SERVICE_PORT: "8080"
-      SECRET_KEY: "sandcastle-team4-dev-secret"
-    volumes:
-      - team4-data:/app/data
-    restart: unless-stopped
-
-  team4-ssh:
-    build:
-      context: .
-      dockerfile: docker/ssh/Dockerfile
-      args:
-        TEAM_ID: "4"
-        TEAM_NAME: "team4"
-        TEAM_USER: "team4"
-        TEAM_PASS: "team4pass"
-        TEAM_UID: "1000"
-    image: sandcastle/team4-ssh:latest
-    container_name: team4-ssh
-    hostname: team4-ssh
-    depends_on:
-      - team4-vuln
-    networks:
-      ctf-network:
-        ipv4_address: 10.10.4.2
-    ports:
-      - "2204:22"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./teams/generated/team4/service:/home/team4/service
-    cap_add:
-      - NET_ADMIN
-    restart: unless-stopped
