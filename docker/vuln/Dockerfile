@@ -26,7 +26,6 @@ RUN apt-get update \
         nano \
         net-tools \
         iputils-ping \
-        iproute2 \
         dnsutils \
         nmap \
         python3 \
@@ -101,10 +100,6 @@ if [[ -S /var/run/docker.sock ]]; then
     fi
 
     usermod -aG "${socket_group}" "${TEAM_USER}"
-fi
-
-if [[ -n "${GATEWAY_OVERRIDE:-}" ]]; then
-    ip route replace default via "${GATEWAY_OVERRIDE}" 2>/dev/null || true
 fi
 
 exec "$@"

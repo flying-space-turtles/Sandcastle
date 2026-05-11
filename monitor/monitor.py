@@ -34,13 +34,7 @@ CAPTURE_PORTS: set[int] = {8080, 80, 443}
 
 
 def _find_bridge_iface() -> str:
-    """Return the interface that carries the ctf-network subnet.
-
-    When the monitor runs with network_mode:host this is the Docker bridge
-    (e.g. br-xxxxx).  When it sits directly on ctf-network it is typically
-    eth0.  Either way, we look for the first interface whose address falls
-    inside 10.10.0.0/16.
-    """
+    """Return the host bridge interface that carries the ctf-network subnet."""
     for iface in get_if_list():
         try:
             addr = get_if_addr(iface)
@@ -54,18 +48,13 @@ def _find_bridge_iface() -> str:
 
 
 # ── IP → container name ───────────────────────────────────────────────────────
-# IP layout:  10.10.0.2 = firewall  10.10.0.3 = monitor
-#             10.10.N.1 = gateway   10.10.N.2 = teamN-ssh   10.10.N.3 = teamN-vuln
+# IP layout:  10.10.N.1 = gateway   10.10.N.2 = teamN-ssh   10.10.N.3 = teamN-vuln
 
 
 def _ip_to_name(ip: str) -> str:
     parts = ip.split(".")
     if len(parts) == 4 and parts[0] == "10" and parts[1] == "10":
         team, host = parts[2], parts[3]
-        if team == "0" and host == "2":
-            return "firewall"
-        if team == "0" and host == "3":
-            return "monitor"
         if host == "1":
             return "gateway"
         if host == "2":
@@ -117,15 +106,6 @@ _event_queue: queue.Queue = queue.Queue()
 
 _clients: set = set()
 
-# ── Packet deduplication ──────────────────────────────────────────────────────
-# With firewall routing, the bridge sees each packet twice.  A small cache
-# keyed on (src, dst, sport, dport, payload_hash) with a time window filters
-# the duplicates.
-
-_DEDUP_WINDOW: float = 0.5   # seconds
-_DEDUP_MAX_SIZE: int = 4096
-_seen_packets: dict[tuple, float] = {}
-
 
 # ── Packet handler (runs in sniffer thread) ───────────────────────────────────
 
@@ -169,8 +149,8 @@ def _on_packet(pkt) -> None:
     src_name = _ip_to_name(src_ip)
     dst_name = _ip_to_name(dst_ip)
 
-    # Drop gateway, firewall and monitor traffic — it's routing noise, not attacks
-    if src_name in ("gateway", "firewall", "monitor") or dst_name in ("gateway", "firewall", "monitor"):
+    # Drop gateway traffic — it's routing noise, not attacks
+    if src_name == "gateway" or dst_name == "gateway":
         return
 
     # Skip packets where neither endpoint maps to a known container name
@@ -180,23 +160,6 @@ def _on_packet(pkt) -> None:
     # Skip same-team traffic (ssh↔vuln within the same team) — not an attack
     if _team_id(src_name) is not None and _team_id(src_name) == _team_id(dst_name):
         return
-
-    # ── Deduplication ─────────────────────────────────────────────────────
-    # The firewall routes all traffic, so the bridge sees each packet twice
-    # (sender→firewall and firewall→receiver).  Deduplicate using a hash of
-    # the packet's key fields within a short time window.
-    pkt_key = (src_ip, dst_ip, sport, dport, hash(payload[:64]))
-    now = time.monotonic()
-    if pkt_key in _seen_packets and (now - _seen_packets[pkt_key]) < _DEDUP_WINDOW:
-        return
-    _seen_packets[pkt_key] = now
-
-    # Periodically prune old entries to avoid unbounded growth
-    if len(_seen_packets) > _DEDUP_MAX_SIZE:
-        cutoff = now - _DEDUP_WINDOW
-        stale = [k for k, t in _seen_packets.items() if t < cutoff]
-        for k in stale:
-            del _seen_packets[k]
 
     etype = _classify(payload, dport)
     # First non-empty line of the payload (HTTP request line or data)
