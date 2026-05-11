@@ -288,7 +288,10 @@ EOF
 EOF
     done
 
-    sed -i '${/^$/d;}' "${COMPOSE_FILE}"
+    local tmp_compose
+    tmp_compose="$(mktemp "${COMPOSE_FILE}.XXXXXX")"
+    awk 'NF || seen { print } { seen = 1 }' "${COMPOSE_FILE}" > "${tmp_compose}"
+    mv "${tmp_compose}" "${COMPOSE_FILE}"
 }
 
 print_summary() {

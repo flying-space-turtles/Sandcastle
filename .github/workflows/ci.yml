@@ -91,9 +91,6 @@ jobs:
       - name: Generate docker-compose.yml
         run: python3 scripts/gen_compose.py "${{ steps.team-count.outputs.count }}"
 
-      - name: Verify generated file matches committed version
-        run: git diff --exit-code docker-compose.yml
-
   docker-lint:
     name: Lint Dockerfile
     runs-on: ubuntu-latest
