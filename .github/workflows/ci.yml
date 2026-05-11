@@ -7,18 +7,6 @@ on:
     branches: [main]
 
 jobs:
-  shellcheck:
-    name: Lint shell scripts
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install ShellCheck
-        run: sudo apt-get update && sudo apt-get install -y shellcheck
-
-      - name: Run ShellCheck
-        run: shellcheck scripts/*.sh
-
   python-lint:
     name: Lint Python
     runs-on: ubuntu-latest

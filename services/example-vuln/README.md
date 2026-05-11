@@ -25,9 +25,9 @@ services/example-vuln/
 ```
 
 The top-level scaffold copies this template into each
-`teams/generated/team<N>/service` directory. Each `team<N>-vuln` service is
-built from that team's copy, gets its own `/app/data` volume, and seeds its own
-flag.
+`teams/generated/team<N>/example-vuln` directory. Each `team<N>-vuln` machine
+mounts that team's copy at `~/example-vuln`; running Docker Compose there starts
+`team<N>-vuln-app`, gives it its own `/app/data` volume, and seeds its own flag.
 
 ## Running it standalone
 
@@ -48,16 +48,21 @@ The standalone compose binds the app to host port `8080` by default. Set
 
 ## Running it through the Sandcastle scaffold
 
-Generate the team topology, then let Compose build the per-team copies:
+Generate the team topology, then SSH through the gateway into the vulnerable
+machine and start the app from its copied workspace:
 
 ```bash
 ./scripts/setup.sh --teams 4
 docker compose up --build
+ssh -p 2201 team1@localhost
+ssh team1@team1-vuln
+cd ~/example-vuln
+docker compose up -d --build
 ```
 
-Each `team<N>-vuln` container boots with `TEAM_ID=<N>`, `TEAM_NAME=Team <N>`,
-`SERVICE_PORT=8080`, and a per-team `team<N>-data` volume mounted at
-`/app/data`.
+Each `team<N>-vuln-app` container boots with `TEAM_ID=<N>`,
+`TEAM_NAME=Team <N>`, `SERVICE_PORT=8080`, and a per-team
+`sandcastle_team<N>-data` volume mounted at `/app/data`.
 
 ## Data model
 
