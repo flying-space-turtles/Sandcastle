@@ -25,6 +25,7 @@ RUN apt-get update \
         nano \
         net-tools \
         iputils-ping \
+        iproute2 \
         dnsutils \
         nmap \
         python3 \
@@ -58,6 +59,19 @@ RUN printf '%s\n' \
     '' \
     > /etc/motd
 
+RUN cat > /usr/local/bin/sandcastle-ssh-entrypoint <<'SCRIPT' \
+    && chmod 0755 /usr/local/bin/sandcastle-ssh-entrypoint
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ -n "${GATEWAY_OVERRIDE:-}" ]]; then
+    ip route replace default via "${GATEWAY_OVERRIDE}" 2>/dev/null || true
+fi
+
+exec "$@"
+SCRIPT
+
 EXPOSE 22
 
+ENTRYPOINT ["/usr/local/bin/sandcastle-ssh-entrypoint"]
 CMD ["/usr/sbin/sshd", "-D", "-e"]
