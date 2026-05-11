@@ -6,9 +6,11 @@ import vulnMachineDockerfile from '../../docker/vuln/Dockerfile?raw';
 import vulnDockerfile from '../../services/example-vuln/Dockerfile?raw';
 import DetailsPanel from './components/DetailsPanel.jsx';
 import DockerCanvas from './components/DockerCanvas.jsx';
+import EventFeed from './components/EventFeed.jsx';
 import TopologyNav from './components/TopologyNav.jsx';
 import { parseDockerCompose } from './data/dockerComposeParser.js';
 import { buildDockerFlow } from './graph/dockerGraph.js';
+import { useNetworkEvents } from './hooks/useNetworkEvents.js';
 
 const dockerfileSources = {
   'ssh/Dockerfile': sshDockerfile,
@@ -51,6 +53,8 @@ const App = () => {
   const [topology, setTopology] = useState(() => buildTopology(defaultComposeYaml));
   const [parseError, setParseError] = useState(null);
   const [selectedNode, setSelectedNode] = useState(null);
+
+  const { events, connected, liveEdges } = useNetworkEvents();
 
   const summary = useMemo(
     () => ({
@@ -108,14 +112,25 @@ const App = () => {
         serviceCount={summary.serviceCount}
         networkCount={summary.networkCount}
         edgeCount={summary.edgeCount}
+        monitorConnected={connected}
+        monitorEventCount={events.length}
       />
 
       {mode === 'editor' && (
         <main className="workspace workspace--canvas">
           <section className="canvas-shell">
-            <DockerCanvas topology={topology} onSelectNode={handleSelectNode} />
+            <DockerCanvas topology={topology} onSelectNode={handleSelectNode} liveEdges={liveEdges} />
           </section>
           <DetailsPanel node={selectedNode} />
+        </main>
+      )}
+
+      {mode === 'monitor' && (
+        <main className="workspace workspace--canvas">
+          <section className="canvas-shell">
+            <DockerCanvas topology={topology} onSelectNode={handleSelectNode} liveEdges={liveEdges} />
+          </section>
+          <EventFeed events={events} connected={connected} />
         </main>
       )}
 

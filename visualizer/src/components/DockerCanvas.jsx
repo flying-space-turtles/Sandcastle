@@ -1,4 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+
+const LIVE_EDGE_COLORS = {
+  sqli: '#ef4444',
+  cmdi: '#f97316',
+  'path-traversal': '#a855f7',
+  ssh: '#fbbf24',
+  http: '#38bdf8',
+  tcp: '#64748b',
+};
 import ReactFlow, {
   Background,
   Controls,
@@ -70,7 +79,7 @@ const getHoverSummary = (node, edges) => {
   return `${node.data.serviceName} has ${relationCount} highlighted relation${relationCount === 1 ? '' : 's'}.`;
 };
 
-const CanvasInner = ({ topology, onSelectNode }) => {
+const CanvasInner = ({ topology, onSelectNode, liveEdges }) => {
   const [hoveredNode, setHoveredNode] = useState(null);
   const nodeTypes = useMemo(
     () => ({
@@ -81,6 +90,34 @@ const CanvasInner = ({ topology, onSelectNode }) => {
   );
   const [nodes, setNodes, onNodesChange] = useNodesState(topology.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(topology.edges);
+  const [liveFlowEdges, setLiveFlowEdges] = useState([]);
+
+  useEffect(() => {
+    setLiveFlowEdges(
+      (liveEdges || []).map((event) => ({
+        id: `live:${event.src}||${event.dst}`,
+        source: event.src,
+        target: event.dst,
+        type: 'smoothstep',
+        animated: true,
+        selectable: false,
+        focusable: false,
+        data: { kind: 'live', eventType: event.type },
+        style: {
+          stroke: LIVE_EDGE_COLORS[event.type] || '#64748b',
+          strokeWidth: 3,
+          strokeOpacity: 0.92,
+        },
+        markerEnd: {
+          type: 'arrowclosed',
+          width: 14,
+          height: 14,
+          color: LIVE_EDGE_COLORS[event.type] || '#64748b',
+        },
+        label: (event.type || 'tcp').toUpperCase(),
+      }))
+    );
+  }, [liveEdges]);
 
   useEffect(() => {
     setNodes(topology.nodes);
@@ -161,11 +198,16 @@ const CanvasInner = ({ topology, onSelectNode }) => {
     onSelectNode(null);
   }, [onSelectNode]);
 
+  const displayEdges = useMemo(
+    () => [...edges, ...liveFlowEdges],
+    [edges, liveFlowEdges],
+  );
+
   return (
     <>
       <ReactFlow
         nodes={nodes}
-        edges={edges}
+        edges={displayEdges}
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
@@ -200,9 +242,9 @@ const CanvasInner = ({ topology, onSelectNode }) => {
   );
 };
 
-const DockerCanvas = (props) => (
+const DockerCanvas = ({ topology, onSelectNode, liveEdges }) => (
   <ReactFlowProvider>
-    <CanvasInner {...props} />
+    <CanvasInner topology={topology} onSelectNode={onSelectNode} liveEdges={liveEdges} />
   </ReactFlowProvider>
 );
 

@@ -291,6 +291,21 @@ EOF
     restart: unless-stopped
 EOF
     done
+
+    cat >> "${COMPOSE_FILE}" <<'EOF'
+
+  monitor:
+    build:
+      context: ./monitor
+    image: sandcastle/monitor:latest
+    container_name: sandcastle-monitor
+    hostname: sandcastle-monitor
+    network_mode: host
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    restart: unless-stopped
+EOF
 }
 
 print_summary() {
