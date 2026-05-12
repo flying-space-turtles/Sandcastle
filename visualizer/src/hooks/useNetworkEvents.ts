@@ -44,9 +44,13 @@ export function useNetworkEvents() {
     const ws = new WebSocket(WS_URL);
     wsRef.current = ws;
 
-    ws.onopen = () => setConnected(true);
+    ws.onopen = () => {
+      if (wsRef.current !== ws) return;
+      setConnected(true);
+    };
 
     ws.onclose = () => {
+      if (wsRef.current !== ws) return;
       setConnected(false);
       reconnectRef.current = setTimeout(connect, 3000);
     };
@@ -54,6 +58,7 @@ export function useNetworkEvents() {
     ws.onerror = () => ws.close();
 
     ws.onmessage = (e) => {
+      if (wsRef.current !== ws) return;
       try {
         const parsed = JSON.parse(e.data) as Record<string, unknown>;
         const event = buildEvent(parsed);
@@ -72,7 +77,9 @@ export function useNetworkEvents() {
       if (reconnectRef.current) {
         clearTimeout(reconnectRef.current);
       }
-      wsRef.current?.close();
+      const ws = wsRef.current;
+      wsRef.current = null;
+      ws?.close();
     };
   }, [connect]);
 

@@ -37,7 +37,7 @@ const EventFeed = ({ events, connected }: EventFeedProps) => {
 
   const visible = events
     .filter((event) => activeTypes.has(event.type as EventType))
-    .sort((a, b) => (b._received ?? b.ts) - (a._received ?? a.ts));
+    .sort((a, b) => (b.ts - a.ts) || ((b._received ?? 0) - (a._received ?? 0)));
 
   return (
     <aside className="event-feed">
@@ -49,6 +49,17 @@ const EventFeed = ({ events, connected }: EventFeedProps) => {
       </div>
 
       <div className="event-feed__filters">
+        <button
+          type="button"
+          className="event-filter-ctrl"
+          onClick={() => setActiveTypes(new Set(ALL_TYPES))}
+        >All</button>
+        <button
+          type="button"
+          className="event-filter-ctrl"
+          onClick={() => setActiveTypes(new Set())}
+        >None</button>
+        <span className="event-filter-divider" />
         {ALL_TYPES.map((type) => {
           const meta = TYPE_META[type];
           return (
