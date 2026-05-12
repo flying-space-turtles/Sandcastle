@@ -2,7 +2,7 @@ import type { Edge, Node } from 'reactflow';
 
 export type Mode = 'editor' | 'yaml' | 'inspector' | 'firewall';
 
-export type EventType = 'sqli' | 'cmdi' | 'path-traversal' | 'ssh' | 'icmp' | 'http' | 'tcp';
+export type EventType = 'ssh' | 'icmp' | 'http' | 'tcp' | 'udp' | 'dns' | 'ftp' | 'mysql' | 'postgres' | 'redis' | 'smtp' | 'telnet';
 
 export interface LiveEvent {
   id: string;

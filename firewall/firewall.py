@@ -14,7 +14,6 @@ import ipaddress
 import json
 import os
 import queue
-import re
 import signal
 import socket
 import struct
@@ -36,33 +35,42 @@ FIRST_PAYLOAD_TIMEOUT = 1.0
 ETH_P_IP = 0x0800
 ICMP_ECHO_REQUEST = 8
 
-# Attack classifiers
+# Well-known TCP port -> protocol label
+_TCP_PORT_MAP: dict[int, str] = {
+    21: "ftp",
+    22: "ssh",
+    23: "telnet",
+    25: "smtp",
+    53: "dns",
+    110: "pop3",
+    143: "imap",
+    443: "http",
+    3306: "mysql",
+    5432: "postgres",
+    6379: "redis",
+    27017: "mongodb",
+    80: "http",
+    8080: "http",
+    8443: "http",
+}
 
-_SQLI = re.compile(
-    r"union\s+select|'\s*or\s*'|or\s+1\s*=\s*1|drop\s+table|--\s|\bselect\b.+\bfrom\b",
-    re.IGNORECASE,
-)
-_CMDI = re.compile(
-    r";\s*(ls|id|whoami|cat|wget|curl|bash|sh|python|perl|nc)\b|&&\s*\w|\|\s*(id|ls|whoami|cat)",
-    re.IGNORECASE,
-)
-_TRAV = re.compile(r"(\.\./|%2e%2e|\.\.%2f|%2f\.\.)", re.IGNORECASE)
+# Well-known UDP port -> protocol label
+_UDP_PORT_MAP: dict[int, str] = {
+    53: "dns",
+    67: "dhcp",
+    68: "dhcp",
+    123: "ntp",
+    161: "snmp",
+    162: "snmp",
+    500: "ike",
+    514: "syslog",
+    1194: "openvpn",
+}
 
-
-def _classify(payload: str, dport: int) -> str:
-    if dport == 22:
-        return "ssh"
-    if _SQLI.search(payload):
-        return "sqli"
-    if _CMDI.search(payload):
-        return "cmdi"
-    if _TRAV.search(payload):
-        return "path-traversal"
+def _classify_tcp(dport: int, payload: str) -> str:
     if payload.startswith(("GET ", "POST ", "PUT ", "PATCH ", "DELETE ", "HEAD ", "OPTIONS ")):
         return "http"
-    if dport in (80, 443, 8080):
-        return "http"
-    return "tcp"
+    return _TCP_PORT_MAP.get(dport, "tcp")
 
 
 def _ip_to_name(ip: str) -> str:
@@ -193,7 +201,7 @@ def _emit_event(
         "srcIp": src_ip,
         "dstIp": dst_ip,
         "maskedSrcIp": masked_src_ip,
-        "type": _classify(payload_text, dst_port),
+        "type": _classify_tcp(dst_port, payload_text),
         "proto": "TCP",
         "port": dst_port,
         "detail": detail,
@@ -222,6 +230,26 @@ def _emit_icmp_event(src_ip: str, dst_ip: str) -> None:
     }
     _event_queue.put(event)
     print(f"[event] {'icmp':<16} {event['src']} ({src_ip}) -> {event['dst']} ({dst_ip}) echo request", flush=True)
+
+
+def _emit_udp_event(src_ip: str, dst_ip: str, src_port: int, dst_port: int, payload: bytes) -> None:
+    proto = _UDP_PORT_MAP.get(dst_port) or _UDP_PORT_MAP.get(src_port, "udp")
+    detail = payload[:80].decode("utf-8", errors="replace").split("\n")[0].strip()[:200] if payload else ""
+    event = {
+        "id": str(uuid.uuid4()),
+        "ts": time.time(),
+        "src": _ip_to_name(src_ip),
+        "dst": _ip_to_name(dst_ip),
+        "srcIp": src_ip,
+        "dstIp": dst_ip,
+        "maskedSrcIp": None,
+        "type": proto,
+        "proto": "UDP",
+        "port": dst_port,
+        "detail": detail,
+    }
+    _event_queue.put(event)
+    print(f"[event] {proto:<16} {event['src']} ({src_ip}:{src_port}) -> {event['dst']} ({dst_ip}:{dst_port})", flush=True)
 
 
 async def _ws_handler(websocket) -> None:
@@ -296,6 +324,60 @@ async def _icmp_sniff_loop(stop_event: asyncio.Event) -> None:
             dst_ip = socket.inet_ntoa(frame[ip_offset + 16 : ip_offset + 20])
             if _in_ctf_network(src_ip) and _in_ctf_network(dst_ip):
                 _emit_icmp_event(src_ip, dst_ip)
+    finally:
+        raw_sock.close()
+
+
+async def _udp_sniff_loop(stop_event: asyncio.Event) -> None:
+    if not hasattr(socket, "AF_PACKET"):
+        print("[firewall] UDP capture is not supported on this platform", flush=True)
+        return
+
+    try:
+        raw_sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(ETH_P_IP))
+    except OSError as exc:
+        print(f"[firewall] WARNING: UDP capture disabled: {exc}", flush=True)
+        return
+
+    raw_sock.settimeout(0.5)
+    print("[firewall] UDP capture enabled", flush=True)
+
+    try:
+        while not stop_event.is_set():
+            try:
+                frame = await asyncio.to_thread(raw_sock.recv, BUFFER_SIZE)
+            except socket.timeout:
+                continue
+            except OSError as exc:
+                if not stop_event.is_set():
+                    print(f"[firewall] WARNING: UDP capture failed: {exc}", flush=True)
+                break
+
+            if len(frame) < 42:  # 14 eth + 20 ip + 8 udp
+                continue
+
+            eth_type = struct.unpack_from("!H", frame, 12)[0]
+            if eth_type != ETH_P_IP:
+                continue
+
+            ip_offset = 14
+            protocol = frame[ip_offset + 9]
+            if protocol != socket.IPPROTO_UDP:
+                continue
+
+            ihl = (frame[ip_offset] & 0x0F) * 4
+            udp_offset = ip_offset + ihl
+            if len(frame) < udp_offset + 8:
+                continue
+
+            src_port = struct.unpack_from("!H", frame, udp_offset)[0]
+            dst_port = struct.unpack_from("!H", frame, udp_offset + 2)[0]
+            src_ip = socket.inet_ntoa(frame[ip_offset + 12 : ip_offset + 16])
+            dst_ip = socket.inet_ntoa(frame[ip_offset + 16 : ip_offset + 20])
+
+            if _in_ctf_network(src_ip) and _in_ctf_network(dst_ip):
+                payload = frame[udp_offset + 8:]
+                _emit_udp_event(src_ip, dst_ip, src_port, dst_port, payload)
     finally:
         raw_sock.close()
 
@@ -408,6 +490,7 @@ async def main() -> None:
     ws_server = await websockets.serve(_ws_handler, "0.0.0.0", WS_PORT)
     broadcast_task = asyncio.create_task(_broadcast_loop())
     icmp_task = asyncio.create_task(_icmp_sniff_loop(stop_event))
+    udp_task = asyncio.create_task(_udp_sniff_loop(stop_event))
 
     print(f"[firewall] Transparent proxy listening on 0.0.0.0:{PROXY_PORT}", flush=True)
     print(f"[firewall] WebSocket listening on ws://0.0.0.0:{WS_PORT}", flush=True)
@@ -419,9 +502,10 @@ async def main() -> None:
         ws_server.close()
         broadcast_task.cancel()
         icmp_task.cancel()
+        udp_task.cancel()
         await proxy.wait_closed()
         await ws_server.wait_closed()
-        await asyncio.gather(broadcast_task, icmp_task, return_exceptions=True)
+        await asyncio.gather(broadcast_task, icmp_task, udp_task, return_exceptions=True)
         remove_redirect_rule()
 
 

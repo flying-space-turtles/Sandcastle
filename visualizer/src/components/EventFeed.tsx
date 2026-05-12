@@ -2,12 +2,17 @@ import { useState, type CSSProperties } from 'react';
 import type { EventType, LiveEvent } from '../types';
 
 const TYPE_META: Record<EventType, { label: string; color: string }> = {
-  sqli: { label: 'SQLi', color: '#ef4444' },
-  cmdi: { label: 'CMDi', color: '#f97316' },
-  'path-traversal': { label: 'Traversal', color: '#a855f7' },
   ssh: { label: 'SSH', color: '#fbbf24' },
-  icmp: { label: 'ICMP', color: '#22c55e' },
+  telnet: { label: 'Telnet', color: '#f97316' },
+  ftp: { label: 'FTP', color: '#a78bfa' },
+  smtp: { label: 'SMTP', color: '#e879f9' },
+  mysql: { label: 'MySQL', color: '#f43f5e' },
+  postgres: { label: 'Postgres', color: '#3b82f6' },
+  redis: { label: 'Redis', color: '#ef4444' },
+  dns: { label: 'DNS', color: '#10b981' },
   http: { label: 'HTTP', color: '#38bdf8' },
+  udp: { label: 'UDP', color: '#84cc16' },
+  icmp: { label: 'ICMP', color: '#22c55e' },
   tcp: { label: 'TCP', color: '#64748b' },
 };
 
@@ -20,7 +25,7 @@ type EventFeedProps = {
 
 const EventFeed = ({ events, connected }: EventFeedProps) => {
   const [activeTypes, setActiveTypes] = useState<Set<EventType>>(
-    () => new Set<EventType>(['sqli', 'cmdi', 'path-traversal', 'ssh', 'icmp', 'http', 'tcp']),
+    () => new Set<EventType>(['ssh', 'telnet', 'ftp', 'smtp', 'mysql', 'postgres', 'redis', 'dns', 'http', 'udp', 'icmp', 'tcp']),
   );
 
   const toggleType = (type: EventType) =>

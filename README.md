@@ -123,6 +123,7 @@ docker compose up -d --build
 curl http://team1-vuln:8080/health
 ```
 
+
 The generated app Compose file recreates only that team's
 `team<N>-vuln-app` container and uses a per-team data volume.
 
