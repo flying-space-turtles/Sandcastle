@@ -16,12 +16,17 @@ import CustomNetworkGroup from './CustomNetworkGroup';
 import type { LiveEvent, MachineNodeData, Topology, TopologyEdgeData, TopologyNodeData } from '../types';
 
 const LIVE_EDGE_COLORS: Record<string, string> = {
-  sqli: '#ef4444',
-  cmdi: '#f97316',
-  'path-traversal': '#a855f7',
   ssh: '#fbbf24',
-  icmp: '#22c55e',
+  telnet: '#f97316',
+  ftp: '#a78bfa',
+  smtp: '#e879f9',
+  mysql: '#f43f5e',
+  postgres: '#3b82f6',
+  redis: '#ef4444',
+  dns: '#10b981',
   http: '#38bdf8',
+  udp: '#84cc16',
+  icmp: '#22c55e',
   tcp: '#64748b',
 };
 

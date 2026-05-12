@@ -6,7 +6,7 @@ const MAX_EVENTS = 200;
 const LIVE_WINDOW_SEC = 30;
 
 // Higher number = more severe (determines which event type wins for a src->dst pair)
-const SEVERITY: Record<string, number> = { sqli: 6, cmdi: 5, 'path-traversal': 4, ssh: 3, icmp: 2, http: 1, tcp: 0 };
+const SEVERITY: Record<string, number> = { ssh: 8, telnet: 7, ftp: 6, smtp: 5, mysql: 4, postgres: 4, redis: 4, dns: 3, http: 3, udp: 2, icmp: 2, tcp: 0 };
 const severityOf = (type: string) => SEVERITY[type] ?? 0;
 
 const buildEvent = (raw: Record<string, unknown>): LiveEvent => {
