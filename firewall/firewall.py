@@ -33,7 +33,21 @@ SO_ORIGINAL_DST = 80
 BUFFER_SIZE = 64 * 1024
 FIRST_PAYLOAD_TIMEOUT = 1.0
 ETH_P_IP = 0x0800
+ICMP_ECHO_REPLY = 0
 ICMP_ECHO_REQUEST = 8
+NETLINK_NETFILTER = 12
+NFNLGRP_CONNTRACK_NEW = 1
+NFNL_SUBSYS_CTNETLINK = 1
+IPCTNL_MSG_CT_NEW = (NFNL_SUBSYS_CTNETLINK << 8) | 0
+CTA_TUPLE_ORIG = 1
+CTA_TUPLE_IP = 1
+CTA_TUPLE_PROTO = 2
+CTA_IP_V4_SRC = 1
+CTA_IP_V4_DST = 2
+CTA_PROTO_NUM = 1
+CTA_PROTO_ICMP_ID = 4
+CTA_PROTO_ICMP_TYPE = 5
+CTA_PROTO_ICMP_CODE = 6
 
 # Well-known TCP port -> protocol label
 _TCP_PORT_MAP: dict[int, str] = {
@@ -182,6 +196,7 @@ def _payload_detail(payload: bytes) -> tuple[str, str]:
 
 _event_queue: queue.Queue = queue.Queue()
 _clients: set = set()
+_recent_icmp_events: dict[tuple[str, str, int, int | None, int | None], float] = {}
 
 
 def _emit_event(
@@ -214,7 +229,42 @@ def _emit_event(
     )
 
 
-def _emit_icmp_event(src_ip: str, dst_ip: str) -> None:
+def _should_emit_icmp_event(
+    src_ip: str,
+    dst_ip: str,
+    icmp_type: int,
+    icmp_code: int | None,
+    icmp_id: int | None,
+) -> bool:
+    now = time.monotonic()
+    stale = [key for key, seen_at in _recent_icmp_events.items() if now - seen_at > 1.0]
+    for key in stale:
+        _recent_icmp_events.pop(key, None)
+
+    key = (src_ip, dst_ip, icmp_type, icmp_code, icmp_id)
+    if key in _recent_icmp_events:
+        return False
+
+    _recent_icmp_events[key] = now
+    return True
+
+
+def _emit_icmp_event(
+    src_ip: str,
+    dst_ip: str,
+    icmp_type: int,
+    icmp_code: int | None = None,
+    icmp_id: int | None = None,
+) -> None:
+    if not _should_emit_icmp_event(src_ip, dst_ip, icmp_type, icmp_code, icmp_id):
+        return
+
+    detail = "ICMP traffic"
+    if icmp_type == ICMP_ECHO_REQUEST:
+        detail = "ICMP echo request"
+    elif icmp_type == ICMP_ECHO_REPLY:
+        detail = "ICMP echo reply"
+
     event = {
         "id": str(uuid.uuid4()),
         "ts": time.time(),
@@ -226,10 +276,14 @@ def _emit_icmp_event(src_ip: str, dst_ip: str) -> None:
         "type": "icmp",
         "proto": "ICMP",
         "port": 0,
-        "detail": "ICMP echo request",
+        "detail": detail,
     }
     _event_queue.put(event)
-    print(f"[event] {'icmp':<16} {event['src']} ({src_ip}) -> {event['dst']} ({dst_ip}) echo request", flush=True)
+    print(
+        f"[event] {'icmp':<16} {event['src']} ({src_ip}) -> "
+        f"{event['dst']} ({dst_ip}) type={icmp_type}",
+        flush=True,
+    )
 
 
 def _emit_udp_event(src_ip: str, dst_ip: str, src_port: int, dst_port: int, payload: bytes) -> None:
@@ -278,6 +332,105 @@ async def _broadcast_loop() -> None:
         _clients.difference_update(dead)
 
 
+def _align_netlink(length: int) -> int:
+    return (length + 3) & ~3
+
+
+def _iter_netlink_messages(data: bytes):
+    offset = 0
+    while offset + 16 <= len(data):
+        msg_len, msg_type, _flags, _seq, _pid = struct.unpack_from("IHHII", data, offset)
+        if msg_len < 16 or offset + msg_len > len(data):
+            break
+        yield msg_type, data[offset + 16 : offset + msg_len]
+        offset += _align_netlink(msg_len)
+
+
+def _parse_netfilter_attrs(data: bytes) -> dict[int, bytes]:
+    attrs: dict[int, bytes] = {}
+    offset = 0
+    while offset + 4 <= len(data):
+        attr_len, attr_type = struct.unpack_from("HH", data, offset)
+        if attr_len < 4 or offset + attr_len > len(data):
+            break
+        attrs[attr_type & 0x3FFF] = data[offset + 4 : offset + attr_len]
+        offset += _align_netlink(attr_len)
+    return attrs
+
+
+def _parse_conntrack_icmp_event(message: bytes) -> tuple[str, str, int, int | None, int | None] | None:
+    if len(message) < 4:
+        return None
+
+    attrs = _parse_netfilter_attrs(message[4:])
+    tuple_orig = attrs.get(CTA_TUPLE_ORIG)
+    if not tuple_orig:
+        return None
+
+    tuple_attrs = _parse_netfilter_attrs(tuple_orig)
+    ip_attrs = _parse_netfilter_attrs(tuple_attrs.get(CTA_TUPLE_IP, b""))
+    proto_attrs = _parse_netfilter_attrs(tuple_attrs.get(CTA_TUPLE_PROTO, b""))
+
+    src_raw = ip_attrs.get(CTA_IP_V4_SRC)
+    dst_raw = ip_attrs.get(CTA_IP_V4_DST)
+    proto_raw = proto_attrs.get(CTA_PROTO_NUM)
+    if not src_raw or not dst_raw or not proto_raw or proto_raw[0] != socket.IPPROTO_ICMP:
+        return None
+
+    type_raw = proto_attrs.get(CTA_PROTO_ICMP_TYPE)
+    if not type_raw:
+        return None
+
+    code_raw = proto_attrs.get(CTA_PROTO_ICMP_CODE)
+    id_raw = proto_attrs.get(CTA_PROTO_ICMP_ID)
+
+    src_ip = socket.inet_ntoa(src_raw[:4])
+    dst_ip = socket.inet_ntoa(dst_raw[:4])
+    icmp_type = type_raw[0]
+    icmp_code = code_raw[0] if code_raw else None
+    icmp_id = struct.unpack("!H", id_raw[:2])[0] if id_raw and len(id_raw) >= 2 else None
+    return src_ip, dst_ip, icmp_type, icmp_code, icmp_id
+
+
+async def _icmp_conntrack_loop(stop_event: asyncio.Event) -> None:
+    if not hasattr(socket, "AF_NETLINK"):
+        print("[firewall] ICMP conntrack capture is not supported on this platform", flush=True)
+        return
+
+    try:
+        netlink_sock = socket.socket(socket.AF_NETLINK, socket.SOCK_RAW, NETLINK_NETFILTER)
+        netlink_sock.bind((0, NFNLGRP_CONNTRACK_NEW))
+    except OSError as exc:
+        print(f"[firewall] WARNING: ICMP conntrack capture disabled: {exc}", flush=True)
+        return
+
+    netlink_sock.settimeout(0.5)
+    print("[firewall] ICMP conntrack capture enabled", flush=True)
+
+    try:
+        while not stop_event.is_set():
+            try:
+                data = await asyncio.to_thread(netlink_sock.recv, BUFFER_SIZE)
+            except socket.timeout:
+                continue
+            except OSError as exc:
+                if not stop_event.is_set():
+                    print(f"[firewall] WARNING: ICMP conntrack capture failed: {exc}", flush=True)
+                break
+
+            for msg_type, message in _iter_netlink_messages(data):
+                if msg_type != IPCTNL_MSG_CT_NEW:
+                    continue
+                parsed = _parse_conntrack_icmp_event(message)
+                if not parsed:
+                    continue
+                src_ip, dst_ip, icmp_type, icmp_code, icmp_id = parsed
+                if _in_ctf_network(src_ip) and _in_ctf_network(dst_ip):
+                    _emit_icmp_event(src_ip, dst_ip, icmp_type, icmp_code, icmp_id)
+    finally:
+        netlink_sock.close()
+
+
 async def _icmp_sniff_loop(stop_event: asyncio.Event) -> None:
     if not hasattr(socket, "AF_PACKET"):
         print("[firewall] ICMP activity capture is not supported on this platform", flush=True)
@@ -317,13 +470,18 @@ async def _icmp_sniff_loop(stop_event: asyncio.Event) -> None:
 
             ihl = (frame[ip_offset] & 0x0F) * 4
             icmp_offset = ip_offset + ihl
-            if len(frame) <= icmp_offset or frame[icmp_offset] != ICMP_ECHO_REQUEST:
+            if len(frame) <= icmp_offset:
                 continue
+            icmp_type = frame[icmp_offset]
+            icmp_code = frame[icmp_offset + 1] if len(frame) > icmp_offset + 1 else None
+            icmp_id = None
+            if icmp_type in {ICMP_ECHO_REQUEST, ICMP_ECHO_REPLY} and len(frame) >= icmp_offset + 8:
+                icmp_id = struct.unpack_from("!H", frame, icmp_offset + 4)[0]
 
             src_ip = socket.inet_ntoa(frame[ip_offset + 12 : ip_offset + 16])
             dst_ip = socket.inet_ntoa(frame[ip_offset + 16 : ip_offset + 20])
             if _in_ctf_network(src_ip) and _in_ctf_network(dst_ip):
-                _emit_icmp_event(src_ip, dst_ip)
+                _emit_icmp_event(src_ip, dst_ip, icmp_type, icmp_code, icmp_id)
     finally:
         raw_sock.close()
 
@@ -489,7 +647,8 @@ async def main() -> None:
     proxy = await asyncio.start_server(_handle_client, "0.0.0.0", PROXY_PORT)
     ws_server = await websockets.serve(_ws_handler, "0.0.0.0", WS_PORT)
     broadcast_task = asyncio.create_task(_broadcast_loop())
-    icmp_task = asyncio.create_task(_icmp_sniff_loop(stop_event))
+    icmp_conntrack_task = asyncio.create_task(_icmp_conntrack_loop(stop_event))
+    icmp_sniff_task = asyncio.create_task(_icmp_sniff_loop(stop_event))
     udp_task = asyncio.create_task(_udp_sniff_loop(stop_event))
 
     print(f"[firewall] Transparent proxy listening on 0.0.0.0:{PROXY_PORT}", flush=True)
@@ -501,11 +660,18 @@ async def main() -> None:
         proxy.close()
         ws_server.close()
         broadcast_task.cancel()
-        icmp_task.cancel()
+        icmp_conntrack_task.cancel()
+        icmp_sniff_task.cancel()
         udp_task.cancel()
         await proxy.wait_closed()
         await ws_server.wait_closed()
-        await asyncio.gather(broadcast_task, icmp_task, udp_task, return_exceptions=True)
+        await asyncio.gather(
+            broadcast_task,
+            icmp_conntrack_task,
+            icmp_sniff_task,
+            udp_task,
+            return_exceptions=True,
+        )
         remove_redirect_rule()
 
 
