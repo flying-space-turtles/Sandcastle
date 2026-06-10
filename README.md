@@ -17,10 +17,11 @@ flag submission, SLA scoring, or a scoreboard.
 
 | Component | Purpose | Current status |
 |---|---|---|
-| `scripts/` | Generate and manage team infrastructure | Works, but app startup is still manual |
+| `config/arena.env` | Canonical topology and runtime defaults | Implemented and validated by setup |
+| `scripts/arena.sh` | Complete arena lifecycle and health contract | Implemented |
 | `teamN-ssh` | Host-facing team gateway | Implemented |
 | `teamN-vuln` | Mutable Linux machine with service source and Docker CLI | Implemented |
-| `teamN-vuln-app` | Per-team vulnerable Flask service | Generated separately; not started by `start.sh` |
+| `teamN-vuln-app` | Per-team vulnerable Flask service | Generated, started, and health-checked automatically |
 | `services/example-vuln` | TurtleNotes challenge template and exploits | Implemented |
 | `bot/` | Scripted action/planner runtime and local control API | Offensive path works; watchdog is currently ineffective |
 | `firewall/` | Source-masking proxy and WebSocket activity feed | Linux-host dependent and not yet fail-safe |
@@ -84,97 +85,77 @@ The TSV columns are `status`, `check_id`, `message`, and `remediation`.
 The doctor never starts, stops, creates, deletes, or reconfigures arena
 resources.
 
+## Arena Configuration
+
+Edit [`config/arena.env`](config/arena.env) to change the arena topology. It is
+the canonical source for team count, network, service and host ports,
+credentials, startup timeout, bot defaults, and future round defaults.
+
+Keep it as simple `KEY=VALUE` entries. `scripts/setup.sh` validates the values
+and rejects port collisions, unsupported subnet layouts, missing templates,
+and incomplete required fields.
+
+`./scripts/setup.sh --teams N` is a convenience that persists
+`ARENA_TEAM_COUNT=N` before generation. Other topology changes should be made
+directly in the config file.
+
 ## Quick Start
 
-The following starts a fresh four-team prototype.
+The following starts the configured prototype.
 
-### 1. Generate Team Workspaces
-
-```bash
-./scripts/setup.sh --teams 4
-```
-
-This writes the generated root `docker-compose.yml` and creates:
-
-```text
-teams/generated/team1/example-vuln
-teams/generated/team2/example-vuln
-teams/generated/team3/example-vuln
-teams/generated/team4/example-vuln
-```
-
-Do not edit the root `docker-compose.yml` directly. Change
-`scripts/setup.sh`, then regenerate it.
-
-Existing team service copies are preserved so patches are not lost. To replace
-all generated copies with the canonical template:
+### 1. Start The Complete Arena
 
 ```bash
-./scripts/setup.sh --teams 4 --overwrite-services
+./scripts/arena.sh up
 ```
 
-`--overwrite-services` deletes generated team patches. Use it only for a fresh
-or intentionally reset arena.
-
-### 2. Start The Infrastructure
+To persist and start a different team count:
 
 ```bash
-./scripts/start.sh
-docker compose ps
+./scripts/arena.sh up --teams 2
 ```
 
-This starts:
+`up` performs the complete organizer lifecycle:
 
-- `teamN-ssh` at `10.10.N.2`
-- `teamN-vuln` at `10.10.N.3`
-- `sandcastle-firewall`
+- validates `config/arena.env` and generated workspaces
+- reconciles stale containers outside the configured topology
+- generates `docker-compose.yml` and per-team app Compose files
+- builds and starts gateways, vulnerable machines, and the firewall
+- removes stale app containers before attaching them to current parent
+  containers
+- builds and starts every `teamN-vuln-app`
+- waits up to `ARENA_STARTUP_TIMEOUT_SECONDS` for every app `/health`
 
-It does not currently start `teamN-vuln-app`.
+Startup exits non-zero if infrastructure or any required app is not healthy.
+Override the timeout for one run with `--timeout SEC`.
 
-### 3. Start Every Vulnerable App
-
-Until the lifecycle work in SC-003 is implemented, start each generated app
-from its vulnerable machine:
+### 2. Inspect Status
 
 ```bash
-for team in 1 2 3 4; do
-  docker exec "team${team}-vuln" bash -lc \
-    "cd /home/team${team}/example-vuln && docker compose up -d --build --force-recreate"
-done
+./scripts/arena.sh status
 ```
 
-`--force-recreate` avoids stale app containers that still reference an older
-`teamN-vuln` network namespace.
-
-### 4. Verify The Arena
+Status reports each gateway, vulnerable machine, app container, active app
+health result, and the firewall. It exits non-zero when the arena is not fully
+ready. For automation:
 
 ```bash
-for team in 1 2 3 4; do
-  docker exec "team${team}-vuln" \
-    curl -fsS "http://team${team}-vuln:8080/health"
-  echo
-done
+./scripts/arena.sh status --format tsv
 ```
 
-Each request should return:
+### Generation And Patch Preservation
 
-```json
-{"status":"ok"}
-```
+`arena.sh up` calls `scripts/setup.sh`. Marked generated workspaces preserve
+existing patches and repair missing required files. Unmarked directories are
+treated as participant-owned and setup refuses to rewrite them.
 
-Check app containers:
-
-```bash
-docker ps --filter label=sandcastle.role=vuln-app \
-  --format 'table {{.Names}}\t{{.Status}}'
-```
-
-At this point the services can attack each other, but there is no gameserver or
-score calculation.
+To intentionally replace configured service copies from the canonical
+template, use `./scripts/setup.sh --overwrite-services`. This is destructive to
+team patches and prints an explicit warning.
 
 ## Team Access And Patching
 
-Each team has:
+With the default configuration, each team has:
 
 | Team | Gateway | Vulnerable machine/app | Host SSH port | Credentials |
 |---|---|---|---:|---|
@@ -203,11 +184,11 @@ sandcastle_teamN-data
 
 ## Run A Bot
 
-Bots run inside `teamN-ssh` and attack from that team's network identity.
-Start all vulnerable apps first.
+Bots run inside `teamN-ssh` and attack from that team's network identity. Run
+`./scripts/arena.sh up` first.
 
 ```bash
-NUM_TEAMS=4 ./bot/deploy.sh \
+./bot/deploy.sh \
   --actions recon.health,exploit.path_traversal,exploit.cmdi,exploit.sqli \
   --planner recon_first \
   2
@@ -216,7 +197,7 @@ NUM_TEAMS=4 ./bot/deploy.sh \
 Inspect status and logs:
 
 ```bash
-NUM_TEAMS=4 ./bot/deploy.sh --status
+./bot/deploy.sh --status
 ./bot/deploy.sh --logs 2
 ```
 
@@ -253,12 +234,13 @@ npm run dev
 Open `http://localhost:5173`.
 
 The topology view parses the generated Compose file. It is not an authoritative
-view of running container health. The Bot view uses
-`http://localhost:7878`.
+view of running container health. The Bot view and firewall feed use the host
+and ports in `config/arena.env`.
 
 ## Firewall And Activity Feed
 
-The firewall container exposes a WebSocket feed at:
+With the default configuration, the firewall container exposes a WebSocket
+feed at:
 
 ```text
 ws://localhost:6789
@@ -277,19 +259,29 @@ packet counter increased. A zero counter means source masking and TCP activity
 events are not active even if the firewall container reports healthy. This is a
 known P0 issue tracked as SC-004.
 
-## Stop, Reset, And Clean Up
+## Lifecycle Semantics
 
-Stop infrastructure and app containers while preserving named data volumes:
-
-```bash
-./scripts/stop.sh
-```
-
-Rebuild and restart after deleting app data volumes:
+Stop all app and infrastructure containers while preserving source patches and
+named app data volumes:
 
 ```bash
-./scripts/reset.sh
+./scripts/arena.sh down
 ```
+
+Recreate the entire running topology while preserving source and app data:
+
+```bash
+./scripts/arena.sh restart
+```
+
+Delete vulnerable-app data volumes, preserve source patches, and start clean:
+
+```bash
+./scripts/arena.sh reset
+```
+
+`scripts/start.sh`, `scripts/stop.sh`, and `scripts/reset.sh` remain
+compatibility wrappers for `arena.sh up`, `down`, and `reset`.
 
 Remove all Sandcastle containers, networks, volumes, and images:
 
@@ -323,32 +315,38 @@ world-writable.
 
 ### App fails with `joining network namespace ... No such container`
 
-The app container references an old `teamN-vuln` container. Recreate it:
+The app container references an old `teamN-vuln` container. Recreate the full
+topology:
 
 ```bash
-docker exec team1-vuln bash -lc \
-  'cd /home/team1/example-vuln && docker compose up -d --build --force-recreate'
+./scripts/arena.sh restart
 ```
 
 ### Generated team directory exists but is empty
 
-For a disposable arena, restore all generated service copies:
+For a marked generated workspace, rerun setup to restore missing required
+files while preserving existing files:
 
 ```bash
-./scripts/setup.sh --teams 4 --overwrite-services
+./scripts/setup.sh
 ```
 
-This removes generated patches.
+If the directory is unmarked, inspect it first. To intentionally discard its
+contents and replace it from the template:
+
+```bash
+./scripts/setup.sh --overwrite-services
+```
+
+This is destructive and prints an explicit warning.
 
 ### Old teams still run after reducing team count
 
-The current start path does not reliably remove orphans. For a disposable local
-arena:
+The standard lifecycle reconciles stale containers when starting the requested
+topology:
 
 ```bash
-./scripts/cleanup.sh --keep-images
-./scripts/setup.sh --teams 4
-./scripts/start.sh
+./scripts/arena.sh up --teams 4
 ```
 
 ### Firewall UI connects but shows no traffic
@@ -362,6 +360,7 @@ alone does not prove bridge traffic is being intercepted.
 .
 ├── VISION.md
 ├── README.md
+├── config/arena.env                # canonical arena configuration
 ├── docker-compose.yml              # generated topology
 ├── bot/                            # team bot runtime and local bridge
 ├── context/context.md              # broad original A&D design notes
@@ -373,6 +372,7 @@ alone does not prove bridge traffic is being intercepted.
 │   └── PROJECT_AUDIT_AND_BACKLOG.md
 ├── firewall/
 ├── scripts/
+│   └── arena.sh                    # organizer lifecycle entry point
 ├── services/
 │   └── example-vuln/
 ├── teams/generated/                # ignored mutable team copies
@@ -384,6 +384,8 @@ alone does not prove bridge traffic is being intercepted.
 ```bash
 bash -n scripts/*.sh bot/*.sh
 ./tests/doctor_test.sh
+./tests/setup_test.sh
+./tests/arena_test.sh
 python3 -B -m py_compile \
   scripts/gen_compose.py \
   bot/*.py bot/bot_lib/*.py \

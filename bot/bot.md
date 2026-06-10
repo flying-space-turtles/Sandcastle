@@ -31,7 +31,7 @@ planner without changing deploy or the visualizer flow.
 Start the platform, then start the local bot bridge:
 
 ```bash
-./scripts/start.sh
+./scripts/arena.sh up
 python3 bot/bot_api.py
 ```
 
@@ -43,7 +43,8 @@ In the visualizer, open `Bot`:
 4. Select the team containers where the bot should run.
 5. Deploy.
 
-The bridge listens on `http://localhost:7878` and only shells out to
+The bridge address, team count, service port, IP pattern, and default loop
+interval come from `config/arena.env`. The bridge only shells out to
 `bot/deploy.sh`.
 
 ## CLI Quickstart
@@ -71,9 +72,11 @@ Useful environment overrides:
 
 | Variable | Default | Description |
 |---|---:|---|
-| `NUM_TEAMS` | `4` | Total teams visible to the bot |
-| `LOOP_INTERVAL` | `60` | Seconds between rounds |
+| `LOOP_INTERVAL` | `ARENA_BOT_LOOP_SECONDS` | Seconds between rounds |
 | `WATCHDOG` | `false` | Run the maintenance watchdog before each round |
+
+Topology-bound bot defaults are loaded from the canonical arena config, which
+`deploy.sh` also copies into each target container.
 
 ## Built-In Actions
 

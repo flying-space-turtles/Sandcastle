@@ -8,6 +8,10 @@ target product and `PROJECT_AUDIT_AND_BACKLOG.md` for the implementation plan.
 
 ## Topology
 
+The topology values below show the committed defaults. Canonical values live
+in `../config/arena.env`; `scripts/setup.sh` validates them and regenerates the
+root and per-team Compose files.
+
 ```text
 ctf-network (bridge, 10.10.0.0/16)
 
@@ -44,7 +48,8 @@ tracked as SC-004.
 
 ## Generated Services
 
-`scripts/setup.sh` is the source of truth for generated team directories and
+`config/arena.env` is the source of truth for arena values.
+`scripts/setup.sh` owns how those values become generated team directories and
 `docker-compose.yml`. The generated file contains:
 
 - one `team<N>-vuln` machine per team built from `docker/vuln/Dockerfile`
@@ -56,9 +61,14 @@ tracked as SC-004.
 
 No gameserver or scoreboard is generated in this iteration.
 
-The generated root Compose starts the SSH gateways, vulnerable machines, and
-firewall. Each `team<N>-vuln-app` is managed by the nested Compose file in its
-generated workspace and is not currently started by `scripts/start.sh`.
+The generated root Compose defines SSH gateways, vulnerable machines, and the
+firewall. Each `team<N>-vuln-app` remains a nested Compose project so teams can
+rebuild their own patched source.
+
+`scripts/arena.sh up` is the organizer lifecycle. It starts the root project,
+waits for parent machines, removes any old app containers that reference stale
+parent container IDs, starts every nested app project with forced recreation,
+and waits for active `/health` checks.
 
 ## Vulnerable App Slot Contract
 
@@ -69,7 +79,17 @@ the selected template into ignored generated workspaces, so teams can SSH from
 container is named `team<N>-vuln-app`, shares the `team<N>-vuln` network
 namespace, gets `TEAM_ID`, `TEAM_NAME`, `SERVICE_PORT`, and `SECRET_KEY`, uses
 `sandcastle_team<N>-data` for `/app/data`, and is reachable at
-`10.10.<N>.3:8080`.
+the configured team service IP and port.
+
+Marked generated workspaces are repairable and preserve existing files.
+Unmarked directories are participant-owned and are rejected unless the
+operator explicitly selects destructive overwrite. Reducing team count also
+requires explicit handling of stale higher-numbered containers.
+
+`arena.sh down` removes containers but preserves source and named app data.
+`arena.sh restart` applies the same preservation before startup.
+`arena.sh reset` additionally removes `sandcastle_team<N>-data` volumes while
+preserving the generated source tree.
 
 ## Iteration Path
 

@@ -137,8 +137,30 @@ make_fixture() {
 
     mkdir -p \
         "${fixture}/bot" \
-        "${fixture}/scripts" \
+        "${fixture}/config" \
+        "${fixture}/scripts/lib" \
+        "${fixture}/services/example-vuln" \
         "${fixture}/teams/generated/team1/example-vuln/app"
+
+    cp "${ROOT}/scripts/lib/arena_config.sh" "${fixture}/scripts/lib/arena_config.sh"
+    cat > "${fixture}/config/arena.env" <<'EOF'
+ARENA_TEAM_COUNT=1
+ARENA_CTF_SUBNET=10.10.0.0/16
+ARENA_CTF_GATEWAY=10.10.0.1
+ARENA_SSH_BASE_PORT=2200
+ARENA_SERVICE_PORT=8080
+ARENA_TEAM_USERNAME_PATTERN=team{team}
+ARENA_TEAM_PASSWORD_PATTERN=team{team}pass
+ARENA_SERVICE_TEMPLATE=services/example-vuln
+ARENA_FIREWALL_WS_PORT=6789
+ARENA_FIREWALL_PROXY_PORT=15000
+ARENA_BOT_API_HOST=127.0.0.1
+ARENA_BOT_API_PORT=7878
+ARENA_BOT_LOOP_SECONDS=60
+ARENA_STARTUP_TIMEOUT_SECONDS=120
+ARENA_ROUND_DURATION_SECONDS=120
+ARENA_FLAG_EXPIRY_ROUNDS=5
+EOF
 
     cat > "${fixture}/docker-compose.yml" <<'EOF'
 name: sandcastle
@@ -208,6 +230,13 @@ firewall_fixture="${TMP_ROOT}/firewall-zero"
 make_fixture "${firewall_fixture}" complete
 firewall_output="$(run_doctor "${firewall_fixture}" firewall-zero)"
 assert_status "${firewall_output}" WARN firewall.traffic
+
+invalid_fixture="${TMP_ROOT}/invalid-config"
+make_fixture "${invalid_fixture}" complete
+sed -i '/^ARENA_SERVICE_PORT=/d' "${invalid_fixture}/config/arena.env"
+invalid_output="$(run_doctor "${invalid_fixture}" empty)"
+assert_status "${invalid_output}" FAIL arena.config
+assert_status "${invalid_output}" WARN bot.api
 
 ready_fixture="${TMP_ROOT}/ready"
 make_fixture "${ready_fixture}" complete

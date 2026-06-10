@@ -21,6 +21,7 @@ Implemented:
 
 - generated per-team SSH gateways and vulnerable Linux machines
 - mutable per-team copies of a vulnerable Flask service
+- idempotent full-arena startup, status, restart, and reset lifecycle
 - scripted bot actions and planner interfaces
 - a topology/bot visualizer
 - a firewall/activity-feed prototype
@@ -28,7 +29,6 @@ Implemented:
 Missing:
 
 - gameserver, rounds, checkers, submissions, scoring, and scoreboard
-- deterministic full-arena startup and health verification
 - proven firewall enforcement on every supported host
 - safe isolation for untrusted agents or participants
 
@@ -37,8 +37,12 @@ Do not describe the project as a complete arena until the MVP exit criteria in
 
 ## Source Boundaries
 
-- `scripts/setup.sh` is the source of truth for generated team directories and
-  the root `docker-compose.yml`.
+- `config/arena.env` is the source of truth for team count, network, topology
+  ports, credentials, bot defaults, and future round defaults.
+- `scripts/setup.sh` validates that config and owns generated team directories
+  plus the root `docker-compose.yml`.
+- `scripts/arena.sh` is the organizer lifecycle entry point and owns runtime
+  reconciliation and health waits.
 - Do not edit generated `docker-compose.yml` as the canonical implementation.
 - Canonical service templates live under `services/`.
 - Mutable generated copies live under
@@ -48,14 +52,15 @@ Do not describe the project as a complete arena until the MVP exit criteria in
 
 ## Current Runtime Model
 
-Each team has:
+With the default `config/arena.env`, each team has:
 
 - `team<N>-ssh` at `10.10.<N>.2`, exposed on host port `2200 + N`
 - `team<N>-vuln` at `10.10.<N>.3`
-- `team<N>-vuln-app`, started through nested Compose from
-  `team<N>-vuln`
+- `team<N>-vuln-app`, managed by nested Compose and attached to the
+  `team<N>-vuln` network namespace
 
-Credentials are currently `team<N>` / `team<N>pass`.
+Credentials are generated from the username and password patterns in
+`config/arena.env`.
 
 Important capability boundary:
 
@@ -70,10 +75,12 @@ fix. Follow SC-013 and the threat-model tasks.
 
 ## Known Runtime Risks
 
-- `start.sh` starts infrastructure but not the vulnerable app containers.
-- Existing app containers can retain a stale parent network namespace.
-- Empty generated directories can be mistaken for complete workspaces.
-- Old team containers can remain as orphans after topology changes.
+- App containers use `network_mode: container:team<N>-vuln`; lifecycle code
+  must remove stale app containers before parent reattachment.
+- Unmarked directories under `teams/generated/` are participant-owned and
+  setup refuses to rewrite them without `--overwrite-services`.
+- Setup repairs partial marked workspaces and blocks stale team containers
+  unless removal or retention is explicitly selected.
 - Firewall container health does not prove its redirect rule receives traffic.
 
 When a task touches these areas, add a behavioral test rather than relying only
@@ -97,6 +104,8 @@ Run the focused tests for the change plus the relevant baseline:
 ```bash
 bash -n scripts/*.sh bot/*.sh
 ./tests/doctor_test.sh
+./tests/setup_test.sh
+./tests/arena_test.sh
 python3 -B -m py_compile \
   scripts/gen_compose.py \
   bot/*.py bot/bot_lib/*.py \

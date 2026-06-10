@@ -158,6 +158,9 @@ bash -n scripts/doctor.sh
 
 **Dependencies:** SC-001
 
+**Status:** Implemented on 2026-06-10 with canonical configuration in
+`config/arena.env` and fixture-driven coverage in `tests/setup_test.sh`.
+
 **Agent prompt**
 
 > Replace scattered team-count, port, subnet, credential, and round defaults
@@ -192,6 +195,9 @@ git diff --check
 **Linear:** P0 / `infra`, `lifecycle`, `services`
 
 **Dependencies:** SC-002
+
+**Status:** Implemented on 2026-06-10 in `scripts/arena.sh`, with lifecycle
+coverage in `tests/arena_test.sh`.
 
 **Agent prompt**
 

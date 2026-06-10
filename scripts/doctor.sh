@@ -19,13 +19,18 @@ DOCKER_CLI=0
 DOCKER_DAEMON=0
 DOCKER_COMPOSE=0
 RUNTIME_ACTIVE=0
+CONFIG_LOADED=0
 DESIRED_SUBNET=""
+COMPOSE_SUBNET=""
 
 declare -a CONFIGURED_IDS=()
 declare -a SSH_IDS=()
 declare -a VULN_IDS=()
 declare -A CONTAINER_STATE=()
 declare -A REQUIRED_PORT_OWNER=()
+
+# shellcheck source=scripts/lib/arena_config.sh
+source "${ROOT}/scripts/lib/arena_config.sh"
 
 usage() {
     cat <<'EOF'
@@ -175,6 +180,21 @@ raise SystemExit(0 if left.overlaps(right) else 1)
 ' "${first}" "${second}" >/dev/null 2>&1
 }
 
+check_arena_configuration() {
+    ARENA_CONFIG_SILENT=1
+    if arena_config_load "${ROOT}"; then
+        CONFIG_LOADED=1
+        DESIRED_SUBNET="${ARENA_CTF_SUBNET}"
+        report PASS arena.config \
+            "Loaded canonical configuration from ${ARENA_CONFIG_FILE#${ROOT}/}."
+    else
+        report FAIL arena.config \
+            "Canonical arena configuration is invalid: ${ARENA_CONFIG_ERROR:-unknown error}." \
+            "Fix config/arena.env, then rerun ./scripts/doctor.sh."
+    fi
+    unset ARENA_CONFIG_SILENT
+}
+
 load_compose_metadata() {
     local line current_service=""
     local -a ssh_raw=()
@@ -206,8 +226,8 @@ load_compose_metadata() {
             REQUIRED_PORT_OWNER["${BASH_REMATCH[1]}"]="${current_service}"
         fi
 
-        if [[ -z "${DESIRED_SUBNET}" && "${line}" =~ subnet:[[:space:]]*([^[:space:]#]+) ]]; then
-            DESIRED_SUBNET="${BASH_REMATCH[1]}"
+        if [[ -z "${COMPOSE_SUBNET}" && "${line}" =~ subnet:[[:space:]]*([^[:space:]#]+) ]]; then
+            COMPOSE_SUBNET="${BASH_REMATCH[1]}"
         fi
     done < "${COMPOSE_FILE}"
 
@@ -248,12 +268,25 @@ load_compose_metadata() {
             "Configured ${#CONFIGURED_IDS[@]} contiguous team(s): [${configured_csv}]."
     fi
 
-    if [[ -z "${DESIRED_SUBNET}" ]]; then
+    if ((CONFIG_LOADED)) && ((${#CONFIGURED_IDS[@]} != ARENA_TEAM_COUNT)); then
+        report FAIL compose.config-drift \
+            "Compose has ${#CONFIGURED_IDS[@]} team(s), but config/arena.env requires ${ARENA_TEAM_COUNT}." \
+            "Run ./scripts/setup.sh to regenerate from the canonical configuration."
+    elif ((CONFIG_LOADED)); then
+        report PASS compose.config-drift \
+            "Compose team count matches config/arena.env."
+    fi
+
+    if [[ -z "${COMPOSE_SUBNET}" ]]; then
         report FAIL network.config \
             "No CTF subnet was found in docker-compose.yml." \
-            "Regenerate with ./scripts/setup.sh --teams ${#CONFIGURED_IDS[@]}."
+            "Regenerate with ./scripts/setup.sh."
+    elif ((CONFIG_LOADED)) && [[ "${COMPOSE_SUBNET}" != "${ARENA_CTF_SUBNET}" ]]; then
+        report FAIL network.config \
+            "Compose subnet ${COMPOSE_SUBNET} does not match config/arena.env (${ARENA_CTF_SUBNET})." \
+            "Run ./scripts/setup.sh to regenerate from the canonical configuration."
     else
-        report PASS network.config "Configured CTF subnet is ${DESIRED_SUBNET}."
+        report PASS network.config "Configured CTF subnet is ${COMPOSE_SUBNET}."
     fi
 }
 
@@ -346,16 +379,25 @@ check_required_ports() {
     local -a missing=()
     local -a missing_config=()
     local -a ports=()
-    local port owner state listeners=""
+    local port owner state expected_port listeners=""
 
     for id in "${CONFIGURED_IDS[@]}"; do
         owner="team${id}-ssh"
         if ! printf '%s\n' "${REQUIRED_PORT_OWNER[@]:-}" | grep -Fxq "${owner}"; then
             missing_config+=("${owner}")
+            continue
+        fi
+        if ((CONFIG_LOADED)); then
+            expected_port=$((ARENA_SSH_BASE_PORT + id))
+            if [[ "${REQUIRED_PORT_OWNER[${expected_port}]:-}" != "${owner}" ]]; then
+                missing_config+=("${owner}:expected-${expected_port}")
+            fi
         fi
     done
-    REQUIRED_PORT_OWNER[6789]="sandcastle-firewall"
-    REQUIRED_PORT_OWNER[15000]="sandcastle-firewall"
+    if ((CONFIG_LOADED)); then
+        REQUIRED_PORT_OWNER["${ARENA_FIREWALL_WS_PORT}"]="sandcastle-firewall"
+        REQUIRED_PORT_OWNER["${ARENA_FIREWALL_PROXY_PORT}"]="sandcastle-firewall"
+    fi
     mapfile -t ports < <(printf '%s\n' "${!REQUIRED_PORT_OWNER[@]}" | sort -n)
 
     if ((${#missing_config[@]} > 0)); then
@@ -601,7 +643,7 @@ check_runtime_topology() {
     if ((${#missing[@]} > 0)); then
         report FAIL runtime.topology \
             "Arena infrastructure is partially running: $(join_csv "${missing[@]}")." \
-            "Inspect docker compose ps and docker compose logs, then run ./scripts/start.sh."
+            "Inspect docker compose ps and logs, then run ./scripts/arena.sh restart."
     else
         report PASS runtime.topology "All configured gateways, vulnerable machines, and the firewall are running."
     fi
@@ -635,7 +677,7 @@ check_runtime_docker_access() {
     if ((${#broken[@]} > 0)); then
         report FAIL runtime.docker-access \
             "Vulnerable machines lack required Docker access: $(join_csv "${broken[@]}")." \
-            "Inspect docker/vuln/Dockerfile and generated socket mounts, then rebuild with ./scripts/start.sh."
+            "Inspect docker/vuln/Dockerfile and generated socket mounts, then run ./scripts/arena.sh restart."
     else
         report WARN runtime.docker-access \
             "Running vulnerable machines have host Docker control as required by trusted-local mode." \
@@ -649,6 +691,12 @@ check_app_health() {
     local -a unhealthy=()
 
     ((DOCKER_DAEMON)) || return
+    if ((CONFIG_LOADED == 0)); then
+        report WARN runtime.apps \
+            "App health checks were skipped because the canonical arena configuration is invalid." \
+            "Fix config/arena.env, then rerun ./scripts/doctor.sh."
+        return
+    fi
     if ((RUNTIME_ACTIVE == 0)); then
         report PASS runtime.apps "Arena is stopped; app health checks were skipped."
         return
@@ -663,7 +711,7 @@ check_app_health() {
             continue
         fi
         if ! docker exec "${machine}" \
-            curl -fsS --max-time 3 "http://${machine}:8080/health" \
+            curl -fsS --max-time 3 "http://${machine}:${ARENA_SERVICE_PORT}/health" \
             >/dev/null 2>&1; then
             unhealthy+=("${app}")
         fi
@@ -672,11 +720,11 @@ check_app_health() {
     if ((${#stopped[@]} > 0)); then
         report FAIL runtime.apps \
             "Required vulnerable apps are not running: $(join_csv "${stopped[@]}")." \
-            "Start each generated app with the loop in README.md#start-every-vulnerable-app."
+            "Run ./scripts/arena.sh up to recreate all configured vulnerable apps."
     elif ((${#unhealthy[@]} > 0)); then
         report FAIL runtime.apps \
             "Vulnerable apps failed /health: $(join_csv "${unhealthy[@]}")." \
-            "Inspect each app with docker logs team<N>-vuln-app and recreate it with --force-recreate."
+            "Inspect docker logs team<N>-vuln-app, then run ./scripts/arena.sh restart."
     else
         report PASS runtime.apps "All configured vulnerable apps passed /health."
     fi
@@ -690,7 +738,7 @@ check_firewall() {
         if ((RUNTIME_ACTIVE)); then
             report FAIL firewall.runtime \
                 "The firewall is not running while other arena infrastructure is active." \
-                "Inspect docker compose logs firewall, then run ./scripts/start.sh."
+                "Inspect docker compose logs firewall, then run ./scripts/arena.sh restart."
         else
             report PASS firewall.runtime "Arena is stopped; firewall runtime checks were skipped."
         fi
@@ -744,6 +792,13 @@ check_bot_api() {
     local health_rc=1
     local listeners=""
 
+    if ((CONFIG_LOADED == 0)); then
+        report WARN bot.api \
+            "Bot API checks were skipped because the canonical arena configuration is invalid." \
+            "Fix config/arena.env, then rerun ./scripts/doctor.sh."
+        return
+    fi
+
     command -v python3 >/dev/null 2>&1 || missing+=("python3")
     [[ -f "${ROOT}/bot/bot_api.py" ]] || missing+=("bot/bot_api.py")
     [[ -x "${ROOT}/bot/deploy.sh" ]] || missing+=("executable bot/deploy.sh")
@@ -773,26 +828,28 @@ import sys
 import urllib.request
 
 try:
-    with urllib.request.urlopen("http://127.0.0.1:7878/health", timeout=1) as response:
+    with urllib.request.urlopen(sys.argv[1], timeout=1) as response:
         body = __import__("json").load(response)
         raise SystemExit(0 if response.status == 200 and body.get("ok") is True else 1)
 except Exception:
     raise SystemExit(1)
-' >/dev/null 2>&1; then
+' "http://${ARENA_BOT_API_HOST}:${ARENA_BOT_API_PORT}/health" >/dev/null 2>&1; then
         health_rc=0
     fi
 
     if ((health_rc == 0)); then
-        report PASS bot.api "Bot API is healthy at http://127.0.0.1:7878."
+        report PASS bot.api \
+            "Bot API is healthy at http://${ARENA_BOT_API_HOST}:${ARENA_BOT_API_PORT}."
         return
     fi
 
     if command -v ss >/dev/null 2>&1; then
         listeners="$(ss -H -ltn 2>/dev/null || true)"
     fi
-    if awk '$4 ~ /:7878$/ { found=1 } END { exit !found }' <<< "${listeners}"; then
+    if awk -v port="${ARENA_BOT_API_PORT}" \
+        '$4 ~ (":" port "$") { found=1 } END { exit !found }' <<< "${listeners}"; then
         report WARN bot.api \
-            "Port 7878 is occupied, but the Sandcastle bot API health check failed." \
+            "Port ${ARENA_BOT_API_PORT} is occupied, but the Sandcastle bot API health check failed." \
             "Stop the conflicting process or inspect python3 bot/bot_api.py."
     else
         report PASS bot.api "Bot API is optional and ready to start with python3 bot/bot_api.py."
@@ -806,6 +863,7 @@ main() {
         echo
     fi
 
+    check_arena_configuration
     load_compose_metadata
     check_host_and_docker
     load_container_state
