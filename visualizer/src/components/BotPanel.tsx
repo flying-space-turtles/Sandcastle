@@ -11,10 +11,9 @@ import {
   SlidersHorizontal,
   Terminal,
 } from 'lucide-react';
+import { botApiUrl } from '../data/arenaConfig';
 import type { BotActionOption, BotConfig, BotPlannerOption } from '../types';
 import { DEFAULT_BOT_CONFIG } from '../types';
-
-const API = 'http://localhost:7878';
 
 interface TeamStatus {
   id: number;
@@ -26,6 +25,13 @@ interface TeamStatus {
 interface BotCatalog {
   actions: BotActionOption[];
   planners: BotPlannerOption[];
+}
+
+interface ArenaBotConfig {
+  num_teams: number;
+  service_port: number;
+  ip_pattern: string;
+  ssh_base_port: number;
 }
 
 const FALLBACK_CATALOG: BotCatalog = {
@@ -88,7 +94,7 @@ const FALLBACK_CATALOG: BotCatalog = {
 };
 
 async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
-  const res = await fetch(`${API}${path}`, opts);
+  const res = await fetch(`${botApiUrl}${path}`, opts);
   if (!res.ok) {
     throw new Error(`HTTP ${res.status}`);
   }
@@ -166,19 +172,20 @@ const BotPanel = () => {
 
   const refreshStatus = useCallback(async () => {
     try {
-      const [status, nextCatalog] = await Promise.all([
+      const [status, nextCatalog, arena] = await Promise.all([
         apiFetch<{ teams: TeamStatus[] }>('/status'),
         apiFetch<BotCatalog>('/catalog').catch(() => FALLBACK_CATALOG),
+        apiFetch<ArenaBotConfig>('/arena'),
       ]);
       setTeams(status.teams);
       setCatalog(nextCatalog);
       setApiOnline(true);
-      if (status.teams.length > 0) {
-        setConfig((current) => ({
-          ...current,
-          numTeams: status.teams.length,
-        }));
-      }
+      setConfig((current) => ({
+        ...current,
+        numTeams: arena.num_teams,
+        servicePort: arena.service_port,
+        ipPattern: arena.ip_pattern,
+      }));
     } catch {
       setApiOnline(false);
     }
@@ -246,10 +253,7 @@ const BotPanel = () => {
         actions: config.actions,
         loop_interval: config.loopInterval,
         watchdog: config.actions.includes('maintain.watchdog'),
-        num_teams: config.numTeams,
-        service_port: config.servicePort,
         flag_re: config.flagRe,
-        ip_pattern: config.ipPattern,
         stop_on_success: config.stopOnSuccess,
         timeout: config.timeout,
       };
@@ -372,9 +376,8 @@ const BotPanel = () => {
                   type="number"
                   min={1}
                   value={config.numTeams}
-                  onChange={(event) =>
-                    setConfig((current) => ({ ...current, numTeams: Number(event.target.value) }))
-                  }
+                  readOnly
+                  title="Configured in config/arena.env"
                 />
               </label>
               <label className="bot-field">
@@ -384,9 +387,8 @@ const BotPanel = () => {
                   min={1}
                   max={65535}
                   value={config.servicePort}
-                  onChange={(event) =>
-                    setConfig((current) => ({ ...current, servicePort: Number(event.target.value) }))
-                  }
+                  readOnly
+                  title="Configured in config/arena.env"
                 />
               </label>
               <label className="bot-field">
@@ -403,7 +405,8 @@ const BotPanel = () => {
                 <input
                   type="text"
                   value={config.ipPattern}
-                  onChange={(event) => setConfig((current) => ({ ...current, ipPattern: event.target.value }))}
+                  readOnly
+                  title="Derived from config/arena.env"
                 />
               </label>
               <label className="bot-field bot-field--full">

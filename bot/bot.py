@@ -21,6 +21,7 @@ from collections import defaultdict
 from typing import Any
 
 from bot_lib.actions import ACTION_REGISTRY, WatchdogAction, action_catalog, log_action_result
+from bot_lib.arena import ARENA_DEFAULTS
 from bot_lib.config import BotConfig, load_config_file, merge_config
 from bot_lib.planners import BotTask, load_planner, planner_catalog
 from bot_lib.runtime import BotContext, detect_my_team, err, info, ok, ping_all, ping_team, warn
@@ -32,7 +33,13 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
-    parser.add_argument("--teams", type=int, default=4, metavar="N", help="total number of teams")
+    parser.add_argument(
+        "--teams",
+        type=int,
+        default=ARENA_DEFAULTS.team_count,
+        metavar="N",
+        help="total number of teams from arena configuration",
+    )
     parser.add_argument("--my-team", type=int, default=None, metavar="N", help="override own team ID")
     parser.add_argument("--loop", type=int, default=0, metavar="SEC", help="repeat every SEC seconds")
     parser.add_argument("--watchdog", action="store_true", help="run self watchdog before each round")

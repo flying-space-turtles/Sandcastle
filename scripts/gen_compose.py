@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Compatibility wrapper for the canonical setup script.
 
-`scripts/setup.sh` owns team directory creation, per-team Dockerfiles, service
-copies, and docker-compose.yml generation. This wrapper exists so older CI and
+`scripts/setup.sh` owns validated arena configuration, team directory creation,
+service copies, and docker-compose.yml generation. This wrapper exists so older
 developer commands that call `python3 scripts/gen_compose.py N` still do the
 right thing.
 """

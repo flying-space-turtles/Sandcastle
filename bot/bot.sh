@@ -28,8 +28,16 @@ set -euo pipefail
 
 # ─────────────────────────────── config ────────────────────────────────────
 
-NUM_TEAMS=${NUM_TEAMS:-4}
-SERVICE_PORT=${SERVICE_PORT:-8080}
+ARENA_CONFIG_FILE=${ARENA_CONFIG_FILE:-/tmp/arena.env}
+if [[ -f "${ARENA_CONFIG_FILE}" ]]; then
+    # shellcheck disable=SC1090
+    source "${ARENA_CONFIG_FILE}"
+fi
+
+NUM_TEAMS=${NUM_TEAMS:-${ARENA_TEAM_COUNT:?ARENA_TEAM_COUNT is required}}
+SERVICE_PORT=${SERVICE_PORT:-${ARENA_SERVICE_PORT:?ARENA_SERVICE_PORT is required}}
+CTF_SUBNET=${ARENA_CTF_SUBNET:?ARENA_CTF_SUBNET is required}
+NETWORK_PREFIX="${CTF_SUBNET%.0.0/16}"
 FLAG_REGEX='FLAG\{[0-9a-f]{32}\}'
 
 # Auto-detect own team ID from hostname (e.g. "team3-ssh" → 3).
@@ -57,19 +65,19 @@ log_err()  { echo -e "${RED}[-]${NC} $*" >&2; }
 
 # ─────────────────────────────── service URL ───────────────────────────────
 
-service_url() { echo "http://10.10.${1}.3:${SERVICE_PORT}"; }
+service_url() { echo "http://${NETWORK_PREFIX}.${1}.3:${SERVICE_PORT}"; }
 
 # ─────────────────────────────── ping ──────────────────────────────────────
 
 ping_team() {
-    local ip="10.10.${1}.3"
+    local ip="${NETWORK_PREFIX}.${1}.3"
     ping -c 1 -W 2 "$ip" &>/dev/null
 }
 
 ping_all() {
     log_info "Ping sweep — ${NUM_TEAMS} teams"
     for i in $(seq 1 "$NUM_TEAMS"); do
-        local ip="10.10.${i}.3"
+        local ip="${NETWORK_PREFIX}.${i}.3"
         if ping_team "$i"; then
             echo -e "  team${i}  ${ip}  ${GREEN}UP${NC}"
         else

@@ -25,9 +25,9 @@ import websockets
 
 # Configuration
 
-CTF_NETWORK = ipaddress.ip_network(os.environ.get("CTF_NETWORK", "10.10.0.0/16"))
-WS_PORT = int(os.environ.get("WS_PORT", "6789"))
-PROXY_PORT = int(os.environ.get("PROXY_PORT", "15000"))
+CTF_NETWORK = ipaddress.ip_network(os.environ["CTF_NETWORK"])
+WS_PORT = int(os.environ["WS_PORT"])
+PROXY_PORT = int(os.environ["PROXY_PORT"])
 RULE_COMMENT = "sandcastle-firewall-transparent-proxy"
 SO_ORIGINAL_DST = 80
 BUFFER_SIZE = 64 * 1024
