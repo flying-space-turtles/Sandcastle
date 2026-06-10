@@ -2,8 +2,9 @@
 
 This repository models the container layout for a local Attack & Defense CTF
 and includes a template vulnerable service that is copied into each generated
-team directory. It does not include competition logic such as checkers,
-scoreboards, or scoring.
+team directory. It does not yet include competition logic such as a gameserver,
+checkers, submissions, scoreboards, or scoring. See `../VISION.md` for the
+target product and `PROJECT_AUDIT_AND_BACKLOG.md` for the implementation plan.
 
 ## Topology
 
@@ -33,9 +34,13 @@ ctf-network (bridge, 10.10.0.0/16)
 
 Docker Compose creates the shared bridge network and assigns deterministic IP
 addresses so future checkers, gameservers, and teams can use stable targets.
-All team-to-team TCP traffic is transparently redirected through the firewall,
-so destination services see the firewall's shared source IP while organizers
-still see original endpoints in the activity stream.
+
+The firewall prototype intends to redirect team-to-team TCP traffic through a
+host transparent proxy. This depends on bridge traffic traversing host
+`iptables` PREROUTING. The current implementation does not fail when that host
+capability is absent, so destination source masking and activity events must be
+verified from the redirect rule packet counter. Making this deterministic is
+tracked as SC-004.
 
 ## Generated Services
 
@@ -50,6 +55,10 @@ still see original endpoints in the activity stream.
 - one `firewall` service built from `firewall/Dockerfile`
 
 No gameserver or scoreboard is generated in this iteration.
+
+The generated root Compose starts the SSH gateways, vulnerable machines, and
+firewall. Each `team<N>-vuln-app` is managed by the nested Compose file in its
+generated workspace and is not currently started by `scripts/start.sh`.
 
 ## Vulnerable App Slot Contract
 

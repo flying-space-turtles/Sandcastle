@@ -20,6 +20,12 @@ stable `run(ctx, target_team)` method, and planners produce ordered
 `BotTask(target_team, action_id)` items. A future AI agent can slot in as a
 planner without changing deploy or the visualizer flow.
 
+> Current limitation: bots run in `teamN-ssh`, which does not have Docker CLI,
+> the host Docker socket, or the generated service source. Offensive actions
+> work, but `maintain.watchdog` cannot currently restart the vulnerable machine.
+> The attacker/defender capability split is tracked as SC-013 in
+> `docs/PROJECT_AUDIT_AND_BACKLOG.md`.
+
 ## Visualizer Flow
 
 Start the platform, then start the local bot bridge:
