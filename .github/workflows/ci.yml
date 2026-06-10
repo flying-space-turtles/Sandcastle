@@ -109,10 +109,19 @@ jobs:
       - name: Check executable permissions
         run: |
           status=0
-          for f in scripts/*.sh; do
+          for f in scripts/*.sh tests/*.sh; do
             if [ ! -x "$f" ]; then
               echo "ERROR: $f is not executable"
               status=1
             fi
           done
           exit $status
+
+  doctor-tests:
+    name: Test arena doctor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run fixture-driven doctor tests
+        run: ./tests/doctor_test.sh

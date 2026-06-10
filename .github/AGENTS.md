@@ -96,6 +96,7 @@ Run the focused tests for the change plus the relevant baseline:
 
 ```bash
 bash -n scripts/*.sh bot/*.sh
+./tests/doctor_test.sh
 python3 -B -m py_compile \
   scripts/gen_compose.py \
   bot/*.py bot/bot_lib/*.py \

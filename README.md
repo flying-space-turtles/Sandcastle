@@ -48,6 +48,42 @@ The current trusted-local mode mounts the host Docker socket into every
 `teamN-vuln` container. This is not a security boundary. Do not expose the
 arena to untrusted participants.
 
+## Check Host And Arena Readiness
+
+Run the read-only doctor before setup and whenever the arena behaves
+unexpectedly:
+
+```bash
+./scripts/doctor.sh
+```
+
+The doctor checks:
+
+- native Linux, Docker Engine, Compose, and Docker-socket access
+- required SSH, firewall WebSocket, and proxy ports
+- CTF subnet conflicts
+- generated workspace completeness and team-count consistency
+- running or stopped orphan team containers
+- vulnerable-machine Docker access and vulnerable-app health
+- firewall bridge-netfilter support, redirect rule, and packet counter
+- local bot API prerequisites and health
+
+Results are classified as:
+
+- `PASS`: the check is satisfied
+- `WARN`: trusted-local risk, optional component, or behavior not yet proven
+- `FAIL`: a blocker; the command exits with status `1`
+
+Every warning or failure includes a remediation. For automation:
+
+```bash
+./scripts/doctor.sh --format tsv
+```
+
+The TSV columns are `status`, `check_id`, `message`, and `remediation`.
+The doctor never starts, stops, creates, deletes, or reconfigures arena
+resources.
+
 ## Quick Start
 
 The following starts a fresh four-team prototype.
@@ -271,6 +307,14 @@ Cleanup is destructive to generated runtime data volumes.
 
 ## Common Problems
 
+Start troubleshooting with:
+
+```bash
+./scripts/doctor.sh
+```
+
+Use the stable check ID in each result to identify the failing layer.
+
 ### Permission denied on `/var/run/docker.sock`
 
 Your user cannot access the Docker daemon. Fix Docker permissions for the host
@@ -339,6 +383,7 @@ alone does not prove bridge traffic is being intercepted.
 
 ```bash
 bash -n scripts/*.sh bot/*.sh
+./tests/doctor_test.sh
 python3 -B -m py_compile \
   scripts/gen_compose.py \
   bot/*.py bot/bot_lib/*.py \

@@ -121,6 +121,9 @@ procedural experiments become practical.
 
 **Dependencies:** none
 
+**Status:** Implemented on 2026-06-10 in `scripts/doctor.sh`, with
+fixture-driven coverage in `tests/doctor_test.sh`.
+
 **Agent prompt**
 
 > Implement a read-only `scripts/doctor.sh` that determines whether Sandcastle
