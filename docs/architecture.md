@@ -2,10 +2,15 @@
 
 This repository models the container layout for a local Attack & Defense CTF
 and includes a template vulnerable service that is copied into each generated
-team directory. It does not include competition logic such as checkers,
-scoreboards, or scoring.
+team directory. It does not yet include competition logic such as a gameserver,
+checkers, submissions, scoreboards, or scoring. See `../VISION.md` for the
+target product and `PROJECT_AUDIT_AND_BACKLOG.md` for the implementation plan.
 
 ## Topology
+
+The topology values below show the committed defaults. Canonical values live
+in `../config/arena.env`; `scripts/setup.sh` validates them and regenerates the
+root and per-team Compose files.
 
 ```text
 ctf-network (bridge, 10.10.0.0/16)
@@ -33,13 +38,18 @@ ctf-network (bridge, 10.10.0.0/16)
 
 Docker Compose creates the shared bridge network and assigns deterministic IP
 addresses so future checkers, gameservers, and teams can use stable targets.
-All team-to-team TCP traffic is transparently redirected through the firewall,
-so destination services see the firewall's shared source IP while organizers
-still see original endpoints in the activity stream.
+
+The firewall prototype intends to redirect team-to-team TCP traffic through a
+host transparent proxy. This depends on bridge traffic traversing host
+`iptables` PREROUTING. The current implementation does not fail when that host
+capability is absent, so destination source masking and activity events must be
+verified from the redirect rule packet counter. Making this deterministic is
+tracked as SC-004.
 
 ## Generated Services
 
-`scripts/setup.sh` is the source of truth for generated team directories and
+`config/arena.env` is the source of truth for arena values.
+`scripts/setup.sh` owns how those values become generated team directories and
 `docker-compose.yml`. The generated file contains:
 
 - one `team<N>-vuln` machine per team built from `docker/vuln/Dockerfile`
@@ -51,6 +61,15 @@ still see original endpoints in the activity stream.
 
 No gameserver or scoreboard is generated in this iteration.
 
+The generated root Compose defines SSH gateways, vulnerable machines, and the
+firewall. Each `team<N>-vuln-app` remains a nested Compose project so teams can
+rebuild their own patched source.
+
+`scripts/arena.sh up` is the organizer lifecycle. It starts the root project,
+waits for parent machines, removes any old app containers that reference stale
+parent container IDs, starts every nested app project with forced recreation,
+and waits for active `/health` checks.
+
 ## Vulnerable App Slot Contract
 
 Future vulnerable app templates should be safe to copy per team. Setup copies
@@ -60,7 +79,17 @@ the selected template into ignored generated workspaces, so teams can SSH from
 container is named `team<N>-vuln-app`, shares the `team<N>-vuln` network
 namespace, gets `TEAM_ID`, `TEAM_NAME`, `SERVICE_PORT`, and `SECRET_KEY`, uses
 `sandcastle_team<N>-data` for `/app/data`, and is reachable at
-`10.10.<N>.3:8080`.
+the configured team service IP and port.
+
+Marked generated workspaces are repairable and preserve existing files.
+Unmarked directories are participant-owned and are rejected unless the
+operator explicitly selects destructive overwrite. Reducing team count also
+requires explicit handling of stale higher-numbered containers.
+
+`arena.sh down` removes containers but preserves source and named app data.
+`arena.sh restart` applies the same preservation before startup.
+`arena.sh reset` additionally removes `sandcastle_team<N>-data` volumes while
+preserving the generated source tree.
 
 ## Iteration Path
 

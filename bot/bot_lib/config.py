@@ -6,6 +6,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from .arena import ARENA_DEFAULTS
+
 CONFIG_FILE = "/tmp/bot_config.json"
 
 LEGACY_EXPLOIT_ACTIONS = {
@@ -22,9 +24,13 @@ class BotConfig:
     target_policy: str = "all_opponents"
     target_teams: list[int] = field(default_factory=list)
     actions: list[str] = field(default_factory=lambda: ["recon.health"])
-    service_port: int = field(default_factory=lambda: int(os.environ.get("SERVICE_PORT", "8080")))
+    service_port: int = field(
+        default_factory=lambda: int(os.environ.get("SERVICE_PORT", str(ARENA_DEFAULTS.service_port)))
+    )
     flag_re: str = field(default_factory=lambda: os.environ.get("FLAG_RE", r"FLAG\{[a-f0-9]{32}\}"))
-    ip_pattern: str = field(default_factory=lambda: os.environ.get("IP_PATTERN", "10.10.{team}.3"))
+    ip_pattern: str = field(
+        default_factory=lambda: os.environ.get("IP_PATTERN", ARENA_DEFAULTS.service_ip_pattern)
+    )
     stop_on_success: bool = True
     timeout: int = 6
 

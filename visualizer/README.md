@@ -26,6 +26,9 @@ From there you can create a bot profile, choose actions and a planner, then
 deploy that bot into selected team SSH containers. Deployed bots act on behalf
 of their team from inside the CTF network.
 
+Bot and firewall endpoints, team count, service port, and generated target IPs
+come from the repository root `config/arena.env`.
+
 ## Data Model
 
 The parser normalizes Compose metadata into React Flow nodes and edges:

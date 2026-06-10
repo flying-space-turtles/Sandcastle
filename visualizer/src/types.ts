@@ -1,4 +1,5 @@
 import type { Edge, Node } from 'reactflow';
+import { ARENA_CONFIG } from './data/arenaConfig';
 
 export type Mode = 'editor' | 'yaml' | 'inspector' | 'firewall' | 'bot';
 
@@ -24,11 +25,11 @@ export const DEFAULT_BOT_CONFIG: BotConfig = {
   planner: 'scripted',
   targetPolicy: 'all_opponents',
   targetTeams: [],
-  loopInterval: 60,
-  numTeams: 4,
-  servicePort: 8080,
+  loopInterval: ARENA_CONFIG.botLoopSeconds,
+  numTeams: ARENA_CONFIG.teamCount,
+  servicePort: ARENA_CONFIG.servicePort,
   flagRe: 'FLAG\\{[a-f0-9]{32}\\}',
-  ipPattern: '10.10.{team}.3',
+  ipPattern: ARENA_CONFIG.serviceIpPattern,
   actions: ['recon.health'],
   stopOnSuccess: true,
   timeout: 6,

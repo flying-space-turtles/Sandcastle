@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { firewallWsUrl } from '../data/arenaConfig';
 import type { LiveEvent } from '../types';
 
-const WS_URL = 'ws://localhost:6789';
 const MAX_EVENTS = 200;
 const LIVE_WINDOW_SEC = 30;
 
@@ -41,7 +41,7 @@ export function useNetworkEvents() {
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const connect = useCallback(() => {
-    const ws = new WebSocket(WS_URL);
+    const ws = new WebSocket(firewallWsUrl);
     wsRef.current = ws;
 
     ws.onopen = () => {

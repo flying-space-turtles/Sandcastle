@@ -1,36 +1,56 @@
 #!/usr/bin/env bash
-# Generate a local Sandcastle Attack & Defense scaffold for N teams.
+# Generate a local Sandcastle Attack & Defense scaffold from config/arena.env.
 
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+ROOT="${SANDCASTLE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 TEAMS_DIR="${ROOT}/teams"
 GENERATED_TEAMS_DIR="${TEAMS_DIR}/generated"
-DEFAULT_SERVICE_TEMPLATE="${ROOT}/services/example-vuln"
 COMPOSE_FILE="${ROOT}/docker-compose.yml"
-DEFAULT_TEAMS=3
-MAX_TEAMS=250
-NUM_TEAMS="${DEFAULT_TEAMS}"
-TEMPLATE_DIR="${DEFAULT_SERVICE_TEMPLATE}"
+
+# shellcheck source=scripts/lib/arena_config.sh
+source "${ROOT}/scripts/lib/arena_config.sh"
+
+REQUESTED_TEAM_COUNT=""
+TEMPLATE_OVERRIDE=""
 OVERWRITE_SERVICES=0
 PRUNE_EXTRA_TEAMS=1
+REMOVE_ORPHAN_CONTAINERS=0
+ALLOW_ORPHAN_CONTAINERS=0
+
+declare -a REQUIRED_SERVICE_PATHS=(
+    "Dockerfile"
+    "app/app.py"
+    "app/requirements.txt"
+)
 
 usage() {
-    cat <<EOF
+    cat <<'EOF'
 Usage:
+  ./scripts/setup.sh
   ./scripts/setup.sh --teams N
-  ./scripts/setup.sh -t N
+
+Generate docker-compose.yml and per-team service workspaces from
+config/arena.env. Passing --teams updates ARENA_TEAM_COUNT in that file.
 
 Options:
-  --teams, -t   Number of teams to generate. Defaults to ${DEFAULT_TEAMS}.
-  --template    Service template directory to copy. Defaults to services/example-vuln.
+  --teams, -t N
+                Persist N as ARENA_TEAM_COUNT, then generate N teams.
+  --template DIR
+                Use DIR for this generation instead of ARENA_SERVICE_TEMPLATE.
   --overwrite-services
-                Replace existing teams/generated/team<N>/example-vuln directories with the template.
-  --no-prune    Keep generated teams/generated/team<N> directories above the requested count.
-  --help, -h    Show this help text.
+                Destructively replace every configured generated service copy.
+  --no-prune
+                Keep marked generated team directories above the team count.
+  --remove-orphan-containers
+                Remove stale team containers outside the requested topology.
+  --allow-orphan-containers
+                Generate despite stale team containers, with an explicit warning.
+  --help, -h
+                Show this help text.
 
 Compatibility:
-  ./scripts/setup.sh N  also works for the old positional form.
+  ./scripts/setup.sh N  is equivalent to --teams N.
 EOF
 }
 
@@ -39,30 +59,33 @@ die() {
     exit 1
 }
 
+warn() {
+    echo "[!] $*" >&2
+}
+
 parse_args() {
-    local value=""
     local provided=0
 
     while (($#)); do
         case "$1" in
             --teams|-t)
                 [[ $# -ge 2 ]] || die "$1 requires a value"
-                value="$2"
-                provided=1
+                REQUESTED_TEAM_COUNT="$2"
+                provided=$((provided + 1))
                 shift 2
                 ;;
             --teams=*)
-                value="${1#*=}"
-                provided=1
+                REQUESTED_TEAM_COUNT="${1#*=}"
+                provided=$((provided + 1))
                 shift
                 ;;
             --template)
                 [[ $# -ge 2 ]] || die "$1 requires a value"
-                TEMPLATE_DIR="$2"
+                TEMPLATE_OVERRIDE="$2"
                 shift 2
                 ;;
             --template=*)
-                TEMPLATE_DIR="${1#*=}"
+                TEMPLATE_OVERRIDE="${1#*=}"
                 shift
                 ;;
             --overwrite-services)
@@ -73,14 +96,21 @@ parse_args() {
                 PRUNE_EXTRA_TEAMS=0
                 shift
                 ;;
+            --remove-orphan-containers)
+                REMOVE_ORPHAN_CONTAINERS=1
+                shift
+                ;;
+            --allow-orphan-containers)
+                ALLOW_ORPHAN_CONTAINERS=1
+                shift
+                ;;
             -h|--help)
                 usage
                 exit 0
                 ;;
             [0-9]*)
-                [[ "${provided}" -eq 0 ]] || die "team count provided more than once"
-                value="$1"
-                provided=1
+                REQUESTED_TEAM_COUNT="$1"
+                provided=$((provided + 1))
                 shift
                 ;;
             *)
@@ -89,21 +119,38 @@ parse_args() {
         esac
     done
 
-    if [[ "${provided}" -eq 0 ]]; then
-        value="${DEFAULT_TEAMS}"
+    ((provided <= 1)) || die "team count provided more than once"
+    if ((REMOVE_ORPHAN_CONTAINERS && ALLOW_ORPHAN_CONTAINERS)); then
+        die "--remove-orphan-containers and --allow-orphan-containers are mutually exclusive"
+    fi
+}
+
+validate_requested_team_count() {
+    [[ -n "${REQUESTED_TEAM_COUNT}" ]] || return 0
+    ARENA_TEAM_COUNT="${REQUESTED_TEAM_COUNT}"
+    arena_config_require_int ARENA_TEAM_COUNT 1 250 ||
+        die "invalid --teams value"
+    arena_config_validate_port_layout || die "requested team count conflicts with host ports"
+}
+
+resolve_template() {
+    if [[ -n "${TEMPLATE_OVERRIDE}" ]]; then
+        if [[ "${TEMPLATE_OVERRIDE}" == /* ]]; then
+            ARENA_SERVICE_TEMPLATE_PATH="${TEMPLATE_OVERRIDE}"
+        else
+            ARENA_SERVICE_TEMPLATE_PATH="${ROOT}/${TEMPLATE_OVERRIDE}"
+        fi
     fi
 
-    [[ -n "${value}" ]] || die "team count must be provided"
-    [[ "${value}" =~ ^[0-9]+$ ]] || die "team count must be a positive integer"
-    value="$((10#${value}))"
-    ((value >= 1 && value <= MAX_TEAMS)) || die "team count must be between 1 and ${MAX_TEAMS}"
+    [[ -d "${ARENA_SERVICE_TEMPLATE_PATH}" ]] ||
+        die "missing vulnerable service template: ${ARENA_SERVICE_TEMPLATE_PATH}"
 
-    if [[ "${TEMPLATE_DIR}" != /* ]]; then
-        TEMPLATE_DIR="${ROOT}/${TEMPLATE_DIR}"
-    fi
-    [[ -d "${TEMPLATE_DIR}" ]] || die "missing vulnerable service template: ${TEMPLATE_DIR}"
-
-    NUM_TEAMS="${value}"
+    local required
+    for required in "${REQUIRED_SERVICE_PATHS[@]}"; do
+        if [[ ! -s "${ARENA_SERVICE_TEMPLATE_PATH}/${required}" ]]; then
+            die "service template is incomplete: missing ${required}"
+        fi
+    done
 }
 
 is_generated_team_dir() {
@@ -111,29 +158,76 @@ is_generated_team_dir() {
     [[ -f "${team_dir}/.sandcastle-generated" ]]
 }
 
-prune_extra_teams() {
+service_workspace_complete() {
+    local service_dir="$1"
+    local required
+
+    [[ -d "${service_dir}" ]] || return 1
+    for required in "${REQUIRED_SERVICE_PATHS[@]}"; do
+        [[ -s "${service_dir}/${required}" ]] || return 1
+    done
+}
+
+preflight_team_workspaces() {
     local teams="$1"
-    local team_dir name team_num
+    local i team_dir service_dir
 
-    [[ "${PRUNE_EXTRA_TEAMS}" -eq 1 ]] || return
+    for ((i = 1; i <= teams; i++)); do
+        team_dir="${GENERATED_TEAMS_DIR}/team${i}"
+        service_dir="${team_dir}/example-vuln"
 
-    shopt -s nullglob
-    for team_dir in "${GENERATED_TEAMS_DIR}"/team*; do
-        [[ -d "${team_dir}" ]] || continue
-        name="$(basename "${team_dir}")"
-        [[ "${name}" =~ ^team([0-9]+)$ ]] || continue
-        team_num="${BASH_REMATCH[1]}"
-        team_num="$((10#${team_num}))"
+        if [[ ! -e "${team_dir}" ]]; then
+            continue
+        fi
+        if is_generated_team_dir "${team_dir}"; then
+            continue
+        fi
+        if ((OVERWRITE_SERVICES)); then
+            continue
+        fi
 
-        if ((team_num > teams)); then
-            if is_generated_team_dir "${team_dir}"; then
-                rm -rf "${team_dir}"
-            else
-                echo "[!] Keeping unmarked extra team directory: ${team_dir}" >&2
+        if service_workspace_complete "${service_dir}"; then
+            die "team${i} workspace is participant-owned (unmarked); refusing to rewrite its generated Compose file. Move it outside teams/generated or pass --overwrite-services."
+        fi
+        die "team${i} workspace is incomplete and participant-owned (unmarked). Inspect it, then move it aside or pass --overwrite-services."
+    done
+}
+
+find_orphan_containers() {
+    local teams="$1"
+    local name id
+
+    command -v docker >/dev/null 2>&1 || return
+    docker info >/dev/null 2>&1 || return
+
+    while IFS= read -r name; do
+        if [[ "${name}" =~ ^team([0-9]+)-(ssh|vuln|vuln-app)$ ]]; then
+            id="$((10#${BASH_REMATCH[1]}))"
+            if ((id > teams)); then
+                printf '%s\n' "${name}"
             fi
         fi
-    done
-    shopt -u nullglob
+    done < <(docker ps -a --format '{{.Names}}' 2>/dev/null)
+}
+
+handle_orphan_containers() {
+    local teams="$1"
+    local -a orphans=()
+
+    mapfile -t orphans < <(find_orphan_containers "${teams}" | sort -V)
+    ((${#orphans[@]} > 0)) || return 0
+
+    if ((REMOVE_ORPHAN_CONTAINERS)); then
+        warn "DESTRUCTIVE: removing stale containers outside the ${teams}-team topology: ${orphans[*]}"
+        docker rm -f "${orphans[@]}"
+        return
+    fi
+    if ((ALLOW_ORPHAN_CONTAINERS)); then
+        warn "Continuing with explicitly allowed orphan containers: ${orphans[*]}"
+        return
+    fi
+
+    die "stale team containers exist outside the ${teams}-team topology: ${orphans[*]}. Re-run with --remove-orphan-containers to delete them or --allow-orphan-containers to keep them explicitly."
 }
 
 remove_legacy_generated_teams() {
@@ -145,30 +239,59 @@ remove_legacy_generated_teams() {
         if is_generated_team_dir "${team_dir}"; then
             rm -rf "${team_dir}"
         else
-            echo "[!] Keeping unmarked legacy team directory: ${team_dir}" >&2
+            warn "Keeping participant-owned legacy directory: ${team_dir}"
         fi
     done
     shopt -u nullglob
 }
 
-copy_service_template() {
-    local team_dir="$1"
+prune_extra_teams() {
+    local teams="$1"
+    local team_dir name team_num
+
+    ((PRUNE_EXTRA_TEAMS)) || return
+
+    shopt -s nullglob
+    for team_dir in "${GENERATED_TEAMS_DIR}"/team*; do
+        [[ -d "${team_dir}" ]] || continue
+        name="$(basename "${team_dir}")"
+        [[ "${name}" =~ ^team([0-9]+)$ ]] || continue
+        team_num="$((10#${BASH_REMATCH[1]}))"
+
+        if ((team_num > teams)); then
+            if is_generated_team_dir "${team_dir}"; then
+                rm -rf "${team_dir}"
+            else
+                warn "Keeping participant-owned extra directory: ${team_dir}"
+            fi
+        fi
+    done
+    shopt -u nullglob
+}
+
+prepare_service_workspace() {
+    local team_num="$1"
+    local team_dir="$2"
     local service_dir="${team_dir}/example-vuln"
-    local legacy_service_dir="${team_dir}/service"
 
-    if [[ -d "${legacy_service_dir}" ]]; then
-        rm -rf "${legacy_service_dir}"
+    if ((OVERWRITE_SERVICES)); then
+        warn "DESTRUCTIVE: replacing team${team_num} service workspace from ${ARENA_SERVICE_TEMPLATE_PATH}"
+        rm -rf "${service_dir}"
+        mkdir -p "${service_dir}"
+        cp -a "${ARENA_SERVICE_TEMPLATE_PATH}/." "${service_dir}/"
+    elif [[ ! -d "${service_dir}" ]]; then
+        mkdir -p "${service_dir}"
+        cp -a "${ARENA_SERVICE_TEMPLATE_PATH}/." "${service_dir}/"
+    elif ! service_workspace_complete "${service_dir}"; then
+        warn "Repairing missing files in marked generated workspace team${team_num}; existing files are preserved"
+        cp -an "${ARENA_SERVICE_TEMPLATE_PATH}/." "${service_dir}/"
     fi
 
-    if [[ -d "${service_dir}" && "${OVERWRITE_SERVICES}" -eq 0 ]]; then
-        return
-    fi
+    service_workspace_complete "${service_dir}" ||
+        die "team${team_num} workspace remains incomplete after generation"
 
-    mkdir -p "${service_dir}"
-    if [[ "${OVERWRITE_SERVICES}" -eq 1 ]]; then
-        find "${service_dir}" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-    fi
-    cp -a "${TEMPLATE_DIR}/." "${service_dir}/"
+    printf 'Generated by ./scripts/setup.sh for team%s.\n' "${team_num}" \
+        > "${team_dir}/.sandcastle-generated"
 }
 
 write_team_service_compose() {
@@ -176,11 +299,11 @@ write_team_service_compose() {
     local team_dir="$2"
     local service_dir="${team_dir}/example-vuln"
 
-    mkdir -p "${service_dir}"
     cat > "${service_dir}/docker-compose.yml" <<EOF
 # Generated by scripts/setup.sh for Team ${team_num}.
-# Teams run this from inside team${team_num}-vuln after patching:
-#   cd ~/example-vuln && docker compose up -d --build
+# Source: config/arena.env. Re-run setup instead of editing this file.
+# Organizer lifecycle: ./scripts/arena.sh up
+# Teams may still rebuild their own patched app from inside team${team_num}-vuln.
 
 name: sandcastle-team${team_num}
 
@@ -194,7 +317,7 @@ services:
     environment:
       TEAM_ID: "${team_num}"
       TEAM_NAME: "Team ${team_num}"
-      SERVICE_PORT: "8080"
+      SERVICE_PORT: "${ARENA_SERVICE_PORT}"
       SECRET_KEY: "sandcastle-team${team_num}-dev-secret"
     volumes:
       - team-data:/app/data
@@ -214,30 +337,37 @@ EOF
 
 write_compose() {
     local teams="$1"
+    local i username password
 
     cat > "${COMPOSE_FILE}" <<EOF
-# Auto-generated by ./scripts/setup.sh. Re-run that script instead of editing this file.
-#
-# Local Attack & Defense CTF topology:
-#   - one SSH gateway container per team
-#   - one vulnerable Linux machine per team
-#   - deterministic addresses on 10.10.0.0/16
+# Auto-generated by ./scripts/setup.sh from config/arena.env.
+# Re-run that script instead of editing this file.
 
 name: sandcastle
+
+x-sandcastle-arena:
+  team_count: ${teams}
+  service_port: ${ARENA_SERVICE_PORT}
+  ssh_base_port: ${ARENA_SSH_BASE_PORT}
+  startup_timeout_seconds: ${ARENA_STARTUP_TIMEOUT_SECONDS}
+  round_duration_seconds: ${ARENA_ROUND_DURATION_SECONDS}
+  flag_expiry_rounds: ${ARENA_FLAG_EXPIRY_ROUNDS}
 
 networks:
   ctf-network:
     driver: bridge
     ipam:
       config:
-        - subnet: 10.10.0.0/16
-          gateway: 10.10.0.1
+        - subnet: ${ARENA_CTF_SUBNET}
+          gateway: ${ARENA_CTF_GATEWAY}
 
 services:
 EOF
 
-    local i
     for ((i = 1; i <= teams; i++)); do
+        username="$(arena_config_render_team_value "${ARENA_TEAM_USERNAME_PATTERN}" "${i}")"
+        password="$(arena_config_render_team_value "${ARENA_TEAM_PASSWORD_PATTERN}" "${i}")"
+
         if ((i > 1)); then
             printf '\n' >> "${COMPOSE_FILE}"
         fi
@@ -250,20 +380,23 @@ EOF
       args:
         TEAM_ID: "${i}"
         TEAM_NAME: "team${i}"
-        TEAM_USER: "team${i}"
-        TEAM_PASS: "team${i}pass"
+        TEAM_USER: "${username}"
+        TEAM_PASS: "${password}"
         TEAM_UID: "1000"
     image: sandcastle/team${i}-vuln:latest
     container_name: team${i}-vuln
     hostname: team${i}-vuln
     networks:
       ctf-network:
-        ipv4_address: 10.10.${i}.3
+        ipv4_address: ${ARENA_NETWORK_PREFIX}.${i}.3
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ./teams/generated/team${i}/example-vuln:/home/team${i}/example-vuln
+      - ./teams/generated/team${i}/example-vuln:/home/${username}/example-vuln
     cap_add:
       - NET_ADMIN
+    labels:
+      sandcastle.role: "vuln-machine"
+      sandcastle.team: "team${i}"
     restart: unless-stopped
 
   team${i}-ssh:
@@ -273,8 +406,8 @@ EOF
       args:
         TEAM_ID: "${i}"
         TEAM_NAME: "team${i}"
-        TEAM_USER: "team${i}"
-        TEAM_PASS: "team${i}pass"
+        TEAM_USER: "${username}"
+        TEAM_PASS: "${password}"
         TEAM_UID: "1000"
     image: sandcastle/team${i}-ssh:latest
     container_name: team${i}-ssh
@@ -283,16 +416,19 @@ EOF
       - team${i}-vuln
     networks:
       ctf-network:
-        ipv4_address: 10.10.${i}.2
+        ipv4_address: ${ARENA_NETWORK_PREFIX}.${i}.2
     ports:
-      - "$((2200 + i)):22"
+      - "$((ARENA_SSH_BASE_PORT + i)):22"
     cap_add:
       - NET_ADMIN
+    labels:
+      sandcastle.role: "ssh-gateway"
+      sandcastle.team: "team${i}"
     restart: unless-stopped
 EOF
     done
 
-    cat >> "${COMPOSE_FILE}" <<'EOF'
+    cat >> "${COMPOSE_FILE}" <<EOF
 
   firewall:
     build:
@@ -301,54 +437,82 @@ EOF
     container_name: sandcastle-firewall
     hostname: sandcastle-firewall
     network_mode: host
+    environment:
+      CTF_NETWORK: "${ARENA_CTF_SUBNET}"
+      WS_PORT: "${ARENA_FIREWALL_WS_PORT}"
+      PROXY_PORT: "${ARENA_FIREWALL_PROXY_PORT}"
     cap_add:
       - NET_ADMIN
       - NET_RAW
+    labels:
+      sandcastle.role: "firewall"
     restart: unless-stopped
 EOF
 }
 
 print_summary() {
     local teams="$1"
-    local i
+    local i username password
 
     echo
-    echo "Generated ${teams} team(s)."
+    echo "Generated ${teams} team(s) from ${ARENA_CONFIG_FILE#${ROOT}/}."
     echo
-    printf '%-8s %-15s %-15s %-9s %-12s %-12s\n' "Team" "SSH IP" "Vuln/App IP" "SSH Port" "Username" "Password"
-    printf '%-8s %-15s %-15s %-9s %-12s %-12s\n' "----" "------" "-----------" "--------" "--------" "--------"
+    printf '%-8s %-15s %-15s %-9s %-12s %-16s\n' \
+        "Team" "SSH IP" "Vuln/App IP" "SSH Port" "Username" "Password"
+    printf '%-8s %-15s %-15s %-9s %-12s %-16s\n' \
+        "----" "------" "-----------" "--------" "--------" "--------"
     for ((i = 1; i <= teams; i++)); do
-        printf '%-8s %-15s %-15s %-9s %-12s %-12s\n' \
-            "team${i}" "10.10.${i}.2" "10.10.${i}.3" "$((2200 + i))" "team${i}" "team${i}pass"
+        username="$(arena_config_render_team_value "${ARENA_TEAM_USERNAME_PATTERN}" "${i}")"
+        password="$(arena_config_render_team_value "${ARENA_TEAM_PASSWORD_PATTERN}" "${i}")"
+        printf '%-8s %-15s %-15s %-9s %-12s %-16s\n' \
+            "team${i}" \
+            "${ARENA_NETWORK_PREFIX}.${i}.2" \
+            "${ARENA_NETWORK_PREFIX}.${i}.3" \
+            "$((ARENA_SSH_BASE_PORT + i))" \
+            "${username}" \
+            "${password}"
     done
     echo
+    echo "Service port: ${ARENA_SERVICE_PORT}"
+    echo "Round defaults: ${ARENA_ROUND_DURATION_SECONDS}s, expiry ${ARENA_FLAG_EXPIRY_ROUNDS} rounds"
+    echo
     echo "Next:"
-    echo "  docker compose up --build"
-    echo "  ssh -p 2201 team1@localhost"
-    echo "  ssh team1@team1-vuln"
-    echo "  cd ~/example-vuln && docker compose up -d --build"
+    echo "  ./scripts/arena.sh up"
+    echo "  ./scripts/arena.sh status"
+    echo "  ./scripts/doctor.sh"
 }
 
 main() {
-    local teams
+    arena_config_load "${ROOT}" || exit 1
     parse_args "$@"
-    teams="${NUM_TEAMS}"
+    validate_requested_team_count
+    resolve_template
+    preflight_team_workspaces "${ARENA_TEAM_COUNT}"
+    handle_orphan_containers "${ARENA_TEAM_COUNT}"
+
+    if ((OVERWRITE_SERVICES)); then
+        warn "DESTRUCTIVE MODE ENABLED: configured generated service copies will be replaced"
+    fi
+
+    if [[ -n "${REQUESTED_TEAM_COUNT}" ]]; then
+        arena_config_set_team_count "${ARENA_CONFIG_FILE}" "${ARENA_TEAM_COUNT}" ||
+            die "could not persist ARENA_TEAM_COUNT in ${ARENA_CONFIG_FILE}"
+    fi
 
     mkdir -p "${GENERATED_TEAMS_DIR}"
     remove_legacy_generated_teams
-    prune_extra_teams "${teams}"
+    prune_extra_teams "${ARENA_TEAM_COUNT}"
 
     local i team_dir
-    for ((i = 1; i <= teams; i++)); do
+    for ((i = 1; i <= ARENA_TEAM_COUNT; i++)); do
         team_dir="${GENERATED_TEAMS_DIR}/team${i}"
         mkdir -p "${team_dir}"
-        printf 'Generated by ./scripts/setup.sh for team%s.\n' "${i}" > "${team_dir}/.sandcastle-generated"
-        copy_service_template "${team_dir}"
+        prepare_service_workspace "${i}" "${team_dir}"
         write_team_service_compose "${i}" "${team_dir}"
     done
 
-    write_compose "${teams}"
-    print_summary "${teams}"
+    write_compose "${ARENA_TEAM_COUNT}"
+    print_summary "${ARENA_TEAM_COUNT}"
 }
 
 main "$@"

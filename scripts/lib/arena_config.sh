@@ -1,0 +1,227 @@
+#!/usr/bin/env bash
+# Shared loader and validator for config/arena.env.
+
+arena_config_error() {
+    ARENA_CONFIG_ERROR="$*"
+    if [[ "${ARENA_CONFIG_SILENT:-0}" != "1" ]]; then
+        printf 'arena config: %s\n' "$*" >&2
+    fi
+}
+
+arena_config_require_int() {
+    local name="$1"
+    local min="$2"
+    local max="$3"
+    local value="${!name:-}"
+
+    if [[ ! "${value}" =~ ^[0-9]+$ ]]; then
+        arena_config_error "${name} must be an integer, got '${value}'"
+        return 1
+    fi
+    value="$((10#${value}))"
+    if ((value < min || value > max)); then
+        arena_config_error "${name} must be between ${min} and ${max}, got ${value}"
+        return 1
+    fi
+    printf -v "${name}" '%s' "${value}"
+}
+
+arena_config_validate_pattern() {
+    local name="$1"
+    local value="${!name:-}"
+
+    if [[ -z "${value}" || "${value}" != *"{team}"* ]]; then
+        arena_config_error "${name} must contain the literal {team} placeholder"
+        return 1
+    fi
+    if [[ ! "${value}" =~ ^[a-zA-Z0-9_.{}-]+$ ]]; then
+        arena_config_error "${name} contains unsupported characters"
+        return 1
+    fi
+}
+
+arena_config_validate_port_layout() {
+    local ssh_last_port=$((ARENA_SSH_BASE_PORT + ARENA_TEAM_COUNT))
+    local -a host_ports=(
+        "${ARENA_FIREWALL_WS_PORT}"
+        "${ARENA_FIREWALL_PROXY_PORT}"
+        "${ARENA_BOT_API_PORT}"
+    )
+    local port
+
+    if ((ssh_last_port > 65535)); then
+        arena_config_error \
+            "ARENA_SSH_BASE_PORT + ARENA_TEAM_COUNT must not exceed 65535"
+        return 1
+    fi
+
+    for port in "${host_ports[@]}"; do
+        if ((port > ARENA_SSH_BASE_PORT && port <= ssh_last_port)); then
+            arena_config_error \
+                "host port ${port} collides with the configured team SSH range"
+            return 1
+        fi
+    done
+    if [[ "${ARENA_FIREWALL_WS_PORT}" == "${ARENA_FIREWALL_PROXY_PORT}" ||
+          "${ARENA_FIREWALL_WS_PORT}" == "${ARENA_BOT_API_PORT}" ||
+          "${ARENA_FIREWALL_PROXY_PORT}" == "${ARENA_BOT_API_PORT}" ]]; then
+        arena_config_error "firewall and bot API host ports must be distinct"
+        return 1
+    fi
+}
+
+arena_config_load() {
+    local root="$1"
+    local config_file="${SANDCASTLE_ARENA_CONFIG:-${root}/config/arena.env}"
+    local subnet_a subnet_b gateway_expected octet
+    local -a required=(
+        ARENA_TEAM_COUNT
+        ARENA_CTF_SUBNET
+        ARENA_CTF_GATEWAY
+        ARENA_SSH_BASE_PORT
+        ARENA_SERVICE_PORT
+        ARENA_TEAM_USERNAME_PATTERN
+        ARENA_TEAM_PASSWORD_PATTERN
+        ARENA_SERVICE_TEMPLATE
+        ARENA_FIREWALL_WS_PORT
+        ARENA_FIREWALL_PROXY_PORT
+        ARENA_BOT_API_HOST
+        ARENA_BOT_API_PORT
+        ARENA_BOT_LOOP_SECONDS
+        ARENA_STARTUP_TIMEOUT_SECONDS
+        ARENA_ROUND_DURATION_SECONDS
+        ARENA_FLAG_EXPIRY_ROUNDS
+    )
+
+    ARENA_CONFIG_ERROR=""
+    if [[ ! -f "${config_file}" ]]; then
+        arena_config_error "missing ${config_file}"
+        return 1
+    fi
+
+    local name
+    for name in "${required[@]}"; do
+        unset "${name}"
+    done
+
+    # The file is committed project configuration, not a user secrets file.
+    # shellcheck disable=SC1090
+    source "${config_file}"
+
+    for name in "${required[@]}"; do
+        if [[ -z "${!name:-}" ]]; then
+            arena_config_error "${name} is required in ${config_file}"
+            return 1
+        fi
+    done
+
+    arena_config_require_int ARENA_TEAM_COUNT 1 250 || return 1
+    arena_config_require_int ARENA_SSH_BASE_PORT 1024 65285 || return 1
+    arena_config_require_int ARENA_SERVICE_PORT 1 65535 || return 1
+    arena_config_require_int ARENA_FIREWALL_WS_PORT 1 65535 || return 1
+    arena_config_require_int ARENA_FIREWALL_PROXY_PORT 1 65535 || return 1
+    arena_config_require_int ARENA_BOT_API_PORT 1 65535 || return 1
+    arena_config_require_int ARENA_BOT_LOOP_SECONDS 0 86400 || return 1
+    arena_config_require_int ARENA_STARTUP_TIMEOUT_SECONDS 1 86400 || return 1
+    arena_config_require_int ARENA_ROUND_DURATION_SECONDS 1 86400 || return 1
+    arena_config_require_int ARENA_FLAG_EXPIRY_ROUNDS 1 10000 || return 1
+
+    if [[ ! "${ARENA_CTF_SUBNET}" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.0\.0/16$ ]]; then
+        arena_config_error \
+            "ARENA_CTF_SUBNET must use the supported A.B.0.0/16 form"
+        return 1
+    fi
+    subnet_a="${BASH_REMATCH[1]}"
+    subnet_b="${BASH_REMATCH[2]}"
+    for octet in "${subnet_a}" "${subnet_b}"; do
+        if ((10#${octet} > 255)); then
+            arena_config_error "ARENA_CTF_SUBNET contains an invalid octet"
+            return 1
+        fi
+    done
+    ARENA_NETWORK_PREFIX="$((10#${subnet_a})).$((10#${subnet_b}))"
+    gateway_expected="${ARENA_NETWORK_PREFIX}.0.1"
+    if [[ "${ARENA_CTF_GATEWAY}" != "${gateway_expected}" ]]; then
+        arena_config_error \
+            "ARENA_CTF_GATEWAY must be ${gateway_expected} for ${ARENA_CTF_SUBNET}"
+        return 1
+    fi
+
+    arena_config_validate_pattern ARENA_TEAM_USERNAME_PATTERN || return 1
+    arena_config_validate_pattern ARENA_TEAM_PASSWORD_PATTERN || return 1
+
+    if [[ ! "${ARENA_BOT_API_HOST}" =~ ^[a-zA-Z0-9_.:-]+$ ]]; then
+        arena_config_error "ARENA_BOT_API_HOST contains unsupported characters"
+        return 1
+    fi
+
+    arena_config_validate_port_layout || return 1
+
+    if [[ "${ARENA_SERVICE_TEMPLATE}" == /* ]]; then
+        ARENA_SERVICE_TEMPLATE_PATH="${ARENA_SERVICE_TEMPLATE}"
+    else
+        ARENA_SERVICE_TEMPLATE_PATH="${root}/${ARENA_SERVICE_TEMPLATE}"
+    fi
+    if [[ ! -d "${ARENA_SERVICE_TEMPLATE_PATH}" ]]; then
+        arena_config_error \
+            "ARENA_SERVICE_TEMPLATE does not exist: ${ARENA_SERVICE_TEMPLATE_PATH}"
+        return 1
+    fi
+
+    ARENA_SERVICE_IP_PATTERN="${ARENA_NETWORK_PREFIX}.{team}.3"
+    ARENA_CONFIG_FILE="${config_file}"
+    export \
+        ARENA_TEAM_COUNT \
+        ARENA_CTF_SUBNET \
+        ARENA_CTF_GATEWAY \
+        ARENA_NETWORK_PREFIX \
+        ARENA_SSH_BASE_PORT \
+        ARENA_SERVICE_PORT \
+        ARENA_SERVICE_IP_PATTERN \
+        ARENA_TEAM_USERNAME_PATTERN \
+        ARENA_TEAM_PASSWORD_PATTERN \
+        ARENA_SERVICE_TEMPLATE \
+        ARENA_SERVICE_TEMPLATE_PATH \
+        ARENA_FIREWALL_WS_PORT \
+        ARENA_FIREWALL_PROXY_PORT \
+        ARENA_BOT_API_HOST \
+        ARENA_BOT_API_PORT \
+        ARENA_BOT_LOOP_SECONDS \
+        ARENA_STARTUP_TIMEOUT_SECONDS \
+        ARENA_ROUND_DURATION_SECONDS \
+        ARENA_FLAG_EXPIRY_ROUNDS \
+        ARENA_CONFIG_FILE
+}
+
+arena_config_render_team_value() {
+    local pattern="$1"
+    local team_id="$2"
+    printf '%s' "${pattern//\{team\}/${team_id}}"
+}
+
+arena_config_set_team_count() {
+    local config_file="$1"
+    local team_count="$2"
+    local temp_file
+
+    temp_file="$(mktemp "${config_file}.tmp.XXXXXX")" || return 1
+    awk -v value="${team_count}" '
+        BEGIN { updated = 0 }
+        /^ARENA_TEAM_COUNT=/ {
+            print "ARENA_TEAM_COUNT=" value
+            updated = 1
+            next
+        }
+        { print }
+        END {
+            if (!updated) {
+                exit 2
+            }
+        }
+    ' "${config_file}" > "${temp_file}" || {
+        rm -f "${temp_file}"
+        return 1
+    }
+    chmod --reference="${config_file}" "${temp_file}"
+    mv "${temp_file}" "${config_file}"
+}

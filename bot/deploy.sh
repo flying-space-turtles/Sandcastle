@@ -26,14 +26,22 @@
 #   --exploits <a,b,c>            legacy comma-separated exploit list
 #   --no-stop-on-first            run all exploits even after a hit
 #
-# Environment overrides (legacy):
-#   NUM_TEAMS=6 LOOP_INTERVAL=30 WATCHDOG=false ./deploy.sh 2 3
+# Environment overrides:
+#   LOOP_INTERVAL=30 WATCHDOG=false ./deploy.sh 2 3
 # =============================================================================
 set -euo pipefail
 
 BOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-NUM_TEAMS=${NUM_TEAMS:-4}
-LOOP_INTERVAL=${LOOP_INTERVAL:-60}   # attack loop interval in seconds
+ROOT="$(cd "${BOT_DIR}/.." && pwd)"
+
+# shellcheck source=scripts/lib/arena_config.sh
+source "${ROOT}/scripts/lib/arena_config.sh"
+arena_config_load "${ROOT}"
+
+NUM_TEAMS="${ARENA_TEAM_COUNT}"
+SERVICE_PORT="${ARENA_SERVICE_PORT}"
+IP_PATTERN="${ARENA_SERVICE_IP_PATTERN}"
+LOOP_INTERVAL=${LOOP_INTERVAL:-${ARENA_BOT_LOOP_SECONDS}}
 WATCHDOG=${WATCHDOG:-false}          # also monitor own service (true/false)
 
 # Extra bot.py CLI args assembled from --service-port / --flag-re / etc.
@@ -66,6 +74,7 @@ copy_bot() {
     docker exec "$cname" bash -c "rm -rf /tmp/bot_lib"
     docker cp "${BOT_DIR}/bot_lib" "${cname}:/tmp/bot_lib"
     docker cp "${BOT_DIR}/bot.sh" "${cname}:/tmp/bot.sh"
+    docker cp "${ARENA_CONFIG_FILE}" "${cname}:/tmp/arena.env"
     docker exec "$cname" chmod +x /tmp/bot.sh
     # Copy config file if one was specified (web UI writes it to a temp path)
     if [[ -n "$CONFIG_FILE_PATH" ]]; then
@@ -79,7 +88,7 @@ start_bot() {
     local team_id=$1
     local cname; cname=$(container_name "$team_id")
 
-    local bot_args="--teams ${NUM_TEAMS} --loop ${LOOP_INTERVAL}"
+    local bot_args="--teams ${NUM_TEAMS} --loop ${LOOP_INTERVAL} --service-port ${SERVICE_PORT} --ip-pattern ${IP_PATTERN}"
     [[ "$WATCHDOG" == "true" ]] && bot_args="${bot_args} --watchdog"
     # Append any extra args built from --service-port / --flag-re / etc.
     [[ -n "$EXTRA_BOT_ARGS" ]] && bot_args="${bot_args} ${EXTRA_BOT_ARGS}"
@@ -158,8 +167,9 @@ usage() {
     echo "  --exploits <a,b,c>                      # legacy comma-separated exploit list"
     echo "  --no-stop-on-first                      # run all exploits even after a hit"
     echo ""
+    echo "Arena defaults come from: ${ARENA_CONFIG_FILE}"
     echo "Environment overrides:"
-    echo "  NUM_TEAMS=6 LOOP_INTERVAL=30 WATCHDOG=false $0 2 3"
+    echo "  LOOP_INTERVAL=30 WATCHDOG=false $0 2 3"
 }
 
 main() {

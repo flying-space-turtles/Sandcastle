@@ -3,7 +3,8 @@
 bot_api.py — Lightweight HTTP bridge between the Sandcastle visualizer and deploy.sh
 ======================================================================================
 
-Listens on localhost:7878. The visualizer's Bot tab sends requests here to:
+Listens on the host and port configured in config/arena.env. The visualizer's
+Bot tab sends requests here to:
   - query bot status across all teams
   - deploy the bot to selected teams with a given configuration
   - stop the bot in selected teams
@@ -13,7 +14,7 @@ All endpoints accept and return JSON.  CORS headers are set so any localhost
 origin (Vite dev server, file://, etc.) can reach this server.
 
 Usage:
-    python3 bot/bot_api.py              # default port 7878
+    python3 bot/bot_api.py              # use config/arena.env
     python3 bot/bot_api.py --port 9090  # custom port
 
 Run this from the REPO ROOT (not from inside the bot/ directory) so that the
@@ -24,7 +25,8 @@ Endpoints
 GET  /health                       → {"ok": true}
 GET  /catalog                      → {"actions": [...], "planners": [...]}
 GET  /status                       → {"teams": [{id, running, pid, container_up}, ...]}
-GET  /teams                        → {"num_teams": N}  (reads from docker compose)
+GET  /arena                        → canonical bot-facing arena configuration
+GET  /teams                        → {"num_teams": N}
 GET  /logs/<team_id>               → {"lines": ["...", ...]}
 POST /deploy   body: DeployRequest → {"ok": true, "output": "..."}
 POST /stop     body: {teams:[N]}   → {"ok": true, "output": "..."}
@@ -44,7 +46,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
-from bot_lib import action_catalog, planner_catalog
+from bot_lib import ARENA_DEFAULTS, action_catalog, planner_catalog
 
 # ── paths ────────────────────────────────────────────────────────────────────
 
@@ -82,17 +84,8 @@ def _docker_inspect(container: str) -> dict | None:
 
 
 def _num_teams() -> int:
-    """Detect number of teams from running containers named team<N>-ssh."""
-    rc, out = _run(["docker", "ps", "--format", "{{.Names}}"])
-    if rc != 0:
-        return 0
-    names = out.splitlines()
-    ids = set()
-    for name in names:
-        m = re.match(r"team(\d+)-ssh$", name.strip())
-        if m:
-            ids.add(int(m.group(1)))
-    return max(ids) if ids else 0
+    """Return the configured topology size, including offline teams."""
+    return ARENA_DEFAULTS.team_count
 
 
 def _team_status(team_id: int) -> dict:
@@ -182,6 +175,18 @@ class BotAPIHandler(BaseHTTPRequestHandler):
             self._json(200, {"actions": action_catalog(), "planners": planner_catalog()})
             return
 
+        if path == "/arena":
+            self._json(
+                200,
+                {
+                    "num_teams": ARENA_DEFAULTS.team_count,
+                    "service_port": ARENA_DEFAULTS.service_port,
+                    "ip_pattern": ARENA_DEFAULTS.service_ip_pattern,
+                    "ssh_base_port": ARENA_DEFAULTS.ssh_base_port,
+                },
+            )
+            return
+
         if path == "/teams":
             n = _num_teams()
             self._json(200, {"num_teams": n})
@@ -227,10 +232,10 @@ class BotAPIHandler(BaseHTTPRequestHandler):
           "actions": ["recon.health"],
           "loop_interval": 60,
           "watchdog": true,
-          "num_teams": 4,
-          "service_port": 8080,
+          "num_teams": <from arena config>,
+          "service_port": <from arena config>,
           "flag_re": "FLAG\\{[a-f0-9]{32}\\}",
-          "ip_pattern": "10.10.{team}.3",
+          "ip_pattern": <from arena config>,
           "exploits": ["path_traversal", "cmdi", "sqli"],
           "stop_on_first": true,
           "timeout": 6
@@ -250,9 +255,7 @@ class BotAPIHandler(BaseHTTPRequestHandler):
             "target_policy",
             "target_teams",
             "actions",
-            "service_port",
             "flag_re",
-            "ip_pattern",
             "exploits",
             "stop_on_first",
             "stop_on_success",
@@ -260,6 +263,8 @@ class BotAPIHandler(BaseHTTPRequestHandler):
         ):
             if key in body:
                 bot_config[key] = body[key]
+        bot_config["service_port"] = ARENA_DEFAULTS.service_port
+        bot_config["ip_pattern"] = ARENA_DEFAULTS.service_ip_pattern
 
         # Write config to a temp file; deploy.sh copies it into the container
         tmp_cfg = None
@@ -279,9 +284,6 @@ class BotAPIHandler(BaseHTTPRequestHandler):
             env["LOOP_INTERVAL"] = str(int(body["loop_interval"]))
         if "watchdog" in body:
             env["WATCHDOG"] = "true" if body["watchdog"] else "false"
-        if "num_teams" in body:
-            env["NUM_TEAMS"] = str(int(body["num_teams"]))
-
         cmd = ["bash", str(DEPLOY_SH)] + extra_args + [str(t) for t in teams]
         try:
             result = subprocess.run(
@@ -323,10 +325,20 @@ class BotAPIHandler(BaseHTTPRequestHandler):
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Sandcastle Bot API server")
-    p.add_argument("--port", type=int, default=7878, metavar="PORT",
-                   help="port to listen on (default: 7878)")
-    p.add_argument("--host", type=str, default="127.0.0.1", metavar="HOST",
-                   help="interface to bind to (default: 127.0.0.1)")
+    p.add_argument(
+        "--port",
+        type=int,
+        default=ARENA_DEFAULTS.bot_api_port,
+        metavar="PORT",
+        help=f"port to listen on (default: {ARENA_DEFAULTS.bot_api_port})",
+    )
+    p.add_argument(
+        "--host",
+        type=str,
+        default=ARENA_DEFAULTS.bot_api_host,
+        metavar="HOST",
+        help=f"interface to bind to (default: {ARENA_DEFAULTS.bot_api_host})",
+    )
     args = p.parse_args()
 
     if not DEPLOY_SH.exists():
