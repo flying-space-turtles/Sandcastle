@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import sqlite3
-from typing import Any, Dict, List, Optional
+from typing import Dict, Optional
+
+from checkers.contract import CheckerResult, ServiceTarget
 from models import MatchState
 
 
@@ -108,21 +111,7 @@ def initialize_schema(conn: sqlite3.Connection) -> None:
         );
     """)
 
-    # Checker Results table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS checker_results (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            team_id INTEGER NOT NULL,
-            service_id INTEGER NOT NULL,
-            round_number INTEGER NOT NULL,
-            status TEXT NOT NULL,
-            details TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(team_id) REFERENCES teams(id) ON DELETE CASCADE,
-            FOREIGN KEY(service_id) REFERENCES services(id) ON DELETE CASCADE,
-            UNIQUE(team_id, service_id, round_number)
-        );
-    """)
+    _initialize_checker_results_schema(conn)
 
     # Submissions table
     cursor.execute("""
@@ -169,6 +158,111 @@ def initialize_schema(conn: sqlite3.Connection) -> None:
         )
 
     conn.commit()
+
+
+def _create_checker_results_table(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS checker_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            team_id INTEGER NOT NULL,
+            service_id INTEGER NOT NULL,
+            round_number INTEGER NOT NULL,
+            operation TEXT NOT NULL CHECK(operation IN ('PUT', 'GET', 'CHECK')),
+            plugin_name TEXT NOT NULL,
+            plugin_version TEXT NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('UP', 'DOWN', 'MUMBLE', 'CORRUPT')),
+            message TEXT NOT NULL,
+            duration_ms INTEGER NOT NULL CHECK(duration_ms >= 0),
+            data_json TEXT NOT NULL DEFAULT '{}',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(team_id) REFERENCES teams(id) ON DELETE CASCADE,
+            FOREIGN KEY(service_id) REFERENCES services(id) ON DELETE CASCADE,
+            UNIQUE(team_id, service_id, round_number, operation)
+        );
+    """)
+
+
+def _initialize_checker_results_schema(conn: sqlite3.Connection) -> None:
+    existing = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'checker_results'"
+    ).fetchone()
+    if existing is None:
+        _create_checker_results_table(conn)
+        return
+
+    columns = {
+        row[1] for row in conn.execute("PRAGMA table_info(checker_results)").fetchall()
+    }
+    if "operation" in columns:
+        return
+
+    conn.execute("ALTER TABLE checker_results RENAME TO checker_results_legacy")
+    _create_checker_results_table(conn)
+    conn.execute("""
+        INSERT INTO checker_results (
+            id, team_id, service_id, round_number, operation,
+            plugin_name, plugin_version, status, message,
+            duration_ms, data_json, created_at
+        )
+        SELECT
+            id, team_id, service_id, round_number, 'CHECK',
+            'legacy', '0', status, COALESCE(details, ''),
+            0, '{}', created_at
+        FROM checker_results_legacy
+    """)
+    conn.execute("DROP TABLE checker_results_legacy")
+
+
+def persist_checker_result(
+    conn: sqlite3.Connection,
+    target: ServiceTarget,
+    round_number: int,
+    result: CheckerResult,
+) -> int:
+    """Persist one structured result per team/service/round/operation."""
+    if round_number < 0:
+        raise ValueError("round_number must be non-negative")
+    data_json = json.dumps(result.data, sort_keys=True, separators=(",", ":"))
+    conn.execute(
+        """
+        INSERT INTO checker_results (
+            team_id, service_id, round_number, operation,
+            plugin_name, plugin_version, status, message,
+            duration_ms, data_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(team_id, service_id, round_number, operation) DO UPDATE SET
+            plugin_name=excluded.plugin_name,
+            plugin_version=excluded.plugin_version,
+            status=excluded.status,
+            message=excluded.message,
+            duration_ms=excluded.duration_ms,
+            data_json=excluded.data_json,
+            created_at=CURRENT_TIMESTAMP
+        """,
+        (
+            target.team_id,
+            target.service_id,
+            round_number,
+            result.operation.value,
+            result.plugin_name,
+            result.plugin_version,
+            result.status.value,
+            result.message,
+            result.duration_ms,
+            data_json,
+        ),
+    )
+    conn.commit()
+    row = conn.execute(
+        """
+        SELECT id FROM checker_results
+        WHERE team_id = ? AND service_id = ? AND round_number = ? AND operation = ?
+        """,
+        (target.team_id, target.service_id, round_number, result.operation.value),
+    ).fetchone()
+    if row is None:
+        raise RuntimeError("persisted checker result could not be read back")
+    return int(row[0])
 
 
 def parse_arena_config(path: str) -> Dict[str, str]:

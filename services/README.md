@@ -30,3 +30,8 @@ the generated teams from that template, then regenerate the topology:
 
 Omit `--overwrite-services` when you want to preserve existing team copies and
 only create missing teams.
+
+Each service template must include a trusted `checker.py` exporting `CHECKER`
+with typed PUT, GET, and CHECK operations. See
+[`docs/writing-checkers.md`](../docs/writing-checkers.md) for the contract,
+status mapping, credential scoping, and tests required for a new service.

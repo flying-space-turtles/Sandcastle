@@ -124,8 +124,13 @@ class CheckerResult:
     team_id: int
     service_id: int
     round_number: int
+    operation: str  # PUT, GET, CHECK
+    plugin_name: str
+    plugin_version: str
     status: str  # UP, DOWN, MUMBLE, CORRUPT
-    details: Optional[str]
+    message: str
+    duration_ms: int
+    data_json: str
     created_at: str
 
 

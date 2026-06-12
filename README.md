@@ -4,9 +4,10 @@ Sandcastle is a local Docker-based Attack & Defense CTF prototype for testing
 software agents that patch their own services and attack opponents.
 
 The repository currently provides team environments, an intentionally
-vulnerable service, scripted bots, a topology visualizer, and a network-monitor
-prototype. It does **not** yet provide a gameserver, timed rounds, authoritative
-flag submission, SLA scoring, or a scoreboard.
+vulnerable service, scripted bots, a topology visualizer, a network monitor, a
+persistent gameserver core, and a typed checker framework. It does **not** yet
+provide timed rounds, authoritative flag submission, SLA scoring, or a
+scoreboard.
 
 - Product direction: [`VISION.md`](VISION.md)
 - Current audit and prioritized agent backlog:
@@ -26,7 +27,9 @@ flag submission, SLA scoring, or a scoreboard.
 | `bot/` | Scripted action/planner runtime and local control API | Offensive path works; watchdog is currently ineffective |
 | `firewall/` | Source-masking proxy and WebSocket activity feed | Enforced and smoke-tested on native Linux |
 | `visualizer/` | React topology, event, and bot UI | Implemented |
-| Gameserver/checkers/scoring | Competition authority | Not implemented |
+| `gameserver/` | Persistent match state and service registry | Core implemented |
+| Service checkers | PUT, GET, CHECK contract and TurtleNotes plugin | Implemented |
+| Rounds/submissions/scoring | Competition lifecycle and authority | Not implemented |
 
 ## Requirements
 

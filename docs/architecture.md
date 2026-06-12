@@ -1,10 +1,10 @@
 # Infrastructure Architecture
 
-This repository models the container layout for a local Attack & Defense CTF
-and includes a template vulnerable service that is copied into each generated
-team directory. It does not yet include competition logic such as a gameserver,
-checkers, submissions, scoreboards, or scoring. See `../VISION.md` for the
-target product and `PROJECT_AUDIT_AND_BACKLOG.md` for the implementation plan.
+This repository models the container layout for a local Attack & Defense CTF,
+includes a template vulnerable service, and provides a persistent gameserver
+core plus typed service checkers. It does not yet include round scheduling,
+submissions, scoreboards, or scoring. See `../VISION.md` for the target product
+and `PROJECT_AUDIT_AND_BACKLOG.md` for the implementation plan.
 
 ## Topology
 
@@ -34,10 +34,13 @@ ctf-network (bridge, 10.10.0.0/16)
 
   sandcastle-firewall
                host net     masks team-to-team TCP source IPs
+
+  sandcastle-gameserver
+               10.10.0.2    persistent registry and checker authority
 ```
 
 Docker Compose creates the shared bridge network and assigns deterministic IP
-addresses so future checkers, gameservers, and teams can use stable targets.
+addresses so the gameserver, checkers, and teams use stable targets.
 
 The firewall redirects team-to-team TCP traffic through a host transparent
 proxy. This requires a native Linux host with `br_netfilter` and
@@ -67,8 +70,9 @@ reported while capture continues.
   `/home/team<N>/example-vuln` in the vulnerable machine
 - a mounted Docker socket in each vulnerable machine for local app orchestration
 - one `firewall` service built from `firewall/Dockerfile`
+- one persistent `gameserver` service at `10.10.0.2`
 
-No gameserver or scoreboard is generated in this iteration.
+No scoreboard is generated in this iteration.
 
 The generated root Compose defines SSH gateways, vulnerable machines, and the
 firewall. Each `team<N>-vuln-app` remains a nested Compose project so teams can
@@ -86,9 +90,9 @@ the selected template into ignored generated workspaces, so teams can SSH from
 `team<N>-ssh` into `team<N>-vuln`, patch their own source, and run
 `docker compose up -d --build` without changing another team's source. The app
 container is named `team<N>-vuln-app`, shares the `team<N>-vuln` network
-namespace, gets `TEAM_ID`, `TEAM_NAME`, `SERVICE_PORT`, and `SECRET_KEY`, uses
-`sandcastle_team<N>-data` for `/app/data`, and is reachable at
-the configured team service IP and port.
+namespace, gets `TEAM_ID`, `TEAM_NAME`, `SERVICE_PORT`, `SECRET_KEY`, and scoped
+checker credentials, uses `sandcastle_team<N>-data` for `/app/data`, and is
+reachable at the configured team service IP and port.
 
 Marked generated workspaces are repairable and preserve existing files.
 Unmarked directories are participant-owned and are rejected unless the
@@ -104,9 +108,8 @@ preserving the generated source tree.
 
 The next layers can be added independently:
 
-- a sample vulnerable application under `services/`
-- app-specific checker and flag planting contracts
-- a gameserver API and persistence layer
+- round scheduling and flag expiry
+- authenticated flag submission and scoring
 - a scoreboard or operator dashboard
 
 Keeping these layers separate makes the infrastructure reusable while the
