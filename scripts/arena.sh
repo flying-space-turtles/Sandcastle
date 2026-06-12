@@ -5,6 +5,8 @@ set -euo pipefail
 
 ROOT="${SANDCASTLE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 COMPOSE_FILE="${ROOT}/docker-compose.yml"
+FIREWALL_PREFLIGHT="${SANDCASTLE_FIREWALL_PREFLIGHT:-${ROOT}/scripts/firewall-preflight.sh}"
+NETWORK_SMOKE="${SANDCASTLE_NETWORK_SMOKE:-${ROOT}/scripts/smoke-network.sh}"
 
 # shellcheck source=scripts/lib/arena_config.sh
 source "${ROOT}/scripts/lib/arena_config.sh"
@@ -134,6 +136,37 @@ require_docker() {
         die "Docker daemon is not reachable"
     docker compose version >/dev/null 2>&1 ||
         die "Docker Compose plugin is not available"
+}
+
+verify_firewall_host() {
+    [[ -x "${FIREWALL_PREFLIGHT}" ]] ||
+        die "missing executable firewall preflight: ${FIREWALL_PREFLIGHT}"
+    "${FIREWALL_PREFLIGHT}" --check ||
+        die "firewall host preflight failed"
+}
+
+verify_firewall_runtime() {
+    docker exec sandcastle-firewall sh -ec '
+        test "$(cat /proc/sys/net/bridge/bridge-nf-call-iptables)" = "1"
+        iptables -t nat -C PREROUTING \
+            -s "$CTF_NETWORK" \
+            -d "$CTF_NETWORK" \
+            -p tcp \
+            -m comment \
+            --comment sandcastle-firewall-transparent-proxy \
+            -j REDIRECT \
+            --to-ports "$PROXY_PORT"
+        ss -lnt | grep -Eq "[:.]${PROXY_PORT}[[:space:]]"
+        ss -lnt | grep -Eq "[:.]${WS_PORT}[[:space:]]"
+    ' >/dev/null ||
+        die "firewall enforcement rule or listeners are inactive"
+}
+
+verify_network_path() {
+    [[ -x "${NETWORK_SMOKE}" ]] ||
+        die "missing executable network smoke test: ${NETWORK_SMOKE}"
+    "${NETWORK_SMOKE}" ||
+        die "firewall network smoke test failed"
 }
 
 top_compose() {
@@ -393,6 +426,7 @@ up_arena() {
     top_compose up -d --build --remove-orphans
     wait_for_infrastructure "${timeout}" ||
         die "infrastructure startup failed; run ./scripts/arena.sh status"
+    verify_firewall_runtime
 
     recreate_apps
     wait_for_apps "${timeout}" || {
@@ -400,6 +434,7 @@ up_arena() {
         print_status || true
         die "one or more vulnerable apps failed health checks"
     }
+    verify_network_path
 
     echo
     echo "[+] Complete arena is healthy."
@@ -427,6 +462,11 @@ main() {
     fi
     validate_options
     require_docker
+    case "${COMMAND}" in
+        up|restart|reset)
+            verify_firewall_host
+            ;;
+    esac
 
     case "${COMMAND}" in
         up)

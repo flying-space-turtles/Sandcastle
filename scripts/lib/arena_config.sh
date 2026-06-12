@@ -68,6 +68,12 @@ arena_config_validate_port_layout() {
         arena_config_error "firewall and bot API host ports must be distinct"
         return 1
     fi
+    if [[ "${ARENA_FIREWALL_PROBE_PORT}" == "${ARENA_SERVICE_PORT}" ||
+          "${ARENA_FIREWALL_PROBE_PORT}" == "22" ]]; then
+        arena_config_error \
+            "ARENA_FIREWALL_PROBE_PORT must not collide with the team service or SSH port"
+        return 1
+    fi
 }
 
 arena_config_load() {
@@ -85,6 +91,11 @@ arena_config_load() {
         ARENA_SERVICE_TEMPLATE
         ARENA_FIREWALL_WS_PORT
         ARENA_FIREWALL_PROXY_PORT
+        ARENA_FIREWALL_PROBE_PORT
+        ARENA_FIREWALL_SMOKE_TIMEOUT_SECONDS
+        ARENA_FIREWALL_EVENT_QUEUE_SIZE
+        ARENA_FIREWALL_CAPTURE_RCVBUF_BYTES
+        ARENA_FIREWALL_RECENT_ICMP_LIMIT
         ARENA_BOT_API_HOST
         ARENA_BOT_API_PORT
         ARENA_BOT_LOOP_SECONDS
@@ -120,6 +131,11 @@ arena_config_load() {
     arena_config_require_int ARENA_SERVICE_PORT 1 65535 || return 1
     arena_config_require_int ARENA_FIREWALL_WS_PORT 1 65535 || return 1
     arena_config_require_int ARENA_FIREWALL_PROXY_PORT 1 65535 || return 1
+    arena_config_require_int ARENA_FIREWALL_PROBE_PORT 1 65535 || return 1
+    arena_config_require_int ARENA_FIREWALL_SMOKE_TIMEOUT_SECONDS 1 300 || return 1
+    arena_config_require_int ARENA_FIREWALL_EVENT_QUEUE_SIZE 1 1000000 || return 1
+    arena_config_require_int ARENA_FIREWALL_CAPTURE_RCVBUF_BYTES 65536 268435456 || return 1
+    arena_config_require_int ARENA_FIREWALL_RECENT_ICMP_LIMIT 1 1000000 || return 1
     arena_config_require_int ARENA_BOT_API_PORT 1 65535 || return 1
     arena_config_require_int ARENA_BOT_LOOP_SECONDS 0 86400 || return 1
     arena_config_require_int ARENA_STARTUP_TIMEOUT_SECONDS 1 86400 || return 1
@@ -184,6 +200,11 @@ arena_config_load() {
         ARENA_SERVICE_TEMPLATE_PATH \
         ARENA_FIREWALL_WS_PORT \
         ARENA_FIREWALL_PROXY_PORT \
+        ARENA_FIREWALL_PROBE_PORT \
+        ARENA_FIREWALL_SMOKE_TIMEOUT_SECONDS \
+        ARENA_FIREWALL_EVENT_QUEUE_SIZE \
+        ARENA_FIREWALL_CAPTURE_RCVBUF_BYTES \
+        ARENA_FIREWALL_RECENT_ICMP_LIMIT \
         ARENA_BOT_API_HOST \
         ARENA_BOT_API_PORT \
         ARENA_BOT_LOOP_SECONDS \

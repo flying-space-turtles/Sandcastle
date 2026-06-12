@@ -123,3 +123,18 @@ jobs:
 
       - name: Run fixture-driven lifecycle tests
         run: ./tests/arena_test.sh
+
+  firewall-tests:
+    name: Test firewall enforcement contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run firewall unit tests
+        run: python3 -B tests/firewall_test.py
+
+      - name: Run host preflight tests
+        run: ./tests/firewall_preflight_test.sh
+
+      - name: Run network smoke fixture tests
+        run: ./tests/network_smoke_test.sh

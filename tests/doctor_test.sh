@@ -154,6 +154,11 @@ ARENA_TEAM_PASSWORD_PATTERN=team{team}pass
 ARENA_SERVICE_TEMPLATE=services/example-vuln
 ARENA_FIREWALL_WS_PORT=6789
 ARENA_FIREWALL_PROXY_PORT=15000
+ARENA_FIREWALL_PROBE_PORT=18080
+ARENA_FIREWALL_SMOKE_TIMEOUT_SECONDS=15
+ARENA_FIREWALL_EVENT_QUEUE_SIZE=2048
+ARENA_FIREWALL_CAPTURE_RCVBUF_BYTES=4194304
+ARENA_FIREWALL_RECENT_ICMP_LIMIT=4096
 ARENA_BOT_API_HOST=127.0.0.1
 ARENA_BOT_API_PORT=7878
 ARENA_BOT_LOOP_SECONDS=60
@@ -229,7 +234,7 @@ assert_status "${orphan_output}" FAIL runtime.orphans
 firewall_fixture="${TMP_ROOT}/firewall-zero"
 make_fixture "${firewall_fixture}" complete
 firewall_output="$(run_doctor "${firewall_fixture}" firewall-zero)"
-assert_status "${firewall_output}" WARN firewall.traffic
+assert_status "${firewall_output}" FAIL firewall.traffic
 
 invalid_fixture="${TMP_ROOT}/invalid-config"
 make_fixture "${invalid_fixture}" complete

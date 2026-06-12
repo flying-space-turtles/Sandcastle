@@ -24,12 +24,11 @@ Implemented:
 - idempotent full-arena startup, status, restart, and reset lifecycle
 - scripted bot actions and planner interfaces
 - a topology/bot visualizer
-- a firewall/activity-feed prototype
+- fail-closed Linux firewall enforcement and activity-feed verification
 
 Missing:
 
 - gameserver, rounds, checkers, submissions, scoring, and scoreboard
-- proven firewall enforcement on every supported host
 - safe isolation for untrusted agents or participants
 
 Do not describe the project as a complete arena until the MVP exit criteria in
@@ -77,11 +76,14 @@ fix. Follow SC-013 and the threat-model tasks.
 
 - App containers use `network_mode: container:team<N>-vuln`; lifecycle code
   must remove stale app containers before parent reattachment.
+- The transparent firewall requires native Linux bridge netfilter. Arena
+  startup must run the host preflight and cross-team network smoke test.
 - Unmarked directories under `teams/generated/` are participant-owned and
   setup refuses to rewrite them without `--overwrite-services`.
 - Setup repairs partial marked workspaces and blocks stale team containers
   unless removal or retention is explicitly selected.
-- Firewall container health does not prove its redirect rule receives traffic.
+- Firewall container health alone does not prove enforcement; the lifecycle
+  smoke test is the required behavioral evidence.
 
 When a task touches these areas, add a behavioral test rather than relying only
 on Compose syntax or process health.
@@ -106,6 +108,9 @@ bash -n scripts/*.sh bot/*.sh
 ./tests/doctor_test.sh
 ./tests/setup_test.sh
 ./tests/arena_test.sh
+./tests/firewall_preflight_test.sh
+./tests/network_smoke_test.sh
+python3 -B tests/firewall_test.py
 python3 -B -m py_compile \
   scripts/gen_compose.py \
   bot/*.py bot/bot_lib/*.py \

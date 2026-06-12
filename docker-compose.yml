@@ -4,7 +4,7 @@
 name: sandcastle
 
 x-sandcastle-arena:
-  team_count: 4
+  team_count: 2
   service_port: 8080
   ssh_base_port: 2200
   startup_timeout_seconds: 120
@@ -126,112 +126,6 @@ services:
       sandcastle.team: "team2"
     restart: unless-stopped
 
-  team3-vuln:
-    build:
-      context: .
-      dockerfile: docker/vuln/Dockerfile
-      args:
-        TEAM_ID: "3"
-        TEAM_NAME: "team3"
-        TEAM_USER: "team3"
-        TEAM_PASS: "team3pass"
-        TEAM_UID: "1000"
-    image: sandcastle/team3-vuln:latest
-    container_name: team3-vuln
-    hostname: team3-vuln
-    networks:
-      ctf-network:
-        ipv4_address: 10.10.3.3
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./teams/generated/team3/example-vuln:/home/team3/example-vuln
-    cap_add:
-      - NET_ADMIN
-    labels:
-      sandcastle.role: "vuln-machine"
-      sandcastle.team: "team3"
-    restart: unless-stopped
-
-  team3-ssh:
-    build:
-      context: .
-      dockerfile: docker/ssh/Dockerfile
-      args:
-        TEAM_ID: "3"
-        TEAM_NAME: "team3"
-        TEAM_USER: "team3"
-        TEAM_PASS: "team3pass"
-        TEAM_UID: "1000"
-    image: sandcastle/team3-ssh:latest
-    container_name: team3-ssh
-    hostname: team3-ssh
-    depends_on:
-      - team3-vuln
-    networks:
-      ctf-network:
-        ipv4_address: 10.10.3.2
-    ports:
-      - "2203:22"
-    cap_add:
-      - NET_ADMIN
-    labels:
-      sandcastle.role: "ssh-gateway"
-      sandcastle.team: "team3"
-    restart: unless-stopped
-
-  team4-vuln:
-    build:
-      context: .
-      dockerfile: docker/vuln/Dockerfile
-      args:
-        TEAM_ID: "4"
-        TEAM_NAME: "team4"
-        TEAM_USER: "team4"
-        TEAM_PASS: "team4pass"
-        TEAM_UID: "1000"
-    image: sandcastle/team4-vuln:latest
-    container_name: team4-vuln
-    hostname: team4-vuln
-    networks:
-      ctf-network:
-        ipv4_address: 10.10.4.3
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ./teams/generated/team4/example-vuln:/home/team4/example-vuln
-    cap_add:
-      - NET_ADMIN
-    labels:
-      sandcastle.role: "vuln-machine"
-      sandcastle.team: "team4"
-    restart: unless-stopped
-
-  team4-ssh:
-    build:
-      context: .
-      dockerfile: docker/ssh/Dockerfile
-      args:
-        TEAM_ID: "4"
-        TEAM_NAME: "team4"
-        TEAM_USER: "team4"
-        TEAM_PASS: "team4pass"
-        TEAM_UID: "1000"
-    image: sandcastle/team4-ssh:latest
-    container_name: team4-ssh
-    hostname: team4-ssh
-    depends_on:
-      - team4-vuln
-    networks:
-      ctf-network:
-        ipv4_address: 10.10.4.2
-    ports:
-      - "2204:22"
-    cap_add:
-      - NET_ADMIN
-    labels:
-      sandcastle.role: "ssh-gateway"
-      sandcastle.team: "team4"
-    restart: unless-stopped
-
   firewall:
     build:
       context: ./firewall
@@ -243,6 +137,9 @@ services:
       CTF_NETWORK: "10.10.0.0/16"
       WS_PORT: "6789"
       PROXY_PORT: "15000"
+      EVENT_QUEUE_SIZE: "2048"
+      CAPTURE_RCVBUF_BYTES: "4194304"
+      RECENT_ICMP_LIMIT: "4096"
     cap_add:
       - NET_ADMIN
       - NET_RAW
