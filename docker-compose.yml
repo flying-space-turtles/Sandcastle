@@ -10,6 +10,7 @@ x-sandcastle-arena:
   startup_timeout_seconds: 120
   round_duration_seconds: 120
   flag_expiry_rounds: 5
+  gameserver_port: 8000
 
 networks:
   ctf-network:
@@ -146,3 +147,27 @@ services:
     labels:
       sandcastle.role: "firewall"
     restart: unless-stopped
+
+  gameserver:
+    build:
+      context: ./gameserver
+    image: sandcastle/gameserver:latest
+    container_name: sandcastle-gameserver
+    hostname: sandcastle-gameserver
+    networks:
+      ctf-network:
+        ipv4_address: 10.10.0.2
+    ports:
+      - "8000:8000"
+    volumes:
+      - gameserver-data:/app/data
+      - ./config/arena.env:/app/config/arena.env:ro
+    labels:
+      sandcastle.role: "gameserver"
+    restart: unless-stopped
+
+volumes:
+  gameserver-data:
+    name: sandcastle_gameserver-data
+    labels:
+      sandcastle.role: "gameserver-data"

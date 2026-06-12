@@ -359,6 +359,7 @@ x-sandcastle-arena:
   startup_timeout_seconds: ${ARENA_STARTUP_TIMEOUT_SECONDS}
   round_duration_seconds: ${ARENA_ROUND_DURATION_SECONDS}
   flag_expiry_rounds: ${ARENA_FLAG_EXPIRY_ROUNDS}
+  gameserver_port: ${ARENA_GAMESERVER_PORT}
 
 networks:
   ctf-network:
@@ -457,6 +458,30 @@ EOF
     labels:
       sandcastle.role: "firewall"
     restart: unless-stopped
+
+  gameserver:
+    build:
+      context: ./gameserver
+    image: sandcastle/gameserver:latest
+    container_name: sandcastle-gameserver
+    hostname: sandcastle-gameserver
+    networks:
+      ctf-network:
+        ipv4_address: ${ARENA_NETWORK_PREFIX}.0.2
+    ports:
+      - "${ARENA_GAMESERVER_PORT}:8000"
+    volumes:
+      - gameserver-data:/app/data
+      - ./config/arena.env:/app/config/arena.env:ro
+    labels:
+      sandcastle.role: "gameserver"
+    restart: unless-stopped
+
+volumes:
+  gameserver-data:
+    name: sandcastle_gameserver-data
+    labels:
+      sandcastle.role: "gameserver-data"
 EOF
 }
 
