@@ -7,7 +7,7 @@ import sqlite3
 from typing import Dict, Optional
 
 from checkers.contract import CheckerResult, ServiceTarget
-from models import MatchState
+from models import FlagState, MatchState, RoundState
 
 
 DEFAULT_DB_PATH = "/app/data/gameserver.db"
@@ -85,31 +85,8 @@ def initialize_schema(conn: sqlite3.Connection) -> None:
         );
     """)
 
-    # Rounds table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS rounds (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            round_number INTEGER NOT NULL UNIQUE,
-            match_id INTEGER NOT NULL,
-            started_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            duration_seconds INTEGER NOT NULL,
-            FOREIGN KEY(match_id) REFERENCES matches(id) ON DELETE CASCADE
-        );
-    """)
-
-    # Flags table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS flags (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            flag TEXT NOT NULL UNIQUE,
-            team_id INTEGER NOT NULL,
-            service_id INTEGER NOT NULL,
-            round_number INTEGER NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(team_id) REFERENCES teams(id) ON DELETE CASCADE,
-            FOREIGN KEY(service_id) REFERENCES services(id) ON DELETE CASCADE
-        );
-    """)
+    _initialize_rounds_schema(conn)
+    _initialize_flags_schema(conn)
 
     _initialize_checker_results_schema(conn)
 
@@ -164,6 +141,7 @@ def _create_checker_results_table(conn: sqlite3.Connection) -> None:
     conn.execute("""
         CREATE TABLE IF NOT EXISTS checker_results (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            match_id INTEGER NOT NULL,
             team_id INTEGER NOT NULL,
             service_id INTEGER NOT NULL,
             round_number INTEGER NOT NULL,
@@ -175,9 +153,8 @@ def _create_checker_results_table(conn: sqlite3.Connection) -> None:
             duration_ms INTEGER NOT NULL CHECK(duration_ms >= 0),
             data_json TEXT NOT NULL DEFAULT '{}',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(team_id) REFERENCES teams(id) ON DELETE CASCADE,
-            FOREIGN KEY(service_id) REFERENCES services(id) ON DELETE CASCADE,
-            UNIQUE(team_id, service_id, round_number, operation)
+            FOREIGN KEY(match_id) REFERENCES matches(id) ON DELETE CASCADE,
+            UNIQUE(match_id, team_id, service_id, round_number, operation)
         );
     """)
 
@@ -193,24 +170,141 @@ def _initialize_checker_results_schema(conn: sqlite3.Connection) -> None:
     columns = {
         row[1] for row in conn.execute("PRAGMA table_info(checker_results)").fetchall()
     }
-    if "operation" in columns:
+    if "operation" in columns and "match_id" in columns:
         return
 
     conn.execute("ALTER TABLE checker_results RENAME TO checker_results_legacy")
     _create_checker_results_table(conn)
+    if "operation" in columns:
+        conn.execute("""
+            INSERT INTO checker_results (
+                id, match_id, team_id, service_id, round_number, operation,
+                plugin_name, plugin_version, status, message,
+                duration_ms, data_json, created_at
+            )
+            SELECT
+                id, 1, team_id, service_id, round_number, operation,
+                plugin_name, plugin_version, status, message,
+                duration_ms, data_json, created_at
+            FROM checker_results_legacy
+        """)
+    else:
+        conn.execute("""
+            INSERT INTO checker_results (
+                id, match_id, team_id, service_id, round_number, operation,
+                plugin_name, plugin_version, status, message,
+                duration_ms, data_json, created_at
+            )
+            SELECT
+                id, 1, team_id, service_id, round_number, 'CHECK',
+                'legacy', '0', status, COALESCE(details, ''),
+                0, '{}', created_at
+            FROM checker_results_legacy
+        """)
+    conn.execute("DROP TABLE checker_results_legacy")
+
+
+def _initialize_rounds_schema(conn: sqlite3.Connection) -> None:
+    existing = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'rounds'"
+    ).fetchone()
+    if existing is None:
+        _create_rounds_table(conn)
+        return
+
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(rounds)").fetchall()}
+    if "status" in columns and "deadline_at" in columns:
+        return
+
+    conn.execute("ALTER TABLE rounds RENAME TO rounds_legacy")
+    _create_rounds_table(conn)
     conn.execute("""
-        INSERT INTO checker_results (
-            id, team_id, service_id, round_number, operation,
-            plugin_name, plugin_version, status, message,
-            duration_ms, data_json, created_at
+        INSERT INTO rounds (
+            id, match_id, round_number, status, started_at, deadline_at,
+            completed_at, duration_seconds, error
         )
         SELECT
-            id, team_id, service_id, round_number, 'CHECK',
-            'legacy', '0', status, COALESCE(details, ''),
-            0, '{}', created_at
-        FROM checker_results_legacy
+            id, match_id, round_number, ?, started_at,
+            datetime(started_at, '+' || duration_seconds || ' seconds'),
+            started_at, duration_seconds, NULL
+        FROM rounds_legacy
+    """, (RoundState.COMPLETED.value,))
+    conn.execute("DROP TABLE rounds_legacy")
+
+
+def _create_rounds_table(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS rounds (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            match_id INTEGER NOT NULL,
+            round_number INTEGER NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('RUNNING', 'COMPLETED', 'FAILED')),
+            started_at TEXT NOT NULL,
+            deadline_at TEXT NOT NULL,
+            completed_at TEXT,
+            duration_seconds INTEGER NOT NULL CHECK(duration_seconds > 0),
+            error TEXT,
+            FOREIGN KEY(match_id) REFERENCES matches(id) ON DELETE CASCADE,
+            UNIQUE(match_id, round_number)
+        );
     """)
-    conn.execute("DROP TABLE checker_results_legacy")
+
+
+def _initialize_flags_schema(conn: sqlite3.Connection) -> None:
+    existing = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'flags'"
+    ).fetchone()
+    if existing is None:
+        _create_flags_table(conn)
+        return
+
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(flags)").fetchall()}
+    if (
+        "match_id" in columns
+        and "expires_after_round" in columns
+        and "target_host" in columns
+    ):
+        return
+
+    conn.execute("ALTER TABLE flags RENAME TO flags_legacy")
+    _create_flags_table(conn)
+    conn.execute("""
+        INSERT INTO flags (
+            id, flag, match_id, team_id, service_id, round_number,
+            target_host, service_name, service_port,
+            status, expires_after_round, created_at, expired_at
+        )
+        SELECT
+            id, flag, 1, team_id, service_id, round_number,
+            COALESCE((SELECT ip_address FROM teams WHERE id = flags_legacy.team_id), ''),
+            COALESCE((SELECT name FROM services WHERE id = flags_legacy.service_id), ''),
+            COALESCE((SELECT port FROM services WHERE id = flags_legacy.service_id), 1),
+            ?, 2147483647, created_at, NULL
+        FROM flags_legacy
+    """, (FlagState.ACTIVE.value,))
+    conn.execute("DROP TABLE flags_legacy")
+
+
+def _create_flags_table(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS flags (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            flag TEXT NOT NULL UNIQUE,
+            match_id INTEGER NOT NULL,
+            team_id INTEGER NOT NULL,
+            service_id INTEGER NOT NULL,
+            round_number INTEGER NOT NULL,
+            target_host TEXT NOT NULL,
+            service_name TEXT NOT NULL,
+            service_port INTEGER NOT NULL CHECK(service_port BETWEEN 1 AND 65535),
+            status TEXT NOT NULL CHECK(status IN ('ACTIVE', 'EXPIRED')),
+            expires_after_round INTEGER NOT NULL,
+            created_at TEXT NOT NULL,
+            expired_at TEXT,
+            FOREIGN KEY(match_id) REFERENCES matches(id) ON DELETE CASCADE,
+            UNIQUE(match_id, team_id, service_id, round_number)
+        );
+    """)
 
 
 def persist_checker_result(
@@ -218,6 +312,7 @@ def persist_checker_result(
     target: ServiceTarget,
     round_number: int,
     result: CheckerResult,
+    match_id: int = 1,
 ) -> int:
     """Persist one structured result per team/service/round/operation."""
     if round_number < 0:
@@ -226,11 +321,11 @@ def persist_checker_result(
     conn.execute(
         """
         INSERT INTO checker_results (
-            team_id, service_id, round_number, operation,
+            match_id, team_id, service_id, round_number, operation,
             plugin_name, plugin_version, status, message,
             duration_ms, data_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(team_id, service_id, round_number, operation) DO UPDATE SET
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(match_id, team_id, service_id, round_number, operation) DO UPDATE SET
             plugin_name=excluded.plugin_name,
             plugin_version=excluded.plugin_version,
             status=excluded.status,
@@ -240,6 +335,7 @@ def persist_checker_result(
             created_at=CURRENT_TIMESTAMP
         """,
         (
+            match_id,
             target.team_id,
             target.service_id,
             round_number,
@@ -256,9 +352,16 @@ def persist_checker_result(
     row = conn.execute(
         """
         SELECT id FROM checker_results
-        WHERE team_id = ? AND service_id = ? AND round_number = ? AND operation = ?
+        WHERE match_id = ? AND team_id = ? AND service_id = ?
+          AND round_number = ? AND operation = ?
         """,
-        (target.team_id, target.service_id, round_number, result.operation.value),
+        (
+            match_id,
+            target.team_id,
+            target.service_id,
+            round_number,
+            result.operation.value,
+        ),
     ).fetchone()
     if row is None:
         raise RuntimeError("persisted checker result could not be read back")

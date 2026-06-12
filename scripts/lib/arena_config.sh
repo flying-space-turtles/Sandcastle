@@ -106,6 +106,7 @@ arena_config_load() {
         ARENA_STARTUP_TIMEOUT_SECONDS
         ARENA_ROUND_DURATION_SECONDS
         ARENA_FLAG_EXPIRY_ROUNDS
+        ARENA_CHECKER_MAX_CONCURRENCY
         ARENA_GAMESERVER_PORT
         ARENA_CHECKER_SECRET
     )
@@ -127,6 +128,7 @@ arena_config_load() {
 
     # Default to 8000 if not specified
     ARENA_GAMESERVER_PORT="${ARENA_GAMESERVER_PORT:-8000}"
+    ARENA_CHECKER_MAX_CONCURRENCY="${ARENA_CHECKER_MAX_CONCURRENCY:-8}"
     ARENA_CHECKER_SECRET="${ARENA_CHECKER_SECRET:-sandcastle-local-checker-secret-change-me}"
 
     for name in "${required[@]}"; do
@@ -151,6 +153,7 @@ arena_config_load() {
     arena_config_require_int ARENA_STARTUP_TIMEOUT_SECONDS 1 86400 || return 1
     arena_config_require_int ARENA_ROUND_DURATION_SECONDS 1 86400 || return 1
     arena_config_require_int ARENA_FLAG_EXPIRY_ROUNDS 1 10000 || return 1
+    arena_config_require_int ARENA_CHECKER_MAX_CONCURRENCY 1 256 || return 1
     arena_config_require_int ARENA_GAMESERVER_PORT 1 65535 || return 1
 
     if ((${#ARENA_CHECKER_SECRET} < 16)); then
@@ -227,6 +230,7 @@ arena_config_load() {
         ARENA_STARTUP_TIMEOUT_SECONDS \
         ARENA_ROUND_DURATION_SECONDS \
         ARENA_FLAG_EXPIRY_ROUNDS \
+        ARENA_CHECKER_MAX_CONCURRENCY \
         ARENA_GAMESERVER_PORT \
         ARENA_CHECKER_SECRET \
         ARENA_CONFIG_FILE

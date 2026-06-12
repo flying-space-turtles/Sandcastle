@@ -76,6 +76,7 @@ This runs in order:
 | `firewall_test.py` | Firewall classification and event unit tests |
 | `gameserver_test.py` | Gameserver schema, registry, state, and API tests |
 | `checker_test.py` | Checker statuses, persistence, scoping, and TurtleNotes workflows |
+| `round_engine_test.py` | Fake-clock scheduling, retries, expiry, concurrency, and recovery |
 | `firewall_preflight_test.sh` | Host preflight flag handling |
 | `network_smoke_test.sh` | Smoke-network script fixture tests |
 | `doctor_test.sh` | Doctor script fixture tests |

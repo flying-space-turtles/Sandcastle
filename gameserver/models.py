@@ -13,6 +13,17 @@ class MatchState(str, enum.Enum):
     FAILED = "FAILED"
 
 
+class RoundState(str, enum.Enum):
+    RUNNING = "RUNNING"
+    COMPLETED = "COMPLETED"
+    FAILED = "FAILED"
+
+
+class FlagState(str, enum.Enum):
+    ACTIVE = "ACTIVE"
+    EXPIRED = "EXPIRED"
+
+
 # Valid transitions for match states.
 # Self-transitions are handled separately as idempotent no-ops.
 VALID_TRANSITIONS = {
@@ -102,25 +113,37 @@ class Service:
 @dataclass
 class Round:
     id: int
-    round_number: int
     match_id: int
+    round_number: int
+    status: RoundState
     started_at: str
+    deadline_at: str
+    completed_at: Optional[str]
     duration_seconds: int
+    error: Optional[str]
 
 
 @dataclass
 class Flag:
     id: int
     flag: str
+    match_id: int
     team_id: int
     service_id: int
     round_number: int
+    target_host: str
+    service_name: str
+    service_port: int
+    status: FlagState
+    expires_after_round: int
     created_at: str
+    expired_at: Optional[str]
 
 
 @dataclass
 class CheckerResult:
     id: int
+    match_id: int
     team_id: int
     service_id: int
     round_number: int

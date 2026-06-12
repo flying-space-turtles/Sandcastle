@@ -128,6 +128,7 @@ after="$(fixture_hashes "${deterministic_fixture}")"
     exit 1
 }
 grep -Fq 'team_count: 2' "${deterministic_fixture}/docker-compose.yml"
+grep -Fq 'checker_max_concurrency: 8' "${deterministic_fixture}/docker-compose.yml"
 grep -Fq '2202:22' "${deterministic_fixture}/docker-compose.yml"
 team1_service_compose="${deterministic_fixture}/teams/generated/team1/example-vuln/docker-compose.yml"
 team2_service_compose="${deterministic_fixture}/teams/generated/team2/example-vuln/docker-compose.yml"

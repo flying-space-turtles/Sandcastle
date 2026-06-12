@@ -140,6 +140,7 @@ class GameserverHTTPTest(unittest.TestCase):
 
         # Start HTTPServer in background thread
         import main
+        cls.main_module = main
         cls.server = HTTPServer((cls.host, cls.port), main.GameserverAPIHandler)
         cls.assigned_port = cls.server.server_port
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
@@ -149,10 +150,33 @@ class GameserverHTTPTest(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        cls.main_module.GameserverAPIHandler.tick_engine = None
         cls.server.shutdown()
         cls.server.server_close()
         if os.path.exists(cls.db_path):
             os.unlink(cls.db_path)
+
+    def setUp(self):
+        self.main_module.GameserverAPIHandler.tick_engine = None
+        conn = db.get_db_connection(self.db_path)
+        conn.execute("DELETE FROM checker_results")
+        conn.execute("DELETE FROM flags")
+        conn.execute("DELETE FROM rounds")
+        conn.execute(
+            "UPDATE matches SET status = ? WHERE id = 1",
+            (MatchState.CREATED.value,),
+        )
+        conn.commit()
+        conn.close()
+
+    def _post(self, path, body=None):
+        data = json.dumps(body).encode() if body is not None else b""
+        request = urllib.request.Request(
+            f"{self.base_url}{path}",
+            data=data,
+            headers={"Content-Type": "application/json"},
+        )
+        return urllib.request.urlopen(request)
 
     def test_get_health(self):
         url = f"{self.base_url}/health"
@@ -200,6 +224,44 @@ class GameserverHTTPTest(unittest.TestCase):
         err_body = json.loads(ctx.exception.read().decode())
         self.assertIn("error", err_body)
         self.assertIn("Invalid match state transition", err_body["error"])
+
+    def test_pause_resume_and_single_step_controls(self):
+        with self._post("/match/resume") as resp:
+            self.assertEqual(json.loads(resp.read().decode())["status"], "RUNNING")
+        with self._post("/match/pause") as resp:
+            self.assertEqual(json.loads(resp.read().decode())["status"], "PAUSED")
+
+        class FakeRound:
+            def as_dict(self):
+                return {"round_number": 7, "status": "COMPLETED"}
+
+        class FakeEngine:
+            def single_step(self):
+                return FakeRound()
+
+        self.main_module.GameserverAPIHandler.tick_engine = FakeEngine()
+        with self._post("/rounds/step") as resp:
+            body = json.loads(resp.read().decode())
+            self.assertEqual(body["round"]["round_number"], 7)
+            self.assertEqual(body["round"]["status"], "COMPLETED")
+
+    def test_get_current_round(self):
+        conn = db.get_db_connection(self.db_path)
+        conn.execute(
+            """
+            INSERT INTO rounds (
+                match_id, round_number, status, started_at, deadline_at,
+                completed_at, duration_seconds
+            ) VALUES (1, 1, 'COMPLETED', '2026-01-01T00:00:00Z',
+                      '2026-01-01T00:02:00Z', '2026-01-01T00:00:01Z', 120)
+            """
+        )
+        conn.commit()
+        conn.close()
+        with urllib.request.urlopen(f"{self.base_url}/rounds/current") as resp:
+            body = json.loads(resp.read().decode())
+            self.assertEqual(body["round_number"], 1)
+            self.assertEqual(body["status"], "COMPLETED")
 
 
 if __name__ == "__main__":
