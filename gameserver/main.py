@@ -9,6 +9,10 @@ Exposes:
   - POST /match/state → Transition the match state (idempotent, validated)
   - GET  /teams       → List registered teams and details
   - GET  /services    → List registered services and details
+  - GET  /rounds/current → Read the latest persisted round
+  - POST /match/pause → Pause automatic round creation
+  - POST /match/resume → Resume automatic round creation
+  - POST /rounds/step → Run one round while paused
 """
 
 from __future__ import annotations
@@ -17,18 +21,22 @@ import argparse
 import json
 import re
 import sys
+import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from typing import Any
 from urllib.parse import urlparse
 
 import db
 from models import Match, MatchState, Service, Team, validate_state_transition
+from tick_engine import OperatorStateError, RoundEngineError, TickEngine, build_tick_engine
 
 
 ALLOWED_ORIGINS = re.compile(r"^https?://localhost(:\d+)?$")
 
 
 class GameserverAPIHandler(BaseHTTPRequestHandler):
+    tick_engine: TickEngine | None = None
+
     def log_message(self, fmt: str, *args: Any) -> None:
         # Silence default access logging to keep stdout clean
         pass
@@ -141,16 +149,62 @@ class GameserverAPIHandler(BaseHTTPRequestHandler):
                     conn.close()
             return
 
+        # ── GET /rounds/current ──
+        if path == "/rounds/current" or path == "/api/rounds/current":
+            conn = None
+            try:
+                conn = db.get_db_connection()
+                row = conn.execute(
+                    """
+                    SELECT id, match_id, round_number, status, started_at,
+                           deadline_at, completed_at, duration_seconds, error
+                    FROM rounds WHERE match_id = 1
+                    ORDER BY round_number DESC LIMIT 1
+                    """
+                ).fetchone()
+                if row is None:
+                    self._json(404, {"error": "no rounds have started"})
+                else:
+                    self._json(200, {
+                        "id": row[0],
+                        "match_id": row[1],
+                        "round_number": row[2],
+                        "status": row[3],
+                        "started_at": row[4],
+                        "deadline_at": row[5],
+                        "completed_at": row[6],
+                        "duration_seconds": row[7],
+                        "error": row[8],
+                    })
+            except Exception as exc:
+                self._json(500, {"error": f"Database error: {str(exc)}"})
+            finally:
+                if conn:
+                    conn.close()
+            return
+
         self._json(404, {"error": "not found"})
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
 
-        # ── POST /match/state ──
-        if path == "/match/state" or path == "/api/match/state":
+        # ── POST /match/state, /match/pause, /match/resume ──
+        if path in {
+            "/match/state",
+            "/api/match/state",
+            "/match/pause",
+            "/api/match/pause",
+            "/match/resume",
+            "/api/match/resume",
+        }:
             body = self._read_body()
-            target_status = body.get("status")
+            if path.endswith("/pause"):
+                target_status = MatchState.PAUSED.value
+            elif path.endswith("/resume"):
+                target_status = MatchState.RUNNING.value
+            else:
+                target_status = body.get("status")
             if not target_status:
                 self._json(400, {"error": "status field is required"})
                 return
@@ -202,6 +256,22 @@ class GameserverAPIHandler(BaseHTTPRequestHandler):
                     conn.close()
             return
 
+        # ── POST /rounds/step ──
+        if path == "/rounds/step" or path == "/api/rounds/step":
+            if self.tick_engine is None:
+                self._json(503, {"error": "round engine is not configured"})
+                return
+            try:
+                record = self.tick_engine.single_step()
+                self._json(200, {"round": record.as_dict()})
+            except OperatorStateError as exc:
+                self._json(409, {"error": str(exc)})
+            except RoundEngineError as exc:
+                self._json(500, {"error": str(exc)})
+            except Exception as exc:  # noqa: BLE001 - HTTP boundary
+                self._json(500, {"error": f"round step failed: {type(exc).__name__}"})
+            return
+
         self._json(404, {"error": "not found"})
 
 
@@ -243,13 +313,33 @@ def main() -> None:
         print(f"[!] Registry synchronization failed: {e}", file=sys.stderr)
         # We don't fail-hard on registry sync in case file isn't mounted during tests/local startup
 
-    # 3. Start HTTPServer
+    # 3. Start the persisted round scheduler.
+    try:
+        tick_engine = build_tick_engine()
+    except Exception as e:
+        print(f"[!] Round engine initialization failed: {e}", file=sys.stderr)
+        sys.exit(1)
+    GameserverAPIHandler.tick_engine = tick_engine
+    scheduler_stop = threading.Event()
+    scheduler = threading.Thread(
+        target=tick_engine.run_forever,
+        args=(scheduler_stop,),
+        name="round-scheduler",
+        daemon=True,
+    )
+    scheduler.start()
+
+    # 4. Start HTTPServer
     server = HTTPServer((args.host, args.port), GameserverAPIHandler)
     print(f"[*] Gameserver API listening on http://{args.host}:{args.port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         print("\n[*] Shutting down gameserver")
+    finally:
+        scheduler_stop.set()
+        scheduler.join(timeout=2)
+        server.server_close()
 
 
 if __name__ == "__main__":

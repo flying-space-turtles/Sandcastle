@@ -59,6 +59,7 @@ python3 -B -m py_compile \
     "${ROOT}/gameserver/checkers/"*.py \
     "${ROOT}/tests/checker_test.py" \
     "${ROOT}/tests/gameserver_test.py" \
+    "${ROOT}/tests/round_engine_test.py" \
     "${ROOT}/services/example-vuln/app/app.py" \
     "${ROOT}/services/example-vuln/checker.py" \
     "${ROOT}/services/example-vuln/exploits/"*.py
@@ -75,6 +76,10 @@ python3 -B "${ROOT}/tests/gameserver_test.py"
 # ---------------------------------------------------------------------------
 step "Checker contract and TurtleNotes tests"
 python3 -B "${ROOT}/tests/checker_test.py"
+
+# ---------------------------------------------------------------------------
+step "Round scheduling and flag lifecycle tests"
+python3 -B "${ROOT}/tests/round_engine_test.py"
 
 # ---------------------------------------------------------------------------
 step "Firewall host preflight tests"

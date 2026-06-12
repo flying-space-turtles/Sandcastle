@@ -25,10 +25,27 @@ class CheckerRunner:
         plugin: CheckerPlugin,
         request: CheckerRequest,
         round_number: int,
+        match_id: int = 1,
     ) -> CheckerResult:
         if round_number < 0:
             raise ValueError("round_number must be non-negative")
 
+        result = self.execute(plugin, request)
+        db.persist_checker_result(
+            conn,
+            target=request.context.target,
+            round_number=round_number,
+            result=result,
+            match_id=match_id,
+        )
+        return result
+
+    def execute(
+        self,
+        plugin: CheckerPlugin,
+        request: CheckerRequest,
+    ) -> CheckerResult:
+        """Execute without persistence so callers can serialize database writes."""
         started = time.monotonic()
         operation = request.operation
         outcome = self._execute(plugin, request)
@@ -41,12 +58,6 @@ class CheckerRunner:
             message=outcome.message,
             duration_ms=duration_ms,
             data=outcome.data,
-        )
-        db.persist_checker_result(
-            conn,
-            target=request.context.target,
-            round_number=round_number,
-            result=result,
         )
         return result
 

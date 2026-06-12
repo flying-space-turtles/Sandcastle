@@ -6,8 +6,7 @@ software agents that patch their own services and attack opponents.
 The repository currently provides team environments, an intentionally
 vulnerable service, scripted bots, a topology visualizer, a network monitor, a
 persistent gameserver core, and a typed checker framework. It does **not** yet
-provide timed rounds, authoritative flag submission, SLA scoring, or a
-scoreboard.
+provide authoritative flag submission, SLA scoring, or a scoreboard.
 
 - Product direction: [`VISION.md`](VISION.md)
 - Current audit and prioritized agent backlog:
@@ -27,9 +26,9 @@ scoreboard.
 | `bot/` | Scripted action/planner runtime and local control API | Offensive path works; watchdog is currently ineffective |
 | `firewall/` | Source-masking proxy and WebSocket activity feed | Enforced and smoke-tested on native Linux |
 | `visualizer/` | React topology, event, and bot UI | Implemented |
-| `gameserver/` | Persistent match state and service registry | Core implemented |
+| `gameserver/` | Persistent match state, timed rounds, flags, and recovery | Implemented |
 | Service checkers | PUT, GET, CHECK contract and TurtleNotes plugin | Implemented |
-| Rounds/submissions/scoring | Competition lifecycle and authority | Not implemented |
+| Submissions/scoring | Competition authority and score calculation | Not implemented |
 
 ## Requirements
 
@@ -92,7 +91,8 @@ resources.
 
 Edit [`config/arena.env`](config/arena.env) to change the arena topology. It is
 the canonical source for team count, network, service and host ports,
-credentials, startup timeout, bot defaults, and future round defaults.
+credentials, startup timeout, bot defaults, round duration, flag expiry, and
+checker concurrency.
 
 Keep it as simple `KEY=VALUE` entries. `scripts/setup.sh` validates the values
 and rejects port collisions, unsupported subnet layouts, missing templates,
@@ -108,6 +108,22 @@ credentials, internal app targets, health commands, and local control URLs:
 ```bash
 ./scripts/setup.sh --show-access
 ```
+
+## Round Controls
+
+The gameserver creates rounds automatically while the match is `RUNNING`. Each
+round persists one unique flag per team/service, then runs bounded PUT, CHECK,
+and GET checker operations. See
+[`docs/round-engine.md`](docs/round-engine.md) for lifecycle and recovery rules.
+
+```bash
+curl -s -X POST http://localhost:8000/match/resume
+curl -s -X POST http://localhost:8000/match/pause
+curl -s -X POST http://localhost:8000/rounds/step
+curl -s http://localhost:8000/rounds/current
+```
+
+Single-step requires a paused match and does not resume automatic scheduling.
 
 ## Quick Start
 

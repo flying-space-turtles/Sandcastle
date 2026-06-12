@@ -2,9 +2,9 @@
 
 This repository models the container layout for a local Attack & Defense CTF,
 includes a template vulnerable service, and provides a persistent gameserver
-core plus typed service checkers. It does not yet include round scheduling,
-submissions, scoreboards, or scoring. See `../VISION.md` for the target product
-and `PROJECT_AUDIT_AND_BACKLOG.md` for the implementation plan.
+core, typed service checkers, and persisted round scheduling. It does not yet
+include submissions, scoreboards, or scoring. See `../VISION.md` for the target
+product and `PROJECT_AUDIT_AND_BACKLOG.md` for the implementation plan.
 
 ## Topology
 
@@ -104,11 +104,28 @@ requires explicit handling of stale higher-numbered containers.
 `arena.sh reset` additionally removes `sandcastle_team<N>-data` volumes while
 preserving the generated source tree.
 
+## Round Persistence
+
+The gameserver snapshots every team/service target and its generated flag in
+the same transaction that creates a round. Checker results form an operation
+journal keyed by match, target, round, and PUT/GET/CHECK operation. A restarted
+gameserver resumes a `RUNNING` round by executing only missing journal entries.
+
+Round numbers are unique per match. Flags are unique globally and also unique
+per match/team/service/round. Starting a later persisted round expires older
+flags according to `ARENA_FLAG_EXPIRY_ROUNDS`. Checker failures remain normal
+round outcomes; an internal persistence invariant failure marks the round and
+match failed.
+
+Automatic scheduling reads `ARENA_ROUND_DURATION_SECONDS`. Checker jobs use a
+bounded executor configured by `ARENA_CHECKER_MAX_CONCURRENCY`. Operator pause,
+resume, and single-step behavior is documented in
+[`round-engine.md`](round-engine.md).
+
 ## Iteration Path
 
 The next layers can be added independently:
 
-- round scheduling and flag expiry
 - authenticated flag submission and scoring
 - a scoreboard or operator dashboard
 

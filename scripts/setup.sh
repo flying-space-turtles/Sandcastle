@@ -373,6 +373,7 @@ x-sandcastle-arena:
   startup_timeout_seconds: ${ARENA_STARTUP_TIMEOUT_SECONDS}
   round_duration_seconds: ${ARENA_ROUND_DURATION_SECONDS}
   flag_expiry_rounds: ${ARENA_FLAG_EXPIRY_ROUNDS}
+  checker_max_concurrency: ${ARENA_CHECKER_MAX_CONCURRENCY}
   gameserver_port: ${ARENA_GAMESERVER_PORT}
 
 networks:
@@ -522,7 +523,7 @@ print_summary() {
     done
     echo
     echo "Service port: ${ARENA_SERVICE_PORT}"
-    echo "Round defaults: ${ARENA_ROUND_DURATION_SECONDS}s, expiry ${ARENA_FLAG_EXPIRY_ROUNDS} rounds"
+    echo "Round defaults: ${ARENA_ROUND_DURATION_SECONDS}s, expiry ${ARENA_FLAG_EXPIRY_ROUNDS} rounds, ${ARENA_CHECKER_MAX_CONCURRENCY} checker workers"
 
     if ((SHOW_ACCESS)); then
         echo
