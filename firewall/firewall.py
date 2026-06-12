@@ -9,7 +9,9 @@ organizer-visible activity events over WebSocket.
 """
 
 import asyncio
+import collections
 import contextlib
+import errno
 import ipaddress
 import json
 import os
@@ -28,6 +30,11 @@ import websockets
 CTF_NETWORK = ipaddress.ip_network(os.environ["CTF_NETWORK"])
 WS_PORT = int(os.environ["WS_PORT"])
 PROXY_PORT = int(os.environ["PROXY_PORT"])
+EVENT_QUEUE_SIZE = int(os.environ.get("EVENT_QUEUE_SIZE", "2048"))
+CAPTURE_RCVBUF_BYTES = int(
+    os.environ.get("CAPTURE_RCVBUF_BYTES", str(4 * 1024 * 1024))
+)
+RECENT_ICMP_LIMIT = int(os.environ.get("RECENT_ICMP_LIMIT", "4096"))
 RULE_COMMENT = "sandcastle-firewall-transparent-proxy"
 SO_ORIGINAL_DST = 80
 BUFFER_SIZE = 64 * 1024
@@ -194,9 +201,26 @@ def _payload_detail(payload: bytes) -> tuple[str, str]:
     return text, detail
 
 
-_event_queue: queue.Queue = queue.Queue()
+_event_queue: queue.Queue = queue.Queue(maxsize=EVENT_QUEUE_SIZE)
 _clients: set = set()
-_recent_icmp_events: dict[tuple[str, str, int, int | None, int | None], float] = {}
+_recent_icmp_events: collections.OrderedDict[
+    tuple[str, str, int, int | None, int | None], float
+] = collections.OrderedDict()
+_dropped_events = 0
+
+
+def _enqueue_event(event: dict) -> None:
+    global _dropped_events
+
+    try:
+        _event_queue.put_nowait(event)
+    except queue.Full:
+        _dropped_events += 1
+        if _dropped_events == 1 or _dropped_events % 100 == 0:
+            print(
+                f"[firewall] WARNING: event queue full; dropped {_dropped_events} event(s)",
+                flush=True,
+            )
 
 
 def _emit_event(
@@ -221,7 +245,7 @@ def _emit_event(
         "port": dst_port,
         "detail": detail,
     }
-    _event_queue.put(event)
+    _enqueue_event(event)
     print(
         f"[event] {event['type']:<16} {event['src']} ({src_ip}) -> "
         f"{event['dst']} ({dst_ip}:{dst_port}) as {masked_src_ip or 'unknown'} {detail[:70]}",
@@ -237,15 +261,19 @@ def _should_emit_icmp_event(
     icmp_id: int | None,
 ) -> bool:
     now = time.monotonic()
-    stale = [key for key, seen_at in _recent_icmp_events.items() if now - seen_at > 1.0]
-    for key in stale:
-        _recent_icmp_events.pop(key, None)
+    while _recent_icmp_events:
+        first_key = next(iter(_recent_icmp_events))
+        if now - _recent_icmp_events[first_key] <= 1.0:
+            break
+        _recent_icmp_events.popitem(last=False)
 
     key = (src_ip, dst_ip, icmp_type, icmp_code, icmp_id)
     if key in _recent_icmp_events:
         return False
 
     _recent_icmp_events[key] = now
+    while len(_recent_icmp_events) > RECENT_ICMP_LIMIT:
+        _recent_icmp_events.popitem(last=False)
     return True
 
 
@@ -278,7 +306,7 @@ def _emit_icmp_event(
         "port": 0,
         "detail": detail,
     }
-    _event_queue.put(event)
+    _enqueue_event(event)
     print(
         f"[event] {'icmp':<16} {event['src']} ({src_ip}) -> "
         f"{event['dst']} ({dst_ip}) type={icmp_type}",
@@ -302,7 +330,7 @@ def _emit_udp_event(src_ip: str, dst_ip: str, src_port: int, dst_port: int, payl
         "port": dst_port,
         "detail": detail,
     }
-    _event_queue.put(event)
+    _enqueue_event(event)
     print(f"[event] {proto:<16} {event['src']} ({src_ip}:{src_port}) -> {event['dst']} ({dst_ip}:{dst_port})", flush=True)
 
 
@@ -399,6 +427,7 @@ async def _icmp_conntrack_loop(stop_event: asyncio.Event) -> None:
 
     try:
         netlink_sock = socket.socket(socket.AF_NETLINK, socket.SOCK_RAW, NETLINK_NETFILTER)
+        netlink_sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, CAPTURE_RCVBUF_BYTES)
         netlink_sock.bind((0, NFNLGRP_CONNTRACK_NEW))
     except OSError as exc:
         print(f"[firewall] WARNING: ICMP conntrack capture disabled: {exc}", flush=True)
@@ -414,6 +443,13 @@ async def _icmp_conntrack_loop(stop_event: asyncio.Event) -> None:
             except socket.timeout:
                 continue
             except OSError as exc:
+                if exc.errno == errno.ENOBUFS:
+                    print(
+                        "[firewall] WARNING: conntrack receive buffer overflow; "
+                        "events were dropped but capture will continue",
+                        flush=True,
+                    )
+                    continue
                 if not stop_event.is_set():
                     print(f"[firewall] WARNING: ICMP conntrack capture failed: {exc}", flush=True)
                 break
@@ -438,6 +474,7 @@ async def _icmp_sniff_loop(stop_event: asyncio.Event) -> None:
 
     try:
         raw_sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(ETH_P_IP))
+        raw_sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, CAPTURE_RCVBUF_BYTES)
     except OSError as exc:
         print(f"[firewall] WARNING: ICMP activity capture disabled: {exc}", flush=True)
         return
@@ -452,6 +489,13 @@ async def _icmp_sniff_loop(stop_event: asyncio.Event) -> None:
             except socket.timeout:
                 continue
             except OSError as exc:
+                if exc.errno == errno.ENOBUFS:
+                    print(
+                        "[firewall] WARNING: ICMP receive buffer overflow; "
+                        "packets were dropped but capture will continue",
+                        flush=True,
+                    )
+                    continue
                 if not stop_event.is_set():
                     print(f"[firewall] WARNING: ICMP capture failed: {exc}", flush=True)
                 break
@@ -493,6 +537,7 @@ async def _udp_sniff_loop(stop_event: asyncio.Event) -> None:
 
     try:
         raw_sock = socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(ETH_P_IP))
+        raw_sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, CAPTURE_RCVBUF_BYTES)
     except OSError as exc:
         print(f"[firewall] WARNING: UDP capture disabled: {exc}", flush=True)
         return
@@ -507,6 +552,13 @@ async def _udp_sniff_loop(stop_event: asyncio.Event) -> None:
             except socket.timeout:
                 continue
             except OSError as exc:
+                if exc.errno == errno.ENOBUFS:
+                    print(
+                        "[firewall] WARNING: UDP receive buffer overflow; "
+                        "packets were dropped but capture will continue",
+                        flush=True,
+                    )
+                    continue
                 if not stop_event.is_set():
                     print(f"[firewall] WARNING: UDP capture failed: {exc}", flush=True)
                 break
@@ -641,6 +693,19 @@ async def main() -> None:
     for sig in (signal.SIGTERM, signal.SIGINT):
         with contextlib.suppress(NotImplementedError):
             loop.add_signal_handler(sig, stop_event.set)
+
+    bridge_netfilter_path = "/proc/sys/net/bridge/bridge-nf-call-iptables"
+    try:
+        with open(bridge_netfilter_path, encoding="ascii") as bridge_file:
+            bridge_value = bridge_file.read().strip()
+    except OSError as exc:
+        raise RuntimeError(
+            f"required bridge netfilter control is unavailable: {bridge_netfilter_path}"
+        ) from exc
+    if bridge_value != "1":
+        raise RuntimeError(
+            "net.bridge.bridge-nf-call-iptables must be 1 for transparent enforcement"
+        )
 
     install_redirect_rule()
 

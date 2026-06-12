@@ -39,12 +39,21 @@ ctf-network (bridge, 10.10.0.0/16)
 Docker Compose creates the shared bridge network and assigns deterministic IP
 addresses so future checkers, gameservers, and teams can use stable targets.
 
-The firewall prototype intends to redirect team-to-team TCP traffic through a
-host transparent proxy. This depends on bridge traffic traversing host
-`iptables` PREROUTING. The current implementation does not fail when that host
-capability is absent, so destination source masking and activity events must be
-verified from the redirect rule packet counter. Making this deterministic is
-tracked as SC-004.
+The firewall redirects team-to-team TCP traffic through a host transparent
+proxy. This requires a native Linux host with `br_netfilter` and
+`net.bridge.bridge-nf-call-iptables=1`. `scripts/firewall-preflight.sh` verifies
+or configures that requirement, and the firewall process refuses to start when
+the kernel path is inactive.
+
+After apps become healthy, `scripts/arena.sh up` runs
+`scripts/smoke-network.sh`. The smoke test proves that a cross-team request
+increments the redirect counter, reaches the destination with the configured
+gateway source identity, and emits a WebSocket event containing the original
+source and destination. Startup fails if any part of that contract is absent.
+
+Packet capture uses bounded kernel receive buffers, a bounded event queue, and
+a bounded ICMP de-duplication cache. Netlink or raw-socket buffer pressure is
+reported while capture continues.
 
 ## Generated Services
 

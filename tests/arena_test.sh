@@ -35,6 +35,11 @@ ARENA_TEAM_PASSWORD_PATTERN=team{team}pass
 ARENA_SERVICE_TEMPLATE=services/example-vuln
 ARENA_FIREWALL_WS_PORT=6789
 ARENA_FIREWALL_PROXY_PORT=15000
+ARENA_FIREWALL_PROBE_PORT=18080
+ARENA_FIREWALL_SMOKE_TIMEOUT_SECONDS=15
+ARENA_FIREWALL_EVENT_QUEUE_SIZE=2048
+ARENA_FIREWALL_CAPTURE_RCVBUF_BYTES=4194304
+ARENA_FIREWALL_RECENT_ICMP_LIMIT=4096
 ARENA_BOT_API_HOST=127.0.0.1
 ARENA_BOT_API_PORT=7878
 ARENA_BOT_LOOP_SECONDS=60
@@ -57,6 +62,24 @@ set -euo pipefail
 printf 'setup %s\n' "$*" >> "${ARENA_TEST_LOG:?}"
 EOF
 chmod +x "${FIXTURE}/scripts/setup.sh"
+
+cat > "${FIXTURE}/scripts/firewall-preflight.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'preflight %s\n' "$*" >> "${ARENA_TEST_LOG:?}"
+[[ "${ARENA_TEST_PREFLIGHT_FAIL:-0}" != "1" ]]
+EOF
+
+cat > "${FIXTURE}/scripts/smoke-network.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'network-smoke\n' >> "${ARENA_TEST_LOG:?}"
+[[ "${ARENA_TEST_SMOKE_FAIL:-0}" != "1" ]]
+EOF
+
+chmod +x \
+    "${FIXTURE}/scripts/firewall-preflight.sh" \
+    "${FIXTURE}/scripts/smoke-network.sh"
 
 cat > "${MOCK_BIN}/docker" <<'EOF'
 #!/usr/bin/env bash
@@ -154,6 +177,8 @@ grep -Fq "Complete arena is healthy" <<< "${up_output}"
 grep -Fq "team1" <<< "${up_output}"
 grep -Fq "healthy" <<< "${up_output}"
 assert_log "setup --remove-orphan-containers --teams 2"
+assert_log "preflight --check"
+assert_log "network-smoke"
 assert_log "docker compose -f ${FIXTURE}/docker-compose.yml up -d --build --remove-orphans"
 assert_log "docker rm -f team1-vuln-app"
 assert_log "docker compose -f ${FIXTURE}/teams/generated/team1/example-vuln/docker-compose.yml up -d --build --force-recreate --remove-orphans"
@@ -235,5 +260,35 @@ source_after="$(
     echo "Lifecycle commands modified participant source patches" >&2
     exit 1
 }
+
+: > "${LOG_FILE}"
+set +e
+preflight_failure="$(
+    ARENA_TEST_PREFLIGHT_FAIL=1 run_arena healthy up --timeout 1 2>&1
+)"
+preflight_rc=$?
+set -e
+((preflight_rc != 0)) || {
+    echo "Startup should fail when firewall preflight fails" >&2
+    exit 1
+}
+grep -Fq "firewall host preflight failed" <<< "${preflight_failure}"
+if grep -Fq "docker compose -f ${FIXTURE}/docker-compose.yml up" "${LOG_FILE}"; then
+    echo "Infrastructure started after firewall preflight failure" >&2
+    exit 1
+fi
+
+: > "${LOG_FILE}"
+set +e
+smoke_failure="$(
+    ARENA_TEST_SMOKE_FAIL=1 run_arena healthy up --timeout 1 2>&1
+)"
+smoke_rc=$?
+set -e
+((smoke_rc != 0)) || {
+    echo "Startup should fail when the network smoke test fails" >&2
+    exit 1
+}
+grep -Fq "firewall network smoke test failed" <<< "${smoke_failure}"
 
 echo "arena lifecycle tests: ok"

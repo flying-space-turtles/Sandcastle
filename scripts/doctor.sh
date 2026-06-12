@@ -779,9 +779,9 @@ check_firewall() {
             "Could not read the redirect rule packet counter." \
             "Run docker exec sandcastle-firewall iptables -t nat -L PREROUTING -n -v -x --line-numbers and inspect the rule."
     elif ((packets == 0)); then
-        report WARN firewall.traffic \
-            "The redirect rule exists but has seen zero packets; masking and TCP events are not yet proven." \
-            "Start the apps, make a cross-team request, then rerun ./scripts/doctor.sh; see README.md#firewall-and-activity-feed."
+        report FAIL firewall.traffic \
+            "The redirect rule has seen zero packets, so required enforcement has not been proven." \
+            "Run ./scripts/smoke-network.sh and inspect firewall logs; arena startup must fail until this passes."
     else
         report PASS firewall.traffic "The redirect rule has processed ${packets} packet(s)."
     fi

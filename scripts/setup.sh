@@ -17,6 +17,7 @@ OVERWRITE_SERVICES=0
 PRUNE_EXTRA_TEAMS=1
 REMOVE_ORPHAN_CONTAINERS=0
 ALLOW_ORPHAN_CONTAINERS=0
+SHOW_ACCESS=0
 
 declare -a REQUIRED_SERVICE_PATHS=(
     "Dockerfile"
@@ -46,6 +47,8 @@ Options:
                 Remove stale team containers outside the requested topology.
   --allow-orphan-containers
                 Generate despite stale team containers, with an explicit warning.
+  --show-access
+                Print development SSH credentials and connection commands.
   --help, -h
                 Show this help text.
 
@@ -102,6 +105,10 @@ parse_args() {
                 ;;
             --allow-orphan-containers)
                 ALLOW_ORPHAN_CONTAINERS=1
+                shift
+                ;;
+            --show-access)
+                SHOW_ACCESS=1
                 shift
                 ;;
             -h|--help)
@@ -441,6 +448,9 @@ EOF
       CTF_NETWORK: "${ARENA_CTF_SUBNET}"
       WS_PORT: "${ARENA_FIREWALL_WS_PORT}"
       PROXY_PORT: "${ARENA_FIREWALL_PROXY_PORT}"
+      EVENT_QUEUE_SIZE: "${ARENA_FIREWALL_EVENT_QUEUE_SIZE}"
+      CAPTURE_RCVBUF_BYTES: "${ARENA_FIREWALL_CAPTURE_RCVBUF_BYTES}"
+      RECENT_ICMP_LIMIT: "${ARENA_FIREWALL_RECENT_ICMP_LIMIT}"
     cap_add:
       - NET_ADMIN
       - NET_RAW
@@ -457,24 +467,42 @@ print_summary() {
     echo
     echo "Generated ${teams} team(s) from ${ARENA_CONFIG_FILE#${ROOT}/}."
     echo
-    printf '%-8s %-15s %-15s %-9s %-12s %-16s\n' \
-        "Team" "SSH IP" "Vuln/App IP" "SSH Port" "Username" "Password"
-    printf '%-8s %-15s %-15s %-9s %-12s %-16s\n' \
-        "----" "------" "-----------" "--------" "--------" "--------"
+    printf '%-8s %-15s %-15s %-9s\n' \
+        "Team" "SSH IP" "Vuln/App IP" "SSH Port"
+    printf '%-8s %-15s %-15s %-9s\n' \
+        "----" "------" "-----------" "--------"
     for ((i = 1; i <= teams; i++)); do
-        username="$(arena_config_render_team_value "${ARENA_TEAM_USERNAME_PATTERN}" "${i}")"
-        password="$(arena_config_render_team_value "${ARENA_TEAM_PASSWORD_PATTERN}" "${i}")"
-        printf '%-8s %-15s %-15s %-9s %-12s %-16s\n' \
+        printf '%-8s %-15s %-15s %-9s\n' \
             "team${i}" \
             "${ARENA_NETWORK_PREFIX}.${i}.2" \
             "${ARENA_NETWORK_PREFIX}.${i}.3" \
-            "$((ARENA_SSH_BASE_PORT + i))" \
-            "${username}" \
-            "${password}"
+            "$((ARENA_SSH_BASE_PORT + i))"
     done
     echo
     echo "Service port: ${ARENA_SERVICE_PORT}"
     echo "Round defaults: ${ARENA_ROUND_DURATION_SECONDS}s, expiry ${ARENA_FLAG_EXPIRY_ROUNDS} rounds"
+
+    if ((SHOW_ACCESS)); then
+        echo
+        echo "Development access details (contains credentials):"
+        for ((i = 1; i <= teams; i++)); do
+            username="$(arena_config_render_team_value "${ARENA_TEAM_USERNAME_PATTERN}" "${i}")"
+            password="$(arena_config_render_team_value "${ARENA_TEAM_PASSWORD_PATTERN}" "${i}")"
+            echo
+            echo "  team${i}"
+            echo "    Gateway SSH:  ssh -p $((ARENA_SSH_BASE_PORT + i)) ${username}@localhost"
+            echo "    Password:     ${password}"
+            echo "    Vuln machine: ssh ${username}@team${i}-vuln"
+            echo "    App target:   http://${ARENA_NETWORK_PREFIX}.${i}.3:${ARENA_SERVICE_PORT}"
+            echo "    App health:   docker exec team${i}-vuln curl -fsS http://127.0.0.1:${ARENA_SERVICE_PORT}/health"
+        done
+        echo
+        echo "  Firewall feed: ws://localhost:${ARENA_FIREWALL_WS_PORT}"
+        echo "  Bot API:       http://${ARENA_BOT_API_HOST}:${ARENA_BOT_API_PORT}"
+    else
+        echo "Run ./scripts/setup.sh --show-access to print development credentials and connection commands."
+    fi
+
     echo
     echo "Next:"
     echo "  ./scripts/arena.sh up"

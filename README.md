@@ -24,7 +24,7 @@ flag submission, SLA scoring, or a scoreboard.
 | `teamN-vuln-app` | Per-team vulnerable Flask service | Generated, started, and health-checked automatically |
 | `services/example-vuln` | TurtleNotes challenge template and exploits | Implemented |
 | `bot/` | Scripted action/planner runtime and local control API | Offensive path works; watchdog is currently ineffective |
-| `firewall/` | Source-masking proxy and WebSocket activity feed | Linux-host dependent and not yet fail-safe |
+| `firewall/` | Source-masking proxy and WebSocket activity feed | Enforced and smoke-tested on native Linux |
 | `visualizer/` | React topology, event, and bot UI | Implemented |
 | Gameserver/checkers/scoring | Competition authority | Not implemented |
 
@@ -35,7 +35,7 @@ Docker Desktop on macOS or Windows is not a supported firewall environment.
 
 Required:
 
-- Linux
+- native Linux with `br_netfilter`
 - Docker Engine with the `docker compose` plugin
 - Bash
 - permission to access `/var/run/docker.sock`
@@ -99,6 +99,13 @@ and incomplete required fields.
 `ARENA_TEAM_COUNT=N` before generation. Other topology changes should be made
 directly in the config file.
 
+Routine setup output hides development passwords. To print SSH commands,
+credentials, internal app targets, health commands, and local control URLs:
+
+```bash
+./scripts/setup.sh --show-access
+```
+
 ## Quick Start
 
 The following starts the configured prototype.
@@ -125,9 +132,11 @@ To persist and start a different team count:
   containers
 - builds and starts every `teamN-vuln-app`
 - waits up to `ARENA_STARTUP_TIMEOUT_SECONDS` for every app `/health`
+- proves cross-team TCP interception, source masking, and WebSocket emission
 
-Startup exits non-zero if infrastructure or any required app is not healthy.
-Override the timeout for one run with `--timeout SEC`.
+Startup exits non-zero if infrastructure, any required app, or firewall
+enforcement is not healthy. Override the app timeout for one run with
+`--timeout SEC`.
 
 ### 2. Inspect Status
 
@@ -247,17 +256,28 @@ ws://localhost:6789
 ```
 
 The current implementation depends on team bridge traffic traversing host
-`iptables` PREROUTING. Verify that traffic is actually reaching the rule:
+`iptables` PREROUTING. Configure and verify the host once:
 
 ```bash
-docker exec sandcastle-firewall \
-  iptables -t nat -L PREROUTING -n -v --line-numbers
+sudo ./scripts/firewall-preflight.sh --apply
+./scripts/firewall-preflight.sh --check
 ```
 
-Generate a cross-team request, then check that the Sandcastle redirect rule's
-packet counter increased. A zero counter means source masking and TCP activity
-events are not active even if the firewall container reports healthy. This is a
-known P0 issue tracked as SC-004.
+`arena.sh up` runs the read-only preflight before startup and then executes:
+
+```bash
+./scripts/smoke-network.sh
+```
+
+The smoke test sends a nonce-bearing TCP request from Team 1 to a temporary
+listener in Team 2. It fails unless the redirect counter increases, Team 2 sees
+the configured gateway as the masked source, and the WebSocket feed emits the
+matching original source and destination. The probe does not modify service
+source or persistent app data.
+
+The firewall bounds its event queue and ICMP de-duplication cache. Packet and
+netlink receive-buffer overflow is logged and capture continues rather than
+terminating silently.
 
 ## Lifecycle Semantics
 
@@ -351,8 +371,16 @@ topology:
 
 ### Firewall UI connects but shows no traffic
 
-Check the firewall rule packet counter as described above. Container health
-alone does not prove bridge traffic is being intercepted.
+Run the behavioral verifier:
+
+```bash
+./scripts/smoke-network.sh
+```
+
+If preflight fails, run
+`sudo ./scripts/firewall-preflight.sh --apply`. If the smoke test fails, inspect
+`docker compose logs firewall`; container health alone does not prove bridge
+traffic is being intercepted.
 
 ## Repository Layout
 
@@ -383,6 +411,9 @@ alone does not prove bridge traffic is being intercepted.
 
 ```bash
 bash -n scripts/*.sh bot/*.sh
+python3 -B tests/firewall_test.py
+./tests/firewall_preflight_test.sh
+./tests/network_smoke_test.sh
 ./tests/doctor_test.sh
 ./tests/setup_test.sh
 ./tests/arena_test.sh

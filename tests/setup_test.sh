@@ -62,6 +62,11 @@ ARENA_TEAM_PASSWORD_PATTERN=team{team}pass
 ARENA_SERVICE_TEMPLATE=services/example-vuln
 ARENA_FIREWALL_WS_PORT=6789
 ARENA_FIREWALL_PROXY_PORT=15000
+ARENA_FIREWALL_PROBE_PORT=18080
+ARENA_FIREWALL_SMOKE_TIMEOUT_SECONDS=15
+ARENA_FIREWALL_EVENT_QUEUE_SIZE=2048
+ARENA_FIREWALL_CAPTURE_RCVBUF_BYTES=4194304
+ARENA_FIREWALL_RECENT_ICMP_LIMIT=4096
 ARENA_BOT_API_HOST=127.0.0.1
 ARENA_BOT_API_PORT=7878
 ARENA_BOT_LOOP_SECONDS=60
@@ -118,6 +123,14 @@ after="$(fixture_hashes "${deterministic_fixture}")"
 }
 grep -Fq 'team_count: 2' "${deterministic_fixture}/docker-compose.yml"
 grep -Fq '2202:22' "${deterministic_fixture}/docker-compose.yml"
+if run_setup "${deterministic_fixture}" | grep -Fq 'team1pass'; then
+    echo "Default setup output exposed development credentials" >&2
+    exit 1
+fi
+access_output="$(run_setup "${deterministic_fixture}" --show-access)"
+assert_contains "${access_output}" "ssh -p 2201 team1@localhost"
+assert_contains "${access_output}" "Password:     team1pass"
+assert_contains "${access_output}" "ws://localhost:6789"
 
 printf 'print("participant patch")\n' \
     > "${deterministic_fixture}/teams/generated/team1/example-vuln/app/app.py"

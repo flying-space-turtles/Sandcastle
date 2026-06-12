@@ -233,6 +233,10 @@ coverage in `tests/arena_test.sh`.
 
 **Dependencies:** SC-001, SC-003
 
+**Status:** Implemented on 2026-06-12 with fail-closed Linux preflight,
+bounded firewall capture, and behavioral verification in
+`scripts/smoke-network.sh`.
+
 **Agent prompt**
 
 > Redesign or harden the team-to-team traffic path so source masking and event
