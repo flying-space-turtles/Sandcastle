@@ -55,6 +55,8 @@ python3 -B -m py_compile \
     "${ROOT}"/bot/*.py \
     "${ROOT}"/bot/bot_lib/*.py \
     "${ROOT}/firewall/firewall.py" \
+    "${ROOT}/gameserver/"*.py \
+    "${ROOT}/tests/gameserver_test.py" \
     "${ROOT}/services/example-vuln/app/app.py" \
     "${ROOT}/services/example-vuln/exploits/"*.py
 ok "py_compile: all Python files are syntactically valid"
@@ -62,6 +64,10 @@ ok "py_compile: all Python files are syntactically valid"
 # ---------------------------------------------------------------------------
 step "Firewall unit tests"
 python3 -B "${ROOT}/tests/firewall_test.py"
+
+# ---------------------------------------------------------------------------
+step "Gameserver unit tests"
+python3 -B "${ROOT}/tests/gameserver_test.py"
 
 # ---------------------------------------------------------------------------
 step "Firewall host preflight tests"

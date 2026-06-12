@@ -46,6 +46,7 @@ arena_config_validate_port_layout() {
         "${ARENA_FIREWALL_WS_PORT}"
         "${ARENA_FIREWALL_PROXY_PORT}"
         "${ARENA_BOT_API_PORT}"
+        "${ARENA_GAMESERVER_PORT}"
     )
     local port
 
@@ -64,8 +65,11 @@ arena_config_validate_port_layout() {
     done
     if [[ "${ARENA_FIREWALL_WS_PORT}" == "${ARENA_FIREWALL_PROXY_PORT}" ||
           "${ARENA_FIREWALL_WS_PORT}" == "${ARENA_BOT_API_PORT}" ||
-          "${ARENA_FIREWALL_PROXY_PORT}" == "${ARENA_BOT_API_PORT}" ]]; then
-        arena_config_error "firewall and bot API host ports must be distinct"
+          "${ARENA_FIREWALL_WS_PORT}" == "${ARENA_GAMESERVER_PORT}" ||
+          "${ARENA_FIREWALL_PROXY_PORT}" == "${ARENA_BOT_API_PORT}" ||
+          "${ARENA_FIREWALL_PROXY_PORT}" == "${ARENA_GAMESERVER_PORT}" ||
+          "${ARENA_BOT_API_PORT}" == "${ARENA_GAMESERVER_PORT}" ]]; then
+        arena_config_error "firewall, gameserver and bot API host ports must be distinct"
         return 1
     fi
     if [[ "${ARENA_FIREWALL_PROBE_PORT}" == "${ARENA_SERVICE_PORT}" ||
@@ -102,6 +106,7 @@ arena_config_load() {
         ARENA_STARTUP_TIMEOUT_SECONDS
         ARENA_ROUND_DURATION_SECONDS
         ARENA_FLAG_EXPIRY_ROUNDS
+        ARENA_GAMESERVER_PORT
     )
 
     ARENA_CONFIG_ERROR=""
@@ -118,6 +123,9 @@ arena_config_load() {
     # The file is committed project configuration, not a user secrets file.
     # shellcheck disable=SC1090
     source "${config_file}"
+
+    # Default to 8000 if not specified
+    ARENA_GAMESERVER_PORT="${ARENA_GAMESERVER_PORT:-8000}"
 
     for name in "${required[@]}"; do
         if [[ -z "${!name:-}" ]]; then
@@ -141,6 +149,7 @@ arena_config_load() {
     arena_config_require_int ARENA_STARTUP_TIMEOUT_SECONDS 1 86400 || return 1
     arena_config_require_int ARENA_ROUND_DURATION_SECONDS 1 86400 || return 1
     arena_config_require_int ARENA_FLAG_EXPIRY_ROUNDS 1 10000 || return 1
+    arena_config_require_int ARENA_GAMESERVER_PORT 1 65535 || return 1
 
     if [[ ! "${ARENA_CTF_SUBNET}" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.0\.0/16$ ]]; then
         arena_config_error \
@@ -211,6 +220,7 @@ arena_config_load() {
         ARENA_STARTUP_TIMEOUT_SECONDS \
         ARENA_ROUND_DURATION_SECONDS \
         ARENA_FLAG_EXPIRY_ROUNDS \
+        ARENA_GAMESERVER_PORT \
         ARENA_CONFIG_FILE
 }
 

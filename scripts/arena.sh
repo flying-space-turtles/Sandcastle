@@ -237,6 +237,9 @@ wait_for_infrastructure() {
         if [[ "$(container_state sandcastle-firewall)" != "running" ]]; then
             pending+=("sandcastle-firewall")
         fi
+        if [[ "$(container_state sandcastle-gameserver)" != "running" ]]; then
+            pending+=("sandcastle-gameserver")
+        fi
 
         ((${#pending[@]} == 0)) && return 0
         ((attempt < attempts)) && sleep "${HEALTH_POLL_SECONDS}"
@@ -347,12 +350,25 @@ print_status() {
     done
 
     firewall_state="$(container_state sandcastle-firewall)"
+    gameserver_state="$(container_state sandcastle-gameserver)"
+    gameserver_health="-"
+    if [[ "${gameserver_state}" == "running" ]]; then
+        if docker exec sandcastle-gameserver python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" >/dev/null 2>&1; then
+            gameserver_health="healthy"
+        else
+            gameserver_health="unhealthy"
+        fi
+    fi
+
     if [[ "${STATUS_FORMAT}" == "text" ]]; then
         printf '%-8s %-10s %-12s %-10s\n' "-" "firewall" "${firewall_state}" "-"
+        printf '%-8s %-10s %-12s %-10s\n' "-" "gameserver" "${gameserver_state}" "${gameserver_health}"
     else
         printf -- '-\tfirewall\t%s\t-\n' "${firewall_state}"
+        printf -- '-\tgameserver\t%s\t%s\n' "${gameserver_state}" "${gameserver_health}"
     fi
     component_ready "${firewall_state}" || ready=1
+    component_ready "${gameserver_state}" "${gameserver_health}" || ready=1
 
     return "${ready}"
 }
