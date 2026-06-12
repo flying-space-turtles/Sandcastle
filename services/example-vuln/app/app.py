@@ -38,6 +38,9 @@ NOTES_DIR = Path(os.environ.get("NOTES_DIR", str(DATA_DIR / "notes")))
 TEAM_ID = os.environ.get("TEAM_ID", "0")
 TEAM_NAME = os.environ.get("TEAM_NAME", "Team 0")
 SECRET_KEY = os.environ.get("SECRET_KEY", "sandcastle-default-secret-change-me")
+CHECKER_USERNAME = os.environ.get("CHECKER_USERNAME", f"checker-team{TEAM_ID}-example-vuln")
+CHECKER_PASSWORD = os.environ.get("CHECKER_PASSWORD", "checker-dev-password")
+PLANT_TOKEN = os.environ.get("PLANT_TOKEN", "checker-dev-plant-token")
 SERVICE_PORT = int(os.environ.get("SERVICE_PORT", "8080"))
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -120,6 +123,13 @@ def init_db(app: Flask) -> None:
             )
             db.commit()
 
+        db.execute(
+            "INSERT INTO users (username, password, is_admin) VALUES (?, ?, 1) "
+            "ON CONFLICT(username) DO UPDATE SET password = excluded.password, is_admin = 1",
+            (CHECKER_USERNAME, CHECKER_PASSWORD),
+        )
+        db.commit()
+
         flag = ensure_flag()
         admin_id = db.execute(
             "SELECT id FROM users WHERE username = 'admin'"
@@ -140,6 +150,25 @@ def init_db(app: Flask) -> None:
             )
             db.commit()
 
+        checker_id = db.execute(
+            "SELECT id FROM users WHERE username = ?", (CHECKER_USERNAME,)
+        ).fetchone()["id"]
+        cur = db.execute(
+            "SELECT id FROM notes WHERE owner_id = ? AND is_secret = 1",
+            (checker_id,),
+        )
+        if cur.fetchone() is None:
+            db.execute(
+                "INSERT INTO notes (owner_id, title, body, is_secret) "
+                "VALUES (?, ?, ?, 1)",
+                (
+                    checker_id,
+                    "Checker flag storage",
+                    f"The current flag is: {flag}",
+                ),
+            )
+            db.commit()
+
         # A few public notes so the homepage is not empty.
         if (
             db.execute(
@@ -148,6 +177,10 @@ def init_db(app: Flask) -> None:
             == 0
         ):
             seed_public_notes(db, admin_id)
+
+        # Route teardown hooks are registered after bootstrap initialization.
+        db.close()
+        g._database = None
 
 
 def seed_public_notes(db: sqlite3.Connection, admin_id: int) -> None:
@@ -413,8 +446,7 @@ def register_routes(app: Flask) -> None:
         called by the gameserver from inside the ctf-network.
         """
         token = request.headers.get("X-Plant-Token") or ""
-        expected = os.environ.get("PLANT_TOKEN", SECRET_KEY)
-        if not secrets.compare_digest(token, expected):
+        if not secrets.compare_digest(token, PLANT_TOKEN):
             abort(403)
         new_flag = (request.json or {}).get("flag")
         if not new_flag or not isinstance(new_flag, str):
@@ -422,12 +454,15 @@ def register_routes(app: Flask) -> None:
         FLAG_FILE.write_text(new_flag.strip() + "\n")
 
         db = get_db()
-        admin_id = db.execute(
-            "SELECT id FROM users WHERE username = 'admin'"
-        ).fetchone()["id"]
+        owner_rows = db.execute(
+            "SELECT id FROM users WHERE username IN ('admin', ?)",
+            (CHECKER_USERNAME,),
+        ).fetchall()
+        owner_ids = [row["id"] for row in owner_rows]
+        placeholders = ",".join("?" for _ in owner_ids)
         db.execute(
-            "UPDATE notes SET body = ? WHERE owner_id = ? AND is_secret = 1",
-            (f"The current flag is: {new_flag.strip()}", admin_id),
+            f"UPDATE notes SET body = ? WHERE owner_id IN ({placeholders}) AND is_secret = 1",
+            (f"The current flag is: {new_flag.strip()}", *owner_ids),
         )
         db.commit()
         return {"status": "planted"}

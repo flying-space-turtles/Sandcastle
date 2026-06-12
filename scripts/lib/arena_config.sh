@@ -107,6 +107,7 @@ arena_config_load() {
         ARENA_ROUND_DURATION_SECONDS
         ARENA_FLAG_EXPIRY_ROUNDS
         ARENA_GAMESERVER_PORT
+        ARENA_CHECKER_SECRET
     )
 
     ARENA_CONFIG_ERROR=""
@@ -126,6 +127,7 @@ arena_config_load() {
 
     # Default to 8000 if not specified
     ARENA_GAMESERVER_PORT="${ARENA_GAMESERVER_PORT:-8000}"
+    ARENA_CHECKER_SECRET="${ARENA_CHECKER_SECRET:-sandcastle-local-checker-secret-change-me}"
 
     for name in "${required[@]}"; do
         if [[ -z "${!name:-}" ]]; then
@@ -150,6 +152,11 @@ arena_config_load() {
     arena_config_require_int ARENA_ROUND_DURATION_SECONDS 1 86400 || return 1
     arena_config_require_int ARENA_FLAG_EXPIRY_ROUNDS 1 10000 || return 1
     arena_config_require_int ARENA_GAMESERVER_PORT 1 65535 || return 1
+
+    if ((${#ARENA_CHECKER_SECRET} < 16)); then
+        arena_config_error "ARENA_CHECKER_SECRET must contain at least 16 characters"
+        return 1
+    fi
 
     if [[ ! "${ARENA_CTF_SUBNET}" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.0\.0/16$ ]]; then
         arena_config_error \
@@ -221,6 +228,7 @@ arena_config_load() {
         ARENA_ROUND_DURATION_SECONDS \
         ARENA_FLAG_EXPIRY_ROUNDS \
         ARENA_GAMESERVER_PORT \
+        ARENA_CHECKER_SECRET \
         ARENA_CONFIG_FILE
 }
 

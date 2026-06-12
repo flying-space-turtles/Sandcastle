@@ -150,7 +150,8 @@ services:
 
   gameserver:
     build:
-      context: ./gameserver
+      context: .
+      dockerfile: gameserver/Dockerfile
     image: sandcastle/gameserver:latest
     container_name: sandcastle-gameserver
     hostname: sandcastle-gameserver
@@ -162,6 +163,8 @@ services:
     volumes:
       - gameserver-data:/app/data
       - ./config/arena.env:/app/config/arena.env:ro
+    environment:
+      CHECKER_MASTER_SECRET: "sandcastle-local-checker-secret-change-me"
     labels:
       sandcastle.role: "gameserver"
     restart: unless-stopped

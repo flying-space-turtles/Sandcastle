@@ -15,6 +15,7 @@ they are working with.
 ```text
 services/example-vuln/
 ├── Dockerfile
+├── checker.py                 # trusted TurtleNotes checker plugin
 ├── docker-compose.yml         # standalone compose for local iteration
 ├── README.md
 ├── app/
@@ -78,11 +79,28 @@ It also seeds:
 
 * an `admin` user with a random password (logged once, never returned)
 * a `guest` user with the password `guest` so reviewers can poke around
+* a team/service-scoped checker account used by the trusted GET and CHECK flows
 * a starter flag stored both as the body of a secret note owned by `admin`
-  *and* as the file `/app/data/flag.txt`
+  and the checker account, and as the file `/app/data/flag.txt`
 
 The gameserver can rotate the planted flag each round by POSTing to
-`/internal/plant` with the `X-Plant-Token` header (defaults to `SECRET_KEY`).
+`/internal/plant` with the team/service-scoped `X-Plant-Token` value. The
+service also seeds a scoped checker account so GET can retrieve the planted
+flag through an exact username/password login instead of an exploit.
+
+## Checker
+
+[`checker.py`](./checker.py) implements the typed service plugin contract:
+
+- PUT uses the authenticated `/internal/plant` organizer endpoint.
+- GET logs in as the scoped checker account and proves the expected flag is in
+  that account's secret note.
+- CHECK validates `/health`, then logs in, creates a benign note, and reads it
+  back. It therefore checks real service behavior rather than only liveness.
+
+Reference attacks remain under [`exploits/`](./exploits) and are not imported by
+the checker. General checker author instructions are in
+[`docs/writing-checkers.md`](../../docs/writing-checkers.md).
 
 ## Deliberate vulnerabilities
 
@@ -140,8 +158,7 @@ curl -s 'http://localhost:8080/export?file=../../etc/passwd'
 ## Reference exploits
 
 The [`exploits/`](./exploits) directory contains one runnable script per
-vulnerability, each implemented in pure Python so they can be used as a
-starting point for an SLA checker or a red-team smoke test:
+vulnerability, each implemented in pure Python for red-team testing:
 
 ```bash
 python exploits/sqli_login.py http://localhost:8080

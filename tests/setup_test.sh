@@ -45,10 +45,15 @@ make_fixture() {
     mkdir -p \
         "${fixture}/config" \
         "${fixture}/scripts/lib" \
+        "${fixture}/gameserver/checkers" \
         "${fixture}/services/example-vuln/app"
 
     cp "${ROOT}/scripts/setup.sh" "${fixture}/scripts/setup.sh"
     cp "${ROOT}/scripts/lib/arena_config.sh" "${fixture}/scripts/lib/arena_config.sh"
+    cp "${ROOT}/gameserver/checker_credentials.py" "${fixture}/gameserver/checker_credentials.py"
+    cp "${ROOT}/gameserver/checkers/__init__.py" "${fixture}/gameserver/checkers/__init__.py"
+    cp "${ROOT}/gameserver/checkers/contract.py" "${fixture}/gameserver/checkers/contract.py"
+    cp "${ROOT}/gameserver/checkers/credentials.py" "${fixture}/gameserver/checkers/credentials.py"
     chmod +x "${fixture}/scripts/setup.sh"
 
     cat > "${fixture}/config/arena.env" <<EOF
@@ -76,6 +81,7 @@ ARENA_FLAG_EXPIRY_ROUNDS=5
 EOF
 
     printf 'FROM scratch\n' > "${fixture}/services/example-vuln/Dockerfile"
+    printf 'CHECKER = object()\n' > "${fixture}/services/example-vuln/checker.py"
     printf 'print("template")\n' > "${fixture}/services/example-vuln/app/app.py"
     printf 'Flask==3.0.3\n' > "${fixture}/services/example-vuln/app/requirements.txt"
 }
@@ -123,6 +129,16 @@ after="$(fixture_hashes "${deterministic_fixture}")"
 }
 grep -Fq 'team_count: 2' "${deterministic_fixture}/docker-compose.yml"
 grep -Fq '2202:22' "${deterministic_fixture}/docker-compose.yml"
+team1_service_compose="${deterministic_fixture}/teams/generated/team1/example-vuln/docker-compose.yml"
+team2_service_compose="${deterministic_fixture}/teams/generated/team2/example-vuln/docker-compose.yml"
+grep -Fq 'CHECKER_USERNAME: "checker_t1_example_vuln"' "${team1_service_compose}"
+grep -Fq 'CHECKER_USERNAME: "checker_t2_example_vuln"' "${team2_service_compose}"
+team1_plant_token="$(grep 'PLANT_TOKEN:' "${team1_service_compose}")"
+team2_plant_token="$(grep 'PLANT_TOKEN:' "${team2_service_compose}")"
+[[ "${team1_plant_token}" != "${team2_plant_token}" ]] || {
+    echo "Checker plant tokens were not team scoped" >&2
+    exit 1
+}
 if run_setup "${deterministic_fixture}" | grep -Fq 'team1pass'; then
     echo "Default setup output exposed development credentials" >&2
     exit 1
