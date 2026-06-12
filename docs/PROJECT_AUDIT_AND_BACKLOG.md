@@ -271,6 +271,12 @@ bounded firewall capture, and behavioral verification in
 
 **Dependencies:** SC-003, SC-004
 
+**Status:** Implemented on 2026-06-12 in `tests/integration_test.sh` with a
+local fixture mode (mock Docker, CI-safe) and a full Docker mode (real two-team
+lifecycle). Developer convenience runner added as `scripts/run-tests.sh`. CI
+jobs added in `.github/workflows/ci.yml`. Contributing guide added as
+`CONTRIBUTING.md`.
+
 **Agent prompt**
 
 > Implement an automated two-team smoke test for the current infrastructure.

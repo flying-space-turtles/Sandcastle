@@ -138,3 +138,44 @@ jobs:
 
       - name: Run network smoke fixture tests
         run: ./tests/network_smoke_test.sh
+
+  integration-test-local:
+    name: "Integration test (local fixture mode)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run fixture-driven integration test
+        run: ./tests/integration_test.sh --local
+
+  integration-test-docker:
+    name: "Integration test (full Docker)"
+    runs-on: ubuntu-latest
+    # Full Docker mode requires bridge-nf-call-iptables and a Linux Docker host.
+    # Run only on pushes to main; PRs use the faster fixture mode above.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Apply firewall bridge-netfilter preflight
+        run: sudo ./scripts/firewall-preflight.sh --apply
+        # Some GitHub-hosted runners do not expose the bridge sysctl.
+        # If the preflight cannot be applied the full-Docker test is skipped
+        # rather than failing CI, since the fixture job already covered
+        # control-flow correctness.
+        continue-on-error: true
+        id: preflight
+
+      - name: Run full Docker integration test
+        if: steps.preflight.outcome == 'success'
+        run: ./tests/integration_test.sh
+        env:
+          SC005_TIMEOUT: "180"
+
+      - name: Upload failure logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sc005-failure-logs
+          path: sc005-logs/
+          if-no-files-found: ignore

@@ -410,20 +410,34 @@ traffic is being intercepted.
 ## Development Checks
 
 ```bash
-bash -n scripts/*.sh bot/*.sh
+bash -n scripts/*.sh bot/*.sh tests/*.sh
 python3 -B tests/firewall_test.py
 ./tests/firewall_preflight_test.sh
 ./tests/network_smoke_test.sh
 ./tests/doctor_test.sh
 ./tests/setup_test.sh
 ./tests/arena_test.sh
+./tests/integration_test.sh --local
 python3 -B -m py_compile \
   scripts/gen_compose.py \
   bot/*.py bot/bot_lib/*.py \
   firewall/firewall.py \
-  services/example-vuln/app/app.py
+  services/example-vuln/app/app.py \
+  services/example-vuln/exploits/*.py
 docker compose config --quiet
 cd visualizer && npm ci && npm run build
 ```
 
-The missing end-to-end competition test is tracked as SC-005.
+Or run everything with one command:
+
+```bash
+./scripts/run-tests.sh        # all checks including visualizer build
+./scripts/run-tests.sh --fast # skip the visualizer build
+```
+
+For the full Docker integration test (SC-005) on a native Linux host:
+
+```bash
+sudo ./scripts/firewall-preflight.sh --apply
+./tests/integration_test.sh
+```
