@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Protocol
 
 import db
+import telemetry
 from checkers.contract import (
     CheckRequest,
     CheckerOperation,
@@ -310,7 +311,7 @@ class TickEngine:
                     created_at=started_at,
                 )
             conn.commit()
-            return RoundRecord(
+            record = RoundRecord(
                 id=round_id,
                 match_id=self.match_id,
                 round_number=next_number,
@@ -326,6 +327,13 @@ class TickEngine:
             raise
         finally:
             conn.close()
+        self._emit(
+            telemetry.ROUND_STARTED,
+            match_id=self.match_id,
+            round_number=next_number,
+            payload={"deadline_at": deadline_at, "duration_seconds": self.config.duration_seconds},
+        )
+        return record
 
     def _insert_unique_flag(
         self,
@@ -536,6 +544,12 @@ class TickEngine:
         completed = self._round_by_id(record.id)
         if completed is None:
             raise RoundEngineError("completed round disappeared")
+        self._emit(
+            telemetry.ROUND_COMPLETED,
+            match_id=record.match_id,
+            round_number=record.round_number,
+            payload={"completed_at": completed.completed_at},
+        )
         return completed
 
     def _fail_round(self, record: RoundRecord, error: Exception) -> None:
@@ -563,6 +577,12 @@ class TickEngine:
                 conn.commit()
         except sqlite3.Error:
             logger.exception("could not persist failed round state")
+        self._emit(
+            telemetry.ROUND_FAILED,
+            match_id=record.match_id,
+            round_number=record.round_number,
+            payload={"error": message, "failed_at": failed_at},
+        )
 
     def _round_targets(self, record: RoundRecord) -> list[_TargetFlag]:
         with closing(self._connection()) as conn:
@@ -626,6 +646,9 @@ class TickEngine:
 
     def _connection(self) -> sqlite3.Connection:
         return db.get_db_connection(self.db_path)
+
+    def _emit(self, event_type: str, **kwargs: object) -> None:
+        telemetry.emit_safe(self.db_path, event_type, "gameserver", **kwargs)
 
 
 def build_tick_engine(

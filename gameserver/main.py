@@ -36,6 +36,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import db
+import telemetry
 from models import Match, MatchState, validate_state_transition
 from scoring import (
     TIEBREAKER,
@@ -53,6 +54,22 @@ from tick_engine import OperatorStateError, RoundEngineError, TickEngine, build_
 
 
 ALLOWED_ORIGINS = re.compile(r"^https?://localhost(:\d+)?$")
+
+
+def _emit_submission(result: Any, team_id: int) -> None:
+    from submissions import SubmissionCode
+    event = (
+        telemetry.SUBMISSION_ACCEPTED
+        if result.code is SubmissionCode.ACCEPTED
+        else telemetry.SUBMISSION_REJECTED
+    )
+    telemetry.emit_safe(
+        db.get_db_path(),
+        event,
+        "gameserver",
+        team_id=team_id,
+        payload={"code": result.code.value, "submission_id": result.submission_id},
+    )
 
 
 class GameserverAPIHandler(BaseHTTPRequestHandler):
@@ -421,6 +438,52 @@ class GameserverAPIHandler(BaseHTTPRequestHandler):
             self._scores(int(round_scores_match.group(1)))
             return
 
+        # ── GET /telemetry/export?match_id=N ──
+        if path in {"/telemetry/export", "/api/telemetry/export"}:
+            if not self._require_operator():
+                return
+            from urllib.parse import parse_qs
+            qs = parse_qs(parsed.query)
+            match_id_strs = qs.get("match_id", [])
+            if not match_id_strs or not match_id_strs[0].isdigit():
+                self._json(400, {"error": "match_id query param required"})
+                return
+            match_id = int(match_id_strs[0])
+            conn = None
+            try:
+                conn = db.get_db_connection()
+                events = telemetry.export_match(conn, match_id)
+                self._json(200, {"match_id": match_id, "event_count": len(events), "events": events})
+            except Exception:
+                self._json(500, {"error": "export failed"})
+            finally:
+                if conn:
+                    conn.close()
+            return
+
+        # ── GET /telemetry/metrics?match_id=N ──
+        if path in {"/telemetry/metrics", "/api/telemetry/metrics"}:
+            if not self._require_operator():
+                return
+            from urllib.parse import parse_qs
+            qs = parse_qs(parsed.query)
+            match_id_strs = qs.get("match_id", [])
+            if not match_id_strs or not match_id_strs[0].isdigit():
+                self._json(400, {"error": "match_id query param required"})
+                return
+            match_id = int(match_id_strs[0])
+            conn = None
+            try:
+                conn = db.get_db_connection()
+                metrics = telemetry.compute_metrics(conn, match_id)
+                self._json(200, metrics)
+            except Exception:
+                self._json(500, {"error": "metrics failed"})
+            finally:
+                if conn:
+                    conn.close()
+            return
+
         self._json(404, {"error": "not found"})
 
     def do_POST(self) -> None:
@@ -474,6 +537,7 @@ class GameserverAPIHandler(BaseHTTPRequestHandler):
                 SubmissionCode.MALFORMED: 400,
                 SubmissionCode.UNKNOWN: 404,
             }
+            _emit_submission(result, team_id)
             self._json(status_by_code[result.code], result.as_dict())
             return
 
@@ -565,6 +629,13 @@ class GameserverAPIHandler(BaseHTTPRequestHandler):
                         (new_state.value,)
                     )
                     conn.commit()
+                    telemetry.emit_safe(
+                        db.get_db_path(),
+                        telemetry.MATCH_STATE_CHANGED,
+                        "gameserver",
+                        match_id=1,
+                        payload={"from": current_status, "to": new_state.value},
+                    )
 
                 # Return fresh status
                 cursor.execute("SELECT id, status, created_at, updated_at FROM matches WHERE id = 1;")
@@ -600,6 +671,49 @@ class GameserverAPIHandler(BaseHTTPRequestHandler):
                 self._json(500, {"error": str(exc)})
             except Exception as exc:  # noqa: BLE001 - HTTP boundary
                 self._json(500, {"error": f"round step failed: {type(exc).__name__}"})
+            return
+
+        # ── POST /telemetry/ingest ──
+        if path in {"/telemetry/ingest", "/api/telemetry/ingest"}:
+            if not self._require_operator():
+                return
+            body = self._read_body()
+            events = body.get("events")
+            if not isinstance(events, list):
+                self._json(400, {"error": "body must contain an 'events' list"})
+                return
+            conn = None
+            ingested = 0
+            try:
+                conn = db.get_db_connection()
+                for ev in events:
+                    if not isinstance(ev, dict):
+                        continue
+                    event_type = ev.get("event_type")
+                    source = ev.get("source", "external")
+                    if not isinstance(event_type, str) or not event_type:
+                        continue
+                    match_id = ev.get("match_id")
+                    round_number = ev.get("round_number")
+                    team_id = ev.get("team_id")
+                    payload = ev.get("payload") if isinstance(ev.get("payload"), dict) else {}
+                    correlation_id = ev.get("correlation_id")
+                    telemetry.emit(
+                        conn, event_type, source,
+                        match_id=match_id if isinstance(match_id, int) else None,
+                        round_number=round_number if isinstance(round_number, int) else None,
+                        team_id=team_id if isinstance(team_id, int) else None,
+                        payload=payload,
+                        correlation_id=str(correlation_id) if correlation_id else None,
+                    )
+                    ingested += 1
+                conn.commit()
+                self._json(200, {"ingested": ingested})
+            except Exception:
+                self._json(500, {"error": "ingest failed"})
+            finally:
+                if conn:
+                    conn.close()
             return
 
         self._json(404, {"error": "not found"})
