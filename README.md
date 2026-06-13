@@ -6,7 +6,7 @@ software agents that patch their own services and attack opponents.
 The repository currently provides team environments, an intentionally
 vulnerable service, scripted bots, a topology visualizer, a network monitor, a
 persistent gameserver core, a typed checker framework, and deterministic
-competition scoring. It does **not** yet provide a scoreboard UI.
+competition scoring with a live scoreboard and operator console.
 
 - Product direction: [`VISION.md`](VISION.md)
 - Current audit and prioritized agent backlog:
@@ -25,7 +25,7 @@ competition scoring. It does **not** yet provide a scoreboard UI.
 | `services/example-vuln` | TurtleNotes challenge template and exploits | Implemented |
 | `bot/` | Scripted action/planner runtime and local control API | Offensive path works; watchdog is currently ineffective |
 | `firewall/` | Source-masking proxy and WebSocket activity feed | Enforced and smoke-tested on native Linux |
-| `visualizer/` | React topology, event, and bot UI | Implemented |
+| `visualizer/` | Live scoreboard, operator controls, topology, event, and bot UI | Implemented |
 | `gameserver/` | Match state, rounds, flags, submissions, scoring, and recovery | Implemented |
 | Service checkers | PUT, GET, CHECK contract and TurtleNotes plugin | Implemented |
 | Scoring/standings | Replayable attack, defense, and SLA scoring APIs | Implemented |
@@ -92,7 +92,7 @@ resources.
 Edit [`config/arena.env`](config/arena.env) to change the arena topology. It is
 the canonical source for team count, network, service and host ports,
 credentials, startup timeout, bot defaults, round duration, flag expiry, and
-checker concurrency.
+checker concurrency. `ARENA_OPERATOR_TOKEN` protects match-control mutations.
 
 Keep it as simple `KEY=VALUE` entries. `scripts/setup.sh` validates the values
 and rejects port collisions, unsupported subnet layouts, missing templates,
@@ -117,13 +117,22 @@ and GET checker operations. See
 [`docs/round-engine.md`](docs/round-engine.md) for lifecycle and recovery rules.
 
 ```bash
-curl -s -X POST http://localhost:8000/match/resume
-curl -s -X POST http://localhost:8000/match/pause
-curl -s -X POST http://localhost:8000/rounds/step
-curl -s http://localhost:8000/rounds/current
+OPERATOR_TOKEN="$(sed -n 's/^ARENA_OPERATOR_TOKEN=//p' config/arena.env)"
+
+# Start the match. The scheduler creates round 1 within about one second.
+curl -s -X POST http://localhost:8000/api/match/start \
+  -H "Authorization: Bearer ${OPERATOR_TOKEN}"
+
+curl -s -X POST http://localhost:8000/api/match/pause \
+  -H "Authorization: Bearer ${OPERATOR_TOKEN}"
+curl -s -X POST http://localhost:8000/api/rounds/step \
+  -H "Authorization: Bearer ${OPERATOR_TOKEN}"
+curl -s http://localhost:8000/api/rounds/current
 ```
 
 Single-step requires a paused match and does not resume automatic scheduling.
+Start, pause, resume, step, finish, and the generic state endpoint all require
+the operator Bearer token.
 
 ## Flag Submission
 
@@ -272,17 +281,9 @@ have Docker control; this is tracked as SC-013.
 
 More detail: [`bot/bot.md`](bot/bot.md).
 
-## Run The Visualizer And Bot UI
+## Run The Scoreboard And Operator Console
 
-Use two terminals from the repository root.
-
-Terminal 1, local bot-control bridge:
-
-```bash
-python3 bot/bot_api.py
-```
-
-Terminal 2, visualizer:
+After `./scripts/arena.sh up`, start the UI:
 
 ```bash
 cd visualizer
@@ -292,9 +293,20 @@ npm run dev
 
 Open `http://localhost:5173`.
 
-The topology view parses the generated Compose file. It is not an authoritative
-view of running container health. The Bot view and firewall feed use the host
-and ports in `config/arena.env`.
+The scoreboard polls the authoritative gameserver and shows match state, round
+timing, component scores, and checker results. Paste the operator token printed
+by `./scripts/setup.sh --show-access` to use Start, Pause, Resume, Step, and
+Finish.
+
+The topology view parses generated Compose configuration and is explicitly not
+live container health. YAML editing and the raw parser inspector are not part
+of the operator console.
+
+The Bots view additionally requires the local bridge in another terminal:
+
+```bash
+python3 bot/bot_api.py
+```
 
 ## Firewall And Activity Feed
 
