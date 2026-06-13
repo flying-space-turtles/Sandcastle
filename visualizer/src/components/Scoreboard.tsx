@@ -8,6 +8,7 @@ import {
   Pause,
   Play,
   RefreshCw,
+  RotateCcw,
   Settings2,
   ShieldCheck,
   SkipForward,
@@ -105,9 +106,15 @@ const Scoreboard = () => {
     else sessionStorage.removeItem('sandcastle.operatorToken');
   }, [operatorToken]);
 
-  const runAction = async (action: 'start' | 'pause' | 'resume' | 'step' | 'finish') => {
+  const runAction = async (action: 'start' | 'pause' | 'resume' | 'step' | 'finish' | 'restart') => {
     if (!operatorToken) {
       setActionError('Enter the operator token before using match controls.');
+      return;
+    }
+    if (
+      action === 'restart' &&
+      !window.confirm('Restart this match? All rounds, flags, submissions, checker results, and scores will be cleared.')
+    ) {
       return;
     }
     setPendingAction(action);
@@ -287,6 +294,7 @@ const Scoreboard = () => {
               <button disabled={matchStatus !== 'PAUSED' || pendingAction !== null} onClick={() => void runAction('resume')}><Play size={16} />Resume</button>
               <button disabled={matchStatus !== 'PAUSED' || pendingAction !== null} onClick={() => void runAction('step')}><SkipForward size={16} />Run one round</button>
               <button className="is-danger" disabled={!['RUNNING', 'PAUSED'].includes(matchStatus || '') || pendingAction !== null} onClick={() => void runAction('finish')}><CircleStop size={16} />Finish match</button>
+              <button className="is-danger" disabled={!['FINISHED', 'FAILED'].includes(matchStatus || '') || pendingAction !== null} onClick={() => void runAction('restart')}><RotateCcw size={16} />Restart match</button>
             </div>
             <div className="drawer-status" role="status">
               {pendingAction ? `Running ${pendingAction}…` : actionError || 'Controls are ready.'}

@@ -1,14 +1,19 @@
 from __future__ import annotations
 
 import http.client
+import hashlib
 import json
+import os
 import re
 import socket
 import subprocess
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional
 
 from .config import BotConfig
@@ -53,6 +58,8 @@ class BotContext:
     my_team: int | None
     hostname: str = field(default_factory=socket.gethostname)
     _flag_re_cache: re.Pattern | None = field(default=None, init=False, repr=False)
+    _submitted_flags: set[str] = field(default_factory=set, init=False, repr=False)
+    event_file: str = field(default_factory=lambda: os.environ.get("BOT_EVENT_FILE", ""))
 
     def flag_re(self) -> re.Pattern:
         if self._flag_re_cache is None:
@@ -64,6 +71,116 @@ class BotContext:
 
     def service_url(self, team_id: int) -> str:
         return f"http://{self.target_ip(team_id)}:{self.config.service_port}"
+
+    def emit(self, event_type: str, **details: object) -> None:
+        if not self.event_file:
+            return
+        event = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "type": event_type,
+            "deployment_id": self.config.deployment_id,
+            "team_id": self.my_team,
+            **details,
+        }
+        try:
+            path = Path(self.event_file)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(event, sort_keys=True) + "\n")
+        except OSError:
+            pass
+
+    @staticmethod
+    def flag_fingerprint(flag: str) -> str:
+        return hashlib.sha256(flag.encode("utf-8")).hexdigest()[:12]
+
+    def submit_flag(self, flag: str, target_team: int, action_id: str) -> dict[str, object]:
+        fingerprint = self.flag_fingerprint(flag)
+        if flag in self._submitted_flags:
+            outcome = {"code": "LOCAL_DUPLICATE", "accepted": False}
+            self.emit(
+                "submission.completed",
+                target_team=target_team,
+                action_id=action_id,
+                flag_fingerprint=fingerprint,
+                **outcome,
+            )
+            return outcome
+
+        self._submitted_flags.add(flag)
+        if not self.config.gameserver_url or not self.config.submission_token or self.my_team is None:
+            outcome = {"code": "NOT_CONFIGURED", "accepted": False}
+            self.emit(
+                "submission.completed",
+                target_team=target_team,
+                action_id=action_id,
+                flag_fingerprint=fingerprint,
+                **outcome,
+            )
+            return outcome
+
+        url = f"{self.config.gameserver_url.rstrip('/')}/api/flags/submit"
+        payload = json.dumps({"team_id": self.my_team, "flag": flag}).encode()
+        self.emit(
+            "submission.started",
+            target_team=target_team,
+            action_id=action_id,
+            flag_fingerprint=fingerprint,
+        )
+
+        for attempt in range(2):
+            request = urllib.request.Request(
+                url,
+                data=payload,
+                headers={
+                    "Authorization": f"Bearer {self.config.submission_token}",
+                    "Content-Type": "application/json",
+                },
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=self.config.timeout) as response:
+                    body = json.loads(response.read().decode("utf-8", errors="replace") or "{}")
+                    outcome = {
+                        "code": str(body.get("code", "ACCEPTED")),
+                        "accepted": bool(body.get("accepted", response.status == 201)),
+                        "http_status": response.status,
+                    }
+                    break
+            except urllib.error.HTTPError as exc:
+                raw = exc.read().decode("utf-8", errors="replace")
+                try:
+                    body = json.loads(raw or "{}")
+                except json.JSONDecodeError:
+                    body = {}
+                outcome = {
+                    "code": str(body.get("code", f"HTTP_{exc.code}")),
+                    "accepted": False,
+                    "http_status": exc.code,
+                }
+                if exc.code == 429 and attempt == 0:
+                    retry_after = exc.headers.get("Retry-After", "1")
+                    time.sleep(min(2, int(retry_after) if retry_after.isdigit() else 1))
+                    continue
+                break
+            except (urllib.error.URLError, OSError) as exc:
+                outcome = {
+                    "code": "TRANSPORT_ERROR",
+                    "accepted": False,
+                    "message": str(exc)[:160],
+                }
+                if attempt == 0:
+                    time.sleep(0.25)
+                    continue
+                break
+
+        self.emit(
+            "submission.completed",
+            target_team=target_team,
+            action_id=action_id,
+            flag_fingerprint=fingerprint,
+            **outcome,
+        )
+        return outcome
 
     def get(self, url: str, opener=None) -> str | None:
         try:

@@ -240,6 +240,9 @@ wait_for_infrastructure() {
         if [[ "$(container_state sandcastle-gameserver)" != "running" ]]; then
             pending+=("sandcastle-gameserver")
         fi
+        if [[ "$(container_state sandcastle-bot-controller)" != "running" ]]; then
+            pending+=("sandcastle-bot-controller")
+        fi
 
         ((${#pending[@]} == 0)) && return 0
         ((attempt < attempts)) && sleep "${HEALTH_POLL_SECONDS}"
@@ -309,7 +312,7 @@ component_ready() {
 
 print_status() {
     local id gateway machine app gateway_state machine_state app_state health
-    local firewall_state
+    local firewall_state bot_controller_state bot_controller_health
     local ready=0
 
     if [[ "${STATUS_FORMAT}" == "text" ]]; then
@@ -359,16 +362,30 @@ print_status() {
             gameserver_health="unhealthy"
         fi
     fi
+    bot_controller_state="$(container_state sandcastle-bot-controller)"
+    bot_controller_health="-"
+    if [[ "${bot_controller_state}" == "running" ]]; then
+        if docker exec sandcastle-bot-controller python3 -c \
+            "import urllib.request; urllib.request.urlopen('http://localhost:${ARENA_BOT_API_PORT}/health')" \
+            >/dev/null 2>&1; then
+            bot_controller_health="healthy"
+        else
+            bot_controller_health="unhealthy"
+        fi
+    fi
 
     if [[ "${STATUS_FORMAT}" == "text" ]]; then
         printf '%-8s %-10s %-12s %-10s\n' "-" "firewall" "${firewall_state}" "-"
         printf '%-8s %-10s %-12s %-10s\n' "-" "gameserver" "${gameserver_state}" "${gameserver_health}"
+        printf '%-8s %-10s %-12s %-10s\n' "-" "bot-api" "${bot_controller_state}" "${bot_controller_health}"
     else
         printf -- '-\tfirewall\t%s\t-\n' "${firewall_state}"
         printf -- '-\tgameserver\t%s\t%s\n' "${gameserver_state}" "${gameserver_health}"
+        printf -- '-\tbot-api\t%s\t%s\n' "${bot_controller_state}" "${bot_controller_health}"
     fi
     component_ready "${firewall_state}" || ready=1
     component_ready "${gameserver_state}" "${gameserver_health}" || ready=1
+    component_ready "${bot_controller_state}" "${bot_controller_health}" || ready=1
 
     return "${ready}"
 }

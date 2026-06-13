@@ -92,7 +92,8 @@ def config_summary(config: BotConfig) -> str:
     return (
         f"name={config.bot_name!r} planner={config.planner} "
         f"policy={config.target_policy} actions={config.actions} "
-        f"port={config.service_port} ip={config.ip_pattern} timeout={config.timeout}s"
+        f"port={config.service_port} ip={config.ip_pattern} timeout={config.timeout}s "
+        f"deployment={config.deployment_id or 'standalone'}"
     )
 
 
@@ -101,8 +102,16 @@ def should_run_watchdog(config: BotConfig, cli_watchdog: bool) -> bool:
 
 
 def run_watchdog(ctx: BotContext) -> None:
+    ctx.emit("action.started", action_id="maintain.watchdog", target_team=ctx.my_team)
     result = WatchdogAction().run(ctx)
     log_action_result(result)
+    ctx.emit(
+        "action.completed",
+        action_id=result.action_id,
+        target_team=result.target_team,
+        status=result.status,
+        message=result.message,
+    )
 
 
 def execute_tasks(ctx: BotContext, tasks: list[BotTask]) -> dict[int, list[str]]:
@@ -126,12 +135,41 @@ def execute_tasks(ctx: BotContext, tasks: list[BotTask]) -> dict[int, list[str]]
 
         if action.category == "Exploit" and not ping_team(ctx, task.target_team):
             warn(f"team{task.target_team} [{action.id}] no ping response")
+            ctx.emit(
+                "action.completed",
+                action_id=action.id,
+                target_team=task.target_team,
+                status="unreachable",
+            )
             continue
 
+        ctx.emit("action.started", action_id=action.id, target_team=task.target_team)
         result = action.run(ctx, task.target_team)
         log_action_result(result)
+        ctx.emit(
+            "action.completed",
+            action_id=result.action_id,
+            target_team=result.target_team,
+            status=result.status,
+            message=result.message,
+            flag_count=len(result.flags),
+        )
         if result.flags:
             flags_by_team[task.target_team].extend(result.flags)
+            for flag in sorted(set(result.flags)):
+                fingerprint = ctx.flag_fingerprint(flag)
+                ctx.emit(
+                    "flag.captured",
+                    action_id=result.action_id,
+                    target_team=task.target_team,
+                    flag_fingerprint=fingerprint,
+                )
+                outcome = ctx.submit_flag(flag, task.target_team, result.action_id)
+                code = str(outcome.get("code", "UNKNOWN"))
+                if outcome.get("accepted"):
+                    ok(f"team{task.target_team} [{result.action_id}] submitted {fingerprint}: {code}")
+                else:
+                    warn(f"team{task.target_team} [{result.action_id}] submission {fingerprint}: {code}")
             if ctx.config.stop_on_success:
                 completed_after_success.add((task.target_team, action.category))
 
@@ -147,6 +185,13 @@ def run_round(ctx: BotContext, override_target: int | None = None) -> dict[int, 
     else:
         targets = sorted({task.target_team for task in tasks})
         info(f"Round plan: {len(tasks)} action(s), targets={targets}")
+    ctx.emit(
+        "round.planned",
+        target_override=override_target,
+        task_count=len(tasks),
+        targets=sorted({task.target_team for task in tasks}),
+        actions=[task.action_id for task in tasks],
+    )
 
     return execute_tasks(ctx, tasks)
 
@@ -168,6 +213,7 @@ def main() -> int:
         my_team = int(env_team) if env_team.isdigit() else detect_my_team()
 
     ctx = BotContext(config=config, num_teams=args.teams, my_team=my_team)
+    ctx.emit("deployment.started", bot_name=config.bot_name, planner=config.planner)
 
     if my_team is None:
         warn("Could not detect own team. Pass --my-team N or set MY_TEAM=N.")
@@ -195,6 +241,7 @@ def main() -> int:
     while True:
         if not first:
             info(f"Sleeping {args.loop}s")
+            ctx.emit("deployment.sleeping", seconds=args.loop)
             time.sleep(args.loop)
         first = False
 
@@ -202,13 +249,16 @@ def main() -> int:
             run_watchdog(ctx)
 
         try:
+            ctx.emit("round.started")
             results = run_round(ctx)
         except Exception as exc:
             err(f"round failed: {exc}")
+            ctx.emit("round.failed", message=str(exc)[:200])
             results = {}
 
         total = sum(len(flags) for flags in results.values())
         ok(f"Round done - {total} flag(s) captured from {len(results)} team(s)")
+        ctx.emit("round.completed", flag_count=total, target_count=len(results))
 
         if args.loop == 0:
             break

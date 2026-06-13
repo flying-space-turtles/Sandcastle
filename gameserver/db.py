@@ -59,6 +59,58 @@ def check_db_readiness(db_path: Optional[str] = None) -> bool:
             conn.close()
 
 
+def restart_match(conn: sqlite3.Connection, match_id: int = 1) -> tuple:
+    """Reset a finished or failed match while preserving registry and policy."""
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        row = conn.execute(
+            """
+            SELECT id, status, created_at, updated_at
+            FROM matches WHERE id = ?
+            """,
+            (match_id,),
+        ).fetchone()
+        if row is None:
+            raise LookupError(f"match {match_id} does not exist")
+        if row[1] not in {MatchState.FINISHED.value, MatchState.FAILED.value}:
+            raise ValueError("match restart requires a FINISHED or FAILED match")
+
+        conn.execute("DELETE FROM score_events WHERE match_id = ?", (match_id,))
+        conn.execute(
+            """
+            DELETE FROM submissions
+            WHERE flag IN (SELECT flag FROM flags WHERE match_id = ?)
+            """,
+            (match_id,),
+        )
+        conn.execute("DELETE FROM checker_results WHERE match_id = ?", (match_id,))
+        conn.execute("DELETE FROM flags WHERE match_id = ?", (match_id,))
+        conn.execute("DELETE FROM rounds WHERE match_id = ?", (match_id,))
+        conn.execute(
+            """
+            UPDATE matches
+            SET status = ?, created_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+            """,
+            (MatchState.CREATED.value, match_id),
+        )
+        restarted = conn.execute(
+            """
+            SELECT id, status, created_at, updated_at
+            FROM matches WHERE id = ?
+            """,
+            (match_id,),
+        ).fetchone()
+        conn.commit()
+        if restarted is None:
+            raise RuntimeError("restarted match could not be read back")
+        return restarted
+    except Exception:
+        conn.rollback()
+        raise
+
+
 def initialize_schema(conn: sqlite3.Connection) -> None:
     """Initialize SQLite tables deterministically if they do not exist."""
     cursor = conn.cursor()

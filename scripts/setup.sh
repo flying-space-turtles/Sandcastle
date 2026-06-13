@@ -501,11 +501,35 @@ EOF
       sandcastle.role: "gameserver"
     restart: unless-stopped
 
+  bot-controller:
+    build:
+      context: .
+      dockerfile: bot/Dockerfile
+    image: sandcastle/bot-controller:latest
+    container_name: sandcastle-bot-controller
+    hostname: sandcastle-bot-controller
+    ports:
+      - "127.0.0.1:${ARENA_BOT_API_PORT}:${ARENA_BOT_API_PORT}"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./config/arena.env:/app/config/arena.env:ro
+      - bot-controller-data:/data
+    environment:
+      ARENA_BOT_API_PORT: "${ARENA_BOT_API_PORT}"
+    labels:
+      sandcastle.role: "bot-controller"
+      sandcastle.visualizer.hidden: "true"
+    restart: unless-stopped
+
 volumes:
   gameserver-data:
     name: sandcastle_gameserver-data
     labels:
       sandcastle.role: "gameserver-data"
+  bot-controller-data:
+    name: sandcastle_bot-controller-data
+    labels:
+      sandcastle.role: "bot-controller-data"
 EOF
 }
 

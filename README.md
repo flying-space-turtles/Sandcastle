@@ -23,7 +23,7 @@ competition scoring with a live scoreboard and operator console.
 | `teamN-vuln` | Mutable Linux machine with service source and Docker CLI | Implemented |
 | `teamN-vuln-app` | Per-team vulnerable Flask service | Generated, started, and health-checked automatically |
 | `services/example-vuln` | TurtleNotes challenge template and exploits | Implemented |
-| `bot/` | Scripted action/planner runtime and local control API | Offensive path works; watchdog is currently ineffective |
+| `bot/` | Scripted runtime, managed deployment controller, telemetry, and submissions | Implemented |
 | `firewall/` | Source-masking proxy and WebSocket activity feed | Enforced and smoke-tested on native Linux |
 | `visualizer/` | Live scoreboard, operator controls, topology, event, and bot UI | Implemented |
 | `gameserver/` | Match state, rounds, flags, submissions, scoring, and recovery | Implemented |
@@ -42,14 +42,13 @@ Required:
 - Bash
 - permission to access `/var/run/docker.sock`
 
-Optional operator tools:
+Optional operator tool:
 
-- Python 3.10+ for `bot/bot_api.py`
-- Node.js 22+ and npm for the visualizer
+- Node.js 22+ and npm for visualizer development
 
 The current trusted-local mode mounts the host Docker socket into every
-`teamN-vuln` container. This is not a security boundary. Do not expose the
-arena to untrusted participants.
+`teamN-vuln` container and the localhost-only bot controller. This is not a
+security boundary. Do not expose the arena to untrusted participants.
 
 ## Check Host And Arena Readiness
 
@@ -69,7 +68,7 @@ The doctor checks:
 - running or stopped orphan team containers
 - vulnerable-machine Docker access and vulnerable-app health
 - firewall bridge-netfilter support, redirect rule, and packet counter
-- local bot API prerequisites and health
+- managed bot controller prerequisites and health
 
 Results are classified as:
 
@@ -275,9 +274,9 @@ Stop the bot:
 ./bot/deploy.sh --stop 2
 ```
 
-The offensive actions work against the bundled challenge. The
-`maintain.watchdog` action does not currently work because `teamN-ssh` does not
-have Docker control; this is tracked as SC-013.
+Captured flags are submitted automatically to the gameserver and recorded as
+structured deployment events. The `maintain.watchdog` action remains limited
+because `teamN-ssh` does not have Docker control.
 
 More detail: [`bot/bot.md`](bot/bot.md).
 
@@ -296,17 +295,15 @@ Open `http://localhost:5173`.
 The scoreboard polls the authoritative gameserver and shows match state, round
 timing, component scores, and checker results. Paste the operator token printed
 by `./scripts/setup.sh --show-access` to use Start, Pause, Resume, Step, and
-Finish.
+Finish. After finishing a match, use Restart match to clear its rounds and
+scores, return it to CREATED, and then use Start match for a clean round 1.
 
 The topology view parses generated Compose configuration and is explicitly not
 live container health. YAML editing and the raw parser inspector are not part
 of the operator console.
 
-The Bots view additionally requires the local bridge in another terminal:
-
-```bash
-python3 bot/bot_api.py
-```
+The Bots view uses the Compose-managed controller started by
+`./scripts/arena.sh up`; no additional Python process is required.
 
 ## Firewall And Activity Feed
 
@@ -452,7 +449,7 @@ traffic is being intercepted.
 ├── README.md
 ├── config/arena.env                # canonical arena configuration
 ├── docker-compose.yml              # generated topology
-├── bot/                            # team bot runtime and local bridge
+├── bot/                            # team bot runtime and deployment controller
 ├── context/context.md              # broad original A&D design notes
 ├── docker/
 │   ├── ssh/Dockerfile

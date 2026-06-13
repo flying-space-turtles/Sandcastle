@@ -818,7 +818,7 @@ check_bot_api() {
     ); then
         report FAIL bot.prerequisites \
             "Python cannot import bot/bot_api.py and its local modules." \
-            "Run PYTHONDONTWRITEBYTECODE=1 python3 -B bot/bot_api.py and fix the reported import error."
+            "Inspect bot/bot_api.py, then rebuild the bot-controller service."
         return
     fi
     report PASS bot.prerequisites "Bot API source, Python imports, and deploy script are available."
@@ -839,7 +839,7 @@ except Exception:
 
     if ((health_rc == 0)); then
         report PASS bot.api \
-            "Bot API is healthy at http://${ARENA_BOT_API_HOST}:${ARENA_BOT_API_PORT}."
+            "Bot controller is healthy at http://${ARENA_BOT_API_HOST}:${ARENA_BOT_API_PORT}."
         return
     fi
 
@@ -849,10 +849,12 @@ except Exception:
     if awk -v port="${ARENA_BOT_API_PORT}" \
         '$4 ~ (":" port "$") { found=1 } END { exit !found }' <<< "${listeners}"; then
         report WARN bot.api \
-            "Port ${ARENA_BOT_API_PORT} is occupied, but the Sandcastle bot API health check failed." \
-            "Stop the conflicting process or inspect python3 bot/bot_api.py."
+            "Port ${ARENA_BOT_API_PORT} is occupied, but the Sandcastle bot controller health check failed." \
+            "Stop the conflicting process or inspect docker compose logs bot-controller."
     else
-        report PASS bot.api "Bot API is optional and ready to start with python3 bot/bot_api.py."
+        report WARN bot.api \
+            "Bot controller is not running." \
+            "Run ./scripts/arena.sh up; the controller starts with the arena."
     fi
 }
 

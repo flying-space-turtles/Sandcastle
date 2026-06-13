@@ -66,9 +66,20 @@ curl -s -X POST http://localhost:8000/api/match/resume \
 curl -s -X POST http://localhost:8000/api/match/finish \
   -H "Authorization: Bearer ${OPERATOR_TOKEN}"
 
+# Clear a FINISHED or FAILED match and return it to CREATED.
+curl -s -X POST http://localhost:8000/api/match/restart \
+  -H "Authorization: Bearer ${OPERATOR_TOKEN}"
+
+# Start the clean match. The next scheduler tick creates round 1.
+curl -s -X POST http://localhost:8000/api/match/start \
+  -H "Authorization: Bearer ${OPERATOR_TOKEN}"
+
 # Read the latest persisted round.
 curl -s http://localhost:8000/api/rounds/current
 ```
 
 Single-step returns `409` unless the match is `PAUSED`. It never changes the
-match back to `RUNNING`.
+match back to `RUNNING`. Restart returns `409` unless the match is `FINISHED`
+or `FAILED`; it permanently deletes rounds, flags, submissions, checker
+results, and score events while preserving teams, services, credentials, and
+the scoring policy.

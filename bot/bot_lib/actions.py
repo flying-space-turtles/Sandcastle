@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import secrets
 import urllib.parse
 import urllib.request
@@ -183,7 +184,8 @@ def log_action_result(result: ActionResult) -> None:
     team = f"team{result.target_team}" if result.target_team is not None else "self"
     if result.flags:
         for flag in result.flags:
-            ok(f"{team} [{prefix}] FLAG: {flag}")
+            fingerprint = hashlib.sha256(flag.encode("utf-8")).hexdigest()[:12]
+            ok(f"{team} [{prefix}] flag captured ({fingerprint})")
         return
 
     message = result.message or "no flag found"

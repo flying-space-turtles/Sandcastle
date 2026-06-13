@@ -14,6 +14,7 @@ Exposes:
   - POST /match/resume → Resume automatic round creation
   - POST /match/start → Start a created match
   - POST /match/finish → Finish a running or paused match
+  - POST /match/restart → Reset a finished or failed match to CREATED
   - POST /rounds/step → Run one round while paused
   - POST /flags/submit → Authenticated flag submission
   - GET  /standings → Current deterministic standings
@@ -477,6 +478,38 @@ class GameserverAPIHandler(BaseHTTPRequestHandler):
             return
 
         # ── POST /match/state, /match/pause, /match/resume ──
+        if path in {"/match/restart", "/api/match/restart"}:
+            if not self._require_operator():
+                return
+            conn = None
+            try:
+                if self.tick_engine is not None:
+                    match_row = self.tick_engine.restart_match()
+                else:
+                    conn = db.get_db_connection()
+                    match_row = db.restart_match(conn)
+                self.submission_rate_limiter.reset()
+                match_obj = Match.from_row(match_row)
+                self._json(
+                    200,
+                    {
+                        "match_id": match_obj.id,
+                        "status": match_obj.status.value,
+                        "created_at": match_obj.created_at,
+                        "updated_at": match_obj.updated_at,
+                    },
+                )
+            except LookupError as exc:
+                self._json(404, {"error": str(exc)})
+            except ValueError as exc:
+                self._json(409, {"error": str(exc)})
+            except Exception:  # noqa: BLE001 - do not expose persistence internals
+                self._json(500, {"error": "match restart failed"})
+            finally:
+                if conn:
+                    conn.close()
+            return
+
         if path in {
             "/match/state",
             "/api/match/state",

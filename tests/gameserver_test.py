@@ -497,6 +497,51 @@ class GameserverHTTPTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(body["status"], "FINISHED")
 
+    def test_restart_finished_match_clears_activity_and_preserves_registry(self):
+        flags = self._insert_round_and_flags()
+        accepted = record_submission(1, flags["opponent"], self.db_path)
+        self.assertEqual(accepted.code, SubmissionCode.ACCEPTED)
+        conn = db.get_db_connection(self.db_path)
+        conn.execute(
+            "UPDATE matches SET status = ? WHERE id = 1",
+            (MatchState.FINISHED.value,),
+        )
+        conn.commit()
+        conn.close()
+
+        status, body, _ = self._post_result(
+            "/api/match/restart",
+            token=self.operator_token,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(body["status"], MatchState.CREATED.value)
+
+        conn = db.get_db_connection(self.db_path)
+        for table in ("rounds", "flags", "checker_results", "submissions", "score_events"):
+            self.assertEqual(
+                conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0],
+                0,
+            )
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM teams").fetchone()[0], 2)
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM services").fetchone()[0], 1)
+        conn.close()
+
+    def test_restart_rejects_active_match(self):
+        conn = db.get_db_connection(self.db_path)
+        conn.execute(
+            "UPDATE matches SET status = ? WHERE id = 1",
+            (MatchState.RUNNING.value,),
+        )
+        conn.commit()
+        conn.close()
+
+        status, body, _ = self._post_result(
+            "/match/restart",
+            token=self.operator_token,
+        )
+        self.assertEqual(status, 409)
+        self.assertIn("FINISHED or FAILED", body["error"])
+
     def test_pause_resume_and_single_step_controls(self):
         with self._post("/match/resume", token=self.operator_token) as resp:
             self.assertEqual(json.loads(resp.read().decode())["status"], "RUNNING")
