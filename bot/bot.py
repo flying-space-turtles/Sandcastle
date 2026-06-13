@@ -102,8 +102,16 @@ def should_run_watchdog(config: BotConfig, cli_watchdog: bool) -> bool:
 
 
 def run_watchdog(ctx: BotContext) -> None:
+    action = WatchdogAction()
+    missing = action.required_capabilities - ctx.capabilities
+    if missing:
+        msg = f"missing capabilities: {', '.join(sorted(missing))}"
+        warn(f"watchdog skipped: {msg}")
+        ctx.emit("action.completed", action_id="maintain.watchdog",
+                 target_team=ctx.my_team, status="skipped", message=msg)
+        return
     ctx.emit("action.started", action_id="maintain.watchdog", target_team=ctx.my_team)
-    result = WatchdogAction().run(ctx)
+    result = action.run(ctx)
     log_action_result(result)
     ctx.emit(
         "action.completed",
@@ -125,6 +133,15 @@ def execute_tasks(ctx: BotContext, tasks: list[BotTask]) -> dict[int, list[str]]
             continue
 
         if action.scope != "target":
+            continue
+
+        required = getattr(action, "required_capabilities", frozenset())
+        missing = required - ctx.capabilities
+        if missing:
+            msg = f"missing capabilities: {', '.join(sorted(missing))}"
+            warn(f"{action.id} skipped: {msg}")
+            ctx.emit("action.completed", action_id=action.id,
+                     target_team=task.target_team, status="skipped", message=msg)
             continue
 
         if ctx.config.stop_on_success and (task.target_team, action.category) in completed_after_success:
@@ -220,6 +237,7 @@ def main() -> int:
     else:
         info(f"Running as team{my_team} (hostname: {socket.gethostname()})")
 
+    info(f"Capabilities: {sorted(ctx.capabilities)}")
     info(f"Config: {config_summary(config)}")
 
     if args.ping:

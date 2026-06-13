@@ -8,7 +8,14 @@ from dataclasses import dataclass
 from http.cookiejar import CookieJar
 from typing import Protocol
 
-from .runtime import BotContext, docker_get, docker_post, info, ok, warn
+from .runtime import (
+    BotContext,
+    _service_control_host,
+    call_service_control,
+    info,
+    ok,
+    warn,
+)
 
 
 @dataclass
@@ -26,6 +33,7 @@ class BotAction(Protocol):
     category: str
     scope: str
     description: str
+    required_capabilities: frozenset
 
     def run(self, ctx: BotContext, target_team: int | None = None) -> ActionResult:
         ...
@@ -36,6 +44,7 @@ class HealthCheckAction:
     label = "Health check"
     category = "Recon"
     scope = "target"
+    required_capabilities: frozenset = frozenset()
     description = "GET /health before heavier actions."
 
     def run(self, ctx: BotContext, target_team: int | None = None) -> ActionResult:
@@ -56,6 +65,7 @@ class PathTraversalAction:
     label = "Path traversal"
     category = "Exploit"
     scope = "target"
+    required_capabilities: frozenset = frozenset()
     description = "Read ../flag.txt through /export."
 
     def run(self, ctx: BotContext, target_team: int | None = None) -> ActionResult:
@@ -71,6 +81,7 @@ class CommandInjectionAction:
     label = "Command injection"
     category = "Exploit"
     scope = "target"
+    required_capabilities: frozenset = frozenset()
     description = "Inject a flag read through /admin/diagnostics."
 
     def run(self, ctx: BotContext, target_team: int | None = None) -> ActionResult:
@@ -88,6 +99,7 @@ class SqlInjectionAction:
     label = "SQL injection"
     category = "Exploit"
     scope = "target"
+    required_capabilities: frozenset = frozenset()
     description = "Bypass login as admin and read /notes."
 
     def run(self, ctx: BotContext, target_team: int | None = None) -> ActionResult:
@@ -110,6 +122,7 @@ class PlantProbeAction:
     label = "Plant endpoint probe"
     category = "Probe"
     scope = "target"
+    required_capabilities: frozenset = frozenset()
     description = "Probe /internal/plant with an intentionally invalid token."
 
     def run(self, ctx: BotContext, target_team: int | None = None) -> ActionResult:
@@ -134,21 +147,35 @@ class WatchdogAction:
     label = "Service watchdog"
     category = "Maintenance"
     scope = "self"
-    description = "Restart this team's vulnerable machine if it is down."
+    required_capabilities: frozenset = frozenset({"service.control.local"})
+    description = "Restart the team app via the service-control API if it is unhealthy."
 
     def run(self, ctx: BotContext, target_team: int | None = None) -> ActionResult:
         if ctx.my_team is None:
             return ActionResult(self.id, None, "skipped", [], "own team unknown")
 
-        name = f"team{ctx.my_team}-vuln"
-        data = docker_get(f"/containers/{name}/json")
-        running = bool(data and data.get("State", {}).get("Running", False))
-        if running:
-            return ActionResult(self.id, ctx.my_team, "ok", [], f"{name} running")
+        missing = self.required_capabilities - ctx.capabilities
+        if missing:
+            return ActionResult(
+                self.id, ctx.my_team, "skipped", [],
+                f"missing capabilities: {', '.join(sorted(missing))}",
+            )
 
-        if docker_post(f"/containers/{name}/restart"):
-            return ActionResult(self.id, ctx.my_team, "ok", [], f"{name} restarted")
-        return ActionResult(self.id, ctx.my_team, "error", [], f"could not restart {name}")
+        host = _service_control_host(ctx.my_team)
+        try:
+            data = call_service_control(host, "GET", "/service/health")
+        except Exception as exc:
+            return ActionResult(self.id, ctx.my_team, "error", [],
+                                f"service-control unreachable: {exc}")
+
+        if data.get("running", False):
+            return ActionResult(self.id, ctx.my_team, "ok", [], "service app is running")
+
+        try:
+            call_service_control(host, "POST", "/service/restart")
+            return ActionResult(self.id, ctx.my_team, "ok", [], "service app restarted")
+        except Exception as exc:
+            return ActionResult(self.id, ctx.my_team, "error", [], f"restart failed: {exc}")
 
 
 def _build_registry() -> dict[str, BotAction]:
@@ -166,7 +193,7 @@ def _build_registry() -> dict[str, BotAction]:
 ACTION_REGISTRY = _build_registry()
 
 
-def action_catalog() -> list[dict[str, str]]:
+def action_catalog() -> list[dict[str, object]]:
     return [
         {
             "id": action.id,
@@ -174,6 +201,7 @@ def action_catalog() -> list[dict[str, str]]:
             "category": action.category,
             "scope": action.scope,
             "description": action.description,
+            "required_capabilities": sorted(getattr(action, "required_capabilities", [])),
         }
         for action in ACTION_REGISTRY.values()
     ]
