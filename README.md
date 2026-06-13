@@ -6,7 +6,7 @@ software agents that patch their own services and attack opponents.
 The repository currently provides team environments, an intentionally
 vulnerable service, scripted bots, a topology visualizer, a network monitor, a
 persistent gameserver core, and a typed checker framework. It does **not** yet
-provide authoritative flag submission, SLA scoring, or a scoreboard.
+provide SLA/defense scoring, standings, or a scoreboard.
 
 - Product direction: [`VISION.md`](VISION.md)
 - Current audit and prioritized agent backlog:
@@ -26,9 +26,9 @@ provide authoritative flag submission, SLA scoring, or a scoreboard.
 | `bot/` | Scripted action/planner runtime and local control API | Offensive path works; watchdog is currently ineffective |
 | `firewall/` | Source-masking proxy and WebSocket activity feed | Enforced and smoke-tested on native Linux |
 | `visualizer/` | React topology, event, and bot UI | Implemented |
-| `gameserver/` | Persistent match state, timed rounds, flags, and recovery | Implemented |
+| `gameserver/` | Match state, rounds, flags, authenticated submissions, and recovery | Implemented |
 | Service checkers | PUT, GET, CHECK contract and TurtleNotes plugin | Implemented |
-| Submissions/scoring | Competition authority and score calculation | Not implemented |
+| Scoring/standings | Deterministic score calculation and presentation | Not implemented |
 
 ## Requirements
 
@@ -124,6 +124,23 @@ curl -s http://localhost:8000/rounds/current
 ```
 
 Single-step requires a paused match and does not resume automatic scheduling.
+
+## Flag Submission
+
+Teams submit captured flags with their configured team ID and Bearer token. The
+database stores only a salted PBKDF2 hash of each token.
+
+```bash
+curl -s -X POST http://localhost:8000/api/flags/submit \
+  -H "Authorization: Bearer ${TEAM_TOKEN}" \
+  -H "Content-Type: application/json" \
+  -d '{"team_id":1,"flag":"FLAG{0123456789abcdef0123456789abcdef}"}'
+```
+
+Responses always include a machine-readable `code`: `ACCEPTED`, `DUPLICATE`,
+`SELF_OWNED`, `EXPIRED`, `MALFORMED`, `UNKNOWN`, `UNAUTHORIZED`, or
+`RATE_LIMITED`. Rate-limited responses include `Retry-After`. Run
+`./scripts/setup.sh --show-access` to print local development tokens.
 
 ## Quick Start
 

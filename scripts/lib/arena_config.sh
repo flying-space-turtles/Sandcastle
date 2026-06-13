@@ -83,7 +83,7 @@ arena_config_validate_port_layout() {
 arena_config_load() {
     local root="$1"
     local config_file="${SANDCASTLE_ARENA_CONFIG:-${root}/config/arena.env}"
-    local subnet_a subnet_b gateway_expected octet
+    local subnet_a subnet_b gateway_expected octet token_sample
     local -a required=(
         ARENA_TEAM_COUNT
         ARENA_CTF_SUBNET
@@ -92,6 +92,7 @@ arena_config_load() {
         ARENA_SERVICE_PORT
         ARENA_TEAM_USERNAME_PATTERN
         ARENA_TEAM_PASSWORD_PATTERN
+        ARENA_TEAM_TOKEN_PATTERN
         ARENA_SERVICE_TEMPLATE
         ARENA_FIREWALL_WS_PORT
         ARENA_FIREWALL_PROXY_PORT
@@ -108,6 +109,8 @@ arena_config_load() {
         ARENA_FLAG_EXPIRY_ROUNDS
         ARENA_CHECKER_MAX_CONCURRENCY
         ARENA_GAMESERVER_PORT
+        ARENA_SUBMISSION_RATE_LIMIT
+        ARENA_SUBMISSION_RATE_WINDOW_SECONDS
         ARENA_CHECKER_SECRET
     )
 
@@ -129,6 +132,8 @@ arena_config_load() {
     # Default to 8000 if not specified
     ARENA_GAMESERVER_PORT="${ARENA_GAMESERVER_PORT:-8000}"
     ARENA_CHECKER_MAX_CONCURRENCY="${ARENA_CHECKER_MAX_CONCURRENCY:-8}"
+    ARENA_SUBMISSION_RATE_LIMIT="${ARENA_SUBMISSION_RATE_LIMIT:-60}"
+    ARENA_SUBMISSION_RATE_WINDOW_SECONDS="${ARENA_SUBMISSION_RATE_WINDOW_SECONDS:-60}"
     ARENA_CHECKER_SECRET="${ARENA_CHECKER_SECRET:-sandcastle-local-checker-secret-change-me}"
 
     for name in "${required[@]}"; do
@@ -155,6 +160,8 @@ arena_config_load() {
     arena_config_require_int ARENA_FLAG_EXPIRY_ROUNDS 1 10000 || return 1
     arena_config_require_int ARENA_CHECKER_MAX_CONCURRENCY 1 256 || return 1
     arena_config_require_int ARENA_GAMESERVER_PORT 1 65535 || return 1
+    arena_config_require_int ARENA_SUBMISSION_RATE_LIMIT 1 100000 || return 1
+    arena_config_require_int ARENA_SUBMISSION_RATE_WINDOW_SECONDS 1 86400 || return 1
 
     if ((${#ARENA_CHECKER_SECRET} < 16)); then
         arena_config_error "ARENA_CHECKER_SECRET must contain at least 16 characters"
@@ -184,6 +191,12 @@ arena_config_load() {
 
     arena_config_validate_pattern ARENA_TEAM_USERNAME_PATTERN || return 1
     arena_config_validate_pattern ARENA_TEAM_PASSWORD_PATTERN || return 1
+    arena_config_validate_pattern ARENA_TEAM_TOKEN_PATTERN || return 1
+    token_sample="${ARENA_TEAM_TOKEN_PATTERN//\{team\}/1}"
+    if ((${#token_sample} < 24)); then
+        arena_config_error "ARENA_TEAM_TOKEN_PATTERN must render at least 24 characters"
+        return 1
+    fi
 
     if [[ ! "${ARENA_BOT_API_HOST}" =~ ^[a-zA-Z0-9_.:-]+$ ]]; then
         arena_config_error "ARENA_BOT_API_HOST contains unsupported characters"
@@ -215,6 +228,7 @@ arena_config_load() {
         ARENA_SERVICE_IP_PATTERN \
         ARENA_TEAM_USERNAME_PATTERN \
         ARENA_TEAM_PASSWORD_PATTERN \
+        ARENA_TEAM_TOKEN_PATTERN \
         ARENA_SERVICE_TEMPLATE \
         ARENA_SERVICE_TEMPLATE_PATH \
         ARENA_FIREWALL_WS_PORT \
@@ -232,6 +246,8 @@ arena_config_load() {
         ARENA_FLAG_EXPIRY_ROUNDS \
         ARENA_CHECKER_MAX_CONCURRENCY \
         ARENA_GAMESERVER_PORT \
+        ARENA_SUBMISSION_RATE_LIMIT \
+        ARENA_SUBMISSION_RATE_WINDOW_SECONDS \
         ARENA_CHECKER_SECRET \
         ARENA_CONFIG_FILE
 }

@@ -12,6 +12,8 @@ x-sandcastle-arena:
   flag_expiry_rounds: 5
   checker_max_concurrency: 8
   gameserver_port: 8000
+  submission_rate_limit: 60
+  submission_rate_window_seconds: 60
 
 networks:
   ctf-network:
