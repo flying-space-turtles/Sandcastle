@@ -127,6 +127,7 @@ competition scoring with a live scoreboard and operator console.
 - Current audit and prioritized agent backlog:
   [`docs/PROJECT_AUDIT_AND_BACKLOG.md`](docs/PROJECT_AUDIT_AND_BACKLOG.md)
 - Infrastructure details: [`docs/architecture.md`](docs/architecture.md)
+- Security model and escape paths: [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md)
 
 ## Current Components
 
@@ -164,6 +165,13 @@ Optional operator tool:
 The current trusted-local mode mounts the host Docker socket into every
 `teamN-vuln` container and the localhost-only bot controller. This is not a
 security boundary. Do not expose the arena to untrusted participants.
+
+**Before running a shared or exposed event, read
+[`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).** It inventories every
+privileged resource, defines the two operating modes and their guarantees,
+documents known escape paths, and lists the controls required before moving
+to an untrusted competition. The doctor script (`./scripts/doctor.sh`) links
+to this document for every warning it emits.
 
 ## Check Host And Arena Readiness
 
@@ -571,6 +579,7 @@ traffic is being intercepted.
 │   └── vuln/Dockerfile
 ├── docs/
 │   ├── architecture.md
+│   ├── THREAT_MODEL.md
 │   └── PROJECT_AUDIT_AND_BACKLOG.md
 ├── firewall/
 ├── scripts/
