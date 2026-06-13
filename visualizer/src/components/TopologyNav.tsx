@@ -1,11 +1,10 @@
 import type { Mode } from '../types';
 
 const MODES: Array<{ id: Mode; label: string }> = [
-  { id: 'editor', label: 'Editor Mode' },
-  { id: 'yaml', label: 'Yaml Mode' },
-  { id: 'inspector', label: 'Inspector' },
-  { id: 'firewall', label: 'Firewall' },
-  { id: 'bot', label: 'Bot' },
+  { id: 'scoreboard', label: 'Scoreboard' },
+  { id: 'topology', label: 'Topology' },
+  { id: 'firewall', label: 'Traffic' },
+  { id: 'bot', label: 'Bots' },
 ];
 
 type TopologyNavProps = {
@@ -14,7 +13,6 @@ type TopologyNavProps = {
   serviceCount: number;
   networkCount: number;
   edgeCount: number;
-  parseError: string | null;
   firewallConnected: boolean;
   firewallEventCount: number;
 };
@@ -25,7 +23,6 @@ const TopologyNav = ({
   serviceCount,
   networkCount,
   edgeCount,
-  parseError,
   firewallConnected,
   firewallEventCount,
 }: TopologyNavProps) => (
@@ -33,8 +30,8 @@ const TopologyNav = ({
     <div className="topology-nav__brand">
       <span className="topology-nav__mark" />
       <div>
-        <div className="topology-nav__title">Docker Architecture Visualizer</div>
-        <div className="topology-nav__subtitle">Sandcastle topology map</div>
+        <div className="topology-nav__title">Sandcastle Operator Console</div>
+        <div className="topology-nav__subtitle">Live match state and configured topology</div>
       </div>
     </div>
 
@@ -57,15 +54,9 @@ const TopologyNav = ({
     </nav>
 
     <div className="topology-nav__stats">
-      {parseError ? (
-        <span className="topology-nav__error">YAML error</span>
-      ) : (
-        <>
-          <span>{networkCount} networks</span>
-          <span>{serviceCount} services</span>
-          <span>{edgeCount} edges</span>
-        </>
-      )}
+      <span>{networkCount} networks</span>
+      <span>{serviceCount} services</span>
+      <span>{edgeCount} edges</span>
       <span className={`topology-nav__firewall-status ${firewallConnected ? 'is-live' : 'is-offline'}`}>
         {firewallConnected ? `● ${firewallEventCount} events` : '○ Firewall offline'}
       </span>

@@ -45,6 +45,7 @@ export const ARENA_CONFIG = {
   sshBasePort: requiredNumber('ARENA_SSH_BASE_PORT', 1024, 65285),
   serviceIpPattern: `${networkPrefix}.{team}.3`,
   firewallWsPort: requiredNumber('ARENA_FIREWALL_WS_PORT', 1, 65535),
+  gameserverPort: requiredNumber('ARENA_GAMESERVER_PORT', 1, 65535),
   botApiHost: required('ARENA_BOT_API_HOST'),
   botApiPort: requiredNumber('ARENA_BOT_API_PORT', 1, 65535),
   botLoopSeconds: requiredNumber('ARENA_BOT_LOOP_SECONDS', 0, 86400),
@@ -52,3 +53,4 @@ export const ARENA_CONFIG = {
 
 export const botApiUrl = `http://${ARENA_CONFIG.botApiHost}:${ARENA_CONFIG.botApiPort}`;
 export const firewallWsUrl = `ws://localhost:${ARENA_CONFIG.firewallWsPort}`;
+export const gameserverApiUrl = `http://localhost:${ARENA_CONFIG.gameserverPort}`;
