@@ -23,17 +23,16 @@ configuration metadata, not live container health. The old YAML editing and
 raw inspector modes were removed to keep the console focused on arena
 operations.
 
-## Bot Mode
+## Bot Deployments
 
-Bot Mode talks to the local Sandcastle bot bridge:
+The bot controller starts automatically with `./scripts/arena.sh up`. The Bots
+view shows active and historical deployments, structured action events,
+captures, submission outcomes, configuration, and archived raw logs.
 
-```bash
-python3 bot/bot_api.py
-```
-
-From there you can create a bot profile, choose actions and a planner, then
-deploy that bot into selected team SSH containers. Deployed bots act on behalf
-of their team from inside the CTF network.
+Create a deployment, choose actions and a planner, then select the team SSH
+containers where it should run. Captured flags are submitted automatically to
+the authoritative gameserver using credentials injected inside the target
+container; credentials are never returned to the browser.
 
 Bot and firewall endpoints, team count, service port, and generated target IPs
 come from the repository root `config/arena.env`.

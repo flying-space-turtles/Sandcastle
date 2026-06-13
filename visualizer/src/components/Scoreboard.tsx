@@ -1,13 +1,18 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import {
+  Activity,
+  ChevronDown,
   CircleStop,
   Clock3,
+  Gauge,
   Pause,
   Play,
   RefreshCw,
+  Settings2,
   ShieldCheck,
   SkipForward,
   Trophy,
+  X,
 } from 'lucide-react';
 import { gameserverApiUrl } from '../data/arenaConfig';
 
@@ -15,12 +20,7 @@ type MatchStatus = 'CREATED' | 'RUNNING' | 'PAUSED' | 'FINISHED' | 'FAILED';
 type CheckerStatus = 'UP' | 'DOWN' | 'MUMBLE' | 'CORRUPT' | 'PENDING';
 
 interface DashboardSnapshot {
-  match: {
-    match_id: number;
-    status: MatchStatus;
-    created_at: string;
-    updated_at: string;
-  };
+  match: { match_id: number; status: MatchStatus; created_at: string; updated_at: string };
   round: {
     round_number: number;
     status: 'RUNNING' | 'COMPLETED' | 'FAILED';
@@ -30,12 +30,7 @@ interface DashboardSnapshot {
     duration_seconds: number;
     error: string | null;
   } | null;
-  policy: {
-    version: string;
-    attack_points: number;
-    defense_points: number;
-    sla_points: number;
-  };
+  policy: { version: string; attack_points: number; defense_points: number; sla_points: number };
   standings: Array<{
     rank: number;
     team_id: number;
@@ -53,31 +48,22 @@ interface DashboardSnapshot {
     port: number;
     round_number: number | null;
     status: CheckerStatus;
-    operations: Record<
-      string,
-      {
-        status: CheckerStatus;
-        message: string;
-        duration_ms: number;
-        created_at: string;
-      }
-    >;
+    operations: Record<string, {
+      status: CheckerStatus;
+      message: string;
+      duration_ms: number;
+      created_at: string;
+    }>;
     last_checked_at: string | null;
   }>;
 }
 
 const POLL_INTERVAL_MS = 2500;
 const STALE_AFTER_MS = 8000;
-
-const formatScore = (value: number) =>
-  Number.isInteger(value) ? value.toString() : value.toFixed(2);
-
+const formatScore = (value: number) => Number.isInteger(value) ? value.toString() : value.toFixed(2);
 const formatCountdown = (deadline: string, now: number) => {
-  const remaining = Math.max(0, Date.parse(deadline) - now);
-  const totalSeconds = Math.ceil(remaining / 1000);
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
-  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  const seconds = Math.ceil(Math.max(0, Date.parse(deadline) - now) / 1000);
+  return `${Math.floor(seconds / 60)}:${(seconds % 60).toString().padStart(2, '0')}`;
 };
 
 const Scoreboard = () => {
@@ -89,18 +75,14 @@ const Scoreboard = () => {
     () => sessionStorage.getItem('sandcastle.operatorToken') || '',
   );
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [controlsOpen, setControlsOpen] = useState(false);
   const [now, setNow] = useState(Date.now());
 
   const refresh = useCallback(async () => {
     try {
-      const response = await fetch(`${gameserverApiUrl}/api/dashboard`, {
-        cache: 'no-store',
-      });
-      if (!response.ok) {
-        throw new Error(`gameserver returned HTTP ${response.status}`);
-      }
-      const body = (await response.json()) as DashboardSnapshot;
-      setSnapshot(body);
+      const response = await fetch(`${gameserverApiUrl}/api/dashboard`, { cache: 'no-store' });
+      if (!response.ok) throw new Error(`gameserver returned HTTP ${response.status}`);
+      setSnapshot(await response.json() as DashboardSnapshot);
       setLastUpdated(Date.now());
       setFetchError(null);
     } catch (error) {
@@ -119,11 +101,8 @@ const Scoreboard = () => {
   }, [refresh]);
 
   useEffect(() => {
-    if (operatorToken) {
-      sessionStorage.setItem('sandcastle.operatorToken', operatorToken);
-    } else {
-      sessionStorage.removeItem('sandcastle.operatorToken');
-    }
+    if (operatorToken) sessionStorage.setItem('sandcastle.operatorToken', operatorToken);
+    else sessionStorage.removeItem('sandcastle.operatorToken');
   }, [operatorToken]);
 
   const runAction = async (action: 'start' | 'pause' | 'resume' | 'step' | 'finish') => {
@@ -133,23 +112,15 @@ const Scoreboard = () => {
     }
     setPendingAction(action);
     setActionError(null);
-    const path = action === 'step' ? '/api/rounds/step' : `/api/match/${action}`;
     try {
+      const path = action === 'step' ? '/api/rounds/step' : `/api/match/${action}`;
       const response = await fetch(`${gameserverApiUrl}${path}`, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${operatorToken}`,
-          'Content-Type': 'application/json',
-        },
+        headers: { Authorization: `Bearer ${operatorToken}`, 'Content-Type': 'application/json' },
         body: '{}',
       });
-      const body = (await response.json().catch(() => ({}))) as {
-        error?: string;
-        code?: string;
-      };
-      if (!response.ok) {
-        throw new Error(body.error || body.code || `HTTP ${response.status}`);
-      }
+      const body = await response.json().catch(() => ({})) as { error?: string; code?: string };
+      if (!response.ok) throw new Error(body.error || body.code || `HTTP ${response.status}`);
       await refresh();
     } catch (error) {
       setActionError(error instanceof Error ? error.message : 'operator action failed');
@@ -160,210 +131,169 @@ const Scoreboard = () => {
 
   const stale = lastUpdated === null || now - lastUpdated > STALE_AFTER_MS;
   const matchStatus = snapshot?.match.status;
+  const maxTotal = Math.max(1, ...(snapshot?.standings.map((team) => team.total) || [1]));
+  const healthyServices = snapshot?.services.filter((service) => service.status === 'UP').length || 0;
   const roundLabel = useMemo(() => {
-    if (!snapshot?.round) {
-      return 'No round yet';
-    }
-    if (matchStatus === 'PAUSED') {
-      return 'Scheduler paused';
-    }
-    return snapshot.round.status === 'RUNNING' ? 'Round deadline' : 'Next round';
-  }, [matchStatus, snapshot?.round]);
+    if (!snapshot?.round) return 'Waiting for first round';
+    if (matchStatus === 'PAUSED') return 'Scheduler paused';
+    if (matchStatus === 'RUNNING') return `${formatCountdown(snapshot.round.deadline_at, now)} remaining`;
+    return snapshot.round.status;
+  }, [matchStatus, now, snapshot?.round]);
 
   return (
-    <main className="scoreboard">
-      <section className="scoreboard__hero">
-        <div>
-          <div className="scoreboard__eyebrow">Authoritative gameserver state</div>
-          <h1>Match Scoreboard</h1>
-          <p>Scores and checker outcomes refresh automatically without reloading the page.</p>
+    <main className="match-page">
+      <section className="match-hero">
+        <div className="match-hero__copy">
+          <span className="page-kicker">Live competition control</span>
+          <h1>Match operations</h1>
+          <p>Follow the race, spot service failures, and control the round scheduler from one view.</p>
         </div>
-        <div className="scoreboard__connection">
-          <span className={`live-indicator ${fetchError || stale ? 'is-stale' : 'is-live'}`}>
+        <div className="match-hero__actions">
+          <div className={`connection-pill ${fetchError || stale ? 'is-stale' : 'is-live'}`} role="status">
+            <span />
             {fetchError ? 'API unavailable' : stale ? 'Data stale' : 'Live'}
-          </span>
-          <button type="button" onClick={() => void refresh()} title="Refresh scoreboard">
-            <RefreshCw size={15} />
-            Refresh
+          </div>
+          <button className="icon-button" type="button" onClick={() => void refresh()} title="Refresh">
+            <RefreshCw size={17} />
           </button>
-          <small>
-            {lastUpdated ? `Updated ${Math.max(0, Math.floor((now - lastUpdated) / 1000))}s ago` : 'Never updated'}
-          </small>
+          <button className="primary-button" type="button" onClick={() => setControlsOpen(true)}>
+            <Settings2 size={16} /> Match controls
+          </button>
         </div>
       </section>
 
       {(fetchError || actionError) && (
-        <div className="scoreboard__error" role="alert">
-          {actionError || fetchError}
-        </div>
+        <div className="inline-alert" role="alert">{actionError || fetchError}</div>
       )}
 
-      <section className="match-overview">
-        <div className="overview-card">
-          <span>Match state</span>
-          <strong className={`status-text status-${(matchStatus || 'UNKNOWN').toLowerCase()}`}>
-            {matchStatus || 'UNKNOWN'}
-          </strong>
+      <section className="match-pulse">
+        <div className={`match-state state-${(matchStatus || 'unknown').toLowerCase()}`}>
+          <div className="match-state__icon"><Activity size={21} /></div>
+          <div>
+            <span>Match state</span>
+            <strong>{matchStatus || 'Connecting'}</strong>
+          </div>
         </div>
-        <div className="overview-card">
-          <span>Current round</span>
-          <strong>{snapshot?.round ? `#${snapshot.round.round_number}` : '-'}</strong>
-          <small>{snapshot?.round?.status || 'Waiting to start'}</small>
+        <div className="pulse-metric">
+          <span>Round</span>
+          <strong>{snapshot?.round ? `#${snapshot.round.round_number}` : '—'}</strong>
+          <small>{roundLabel}</small>
         </div>
-        <div className="overview-card">
-          <span>{roundLabel}</span>
-          <strong>
-            {snapshot?.round && matchStatus === 'RUNNING'
-              ? formatCountdown(snapshot.round.deadline_at, now)
-              : '--:--'}
-          </strong>
-          <small>{snapshot?.round ? `${snapshot.round.duration_seconds}s rounds` : 'Start the match to create one'}</small>
+        <div className="pulse-metric">
+          <span>Service health</span>
+          <strong>{snapshot ? `${healthyServices}/${snapshot.services.length}` : '—'}</strong>
+          <small>checkers reporting UP</small>
         </div>
-        <div className="overview-card">
-          <span>Scoring policy</span>
-          <strong>{snapshot?.policy.version || '-'}</strong>
+        <div className="pulse-metric">
+          <span>Scoring</span>
+          <strong>{snapshot?.policy.version || '—'}</strong>
           <small>
-            {snapshot
-              ? `A ${formatScore(snapshot.policy.attack_points)} · D ${formatScore(snapshot.policy.defense_points)} · SLA ${formatScore(snapshot.policy.sla_points)}`
-              : 'Waiting for gameserver'}
+            {snapshot ? `Attack ${snapshot.policy.attack_points} · Defense ${snapshot.policy.defense_points} · SLA ${snapshot.policy.sla_points}` : 'Waiting for policy'}
           </small>
         </div>
       </section>
 
-      <section className="operator-console">
-        <div className="operator-console__credential">
-          <label htmlFor="operator-token">Operator token</label>
-          <input
-            id="operator-token"
-            type="password"
-            value={operatorToken}
-            autoComplete="off"
-            placeholder="Required for match controls"
-            onChange={(event) => setOperatorToken(event.target.value)}
-          />
-        </div>
-        <div className="operator-console__actions">
-          <button
-            type="button"
-            disabled={matchStatus !== 'CREATED' || pendingAction !== null}
-            onClick={() => void runAction('start')}
-          >
-            <Play size={15} /> Start
-          </button>
-          <button
-            type="button"
-            disabled={matchStatus !== 'RUNNING' || pendingAction !== null}
-            onClick={() => void runAction('pause')}
-          >
-            <Pause size={15} /> Pause
-          </button>
-          <button
-            type="button"
-            disabled={matchStatus !== 'PAUSED' || pendingAction !== null}
-            onClick={() => void runAction('resume')}
-          >
-            <Play size={15} /> Resume
-          </button>
-          <button
-            type="button"
-            disabled={matchStatus !== 'PAUSED' || pendingAction !== null}
-            onClick={() => void runAction('step')}
-          >
-            <SkipForward size={15} /> Step
-          </button>
-          <button
-            type="button"
-            className="is-danger"
-            disabled={!['RUNNING', 'PAUSED'].includes(matchStatus || '') || pendingAction !== null}
-            onClick={() => void runAction('finish')}
-          >
-            <CircleStop size={15} /> Finish
-          </button>
-        </div>
-      </section>
-
-      <div className="scoreboard__grid">
-        <section className="score-panel">
-          <div className="score-panel__heading">
-            <Trophy size={18} />
-            <div>
-              <h2>Standings</h2>
-              <p>Attack, defense, and SLA components are shown independently.</p>
-            </div>
+      <section className="match-layout">
+        <div className="leaderboard">
+          <div className="section-heading">
+            <div><span className="section-icon"><Trophy size={17} /></span><div><h2>Leaderboard</h2><p>Score composition across the arena</p></div></div>
+            <small>{lastUpdated ? `Updated ${Math.floor((now - lastUpdated) / 1000)}s ago` : 'Connecting'}</small>
           </div>
-          <div className="standings-table">
-            <div className="standings-row standings-row--header">
-              <span>Rank</span>
-              <span>Team</span>
-              <span>Attack</span>
-              <span>Defense</span>
-              <span>SLA</span>
-              <span>Total</span>
-            </div>
+          <div className="leader-list">
             {snapshot?.standings.map((team) => (
-              <div className="standings-row" key={team.team_id}>
-                <strong>#{team.rank}</strong>
-                <span>{team.team_name}</span>
-                <span>{formatScore(team.attack)}</span>
-                <span>{formatScore(team.defense)}</span>
-                <span>{formatScore(team.sla)}</span>
-                <strong>{formatScore(team.total)}</strong>
-              </div>
-            ))}
-            {snapshot && snapshot.standings.length === 0 && (
-              <div className="score-panel__empty">No teams are registered.</div>
-            )}
-          </div>
-        </section>
-
-        <section className="score-panel">
-          <div className="score-panel__heading">
-            <ShieldCheck size={18} />
-            <div>
-              <h2>Service Checkers</h2>
-              <p>Latest PUT, CHECK, and GET results for the displayed round.</p>
-            </div>
-          </div>
-          <div className="service-list">
-            {snapshot?.services.map((service) => (
-              <article className="service-card" key={`${service.team_id}-${service.service_id}`}>
-                <div className="service-card__header">
-                  <div>
-                    <strong>{service.team_name}</strong>
-                    <span>{service.service_name}:{service.port}</span>
-                  </div>
-                  <span className={`checker-badge status-${service.status.toLowerCase()}`}>
-                    {service.status}
-                  </span>
+              <article className={`leader-card rank-${team.rank}`} key={team.team_id}>
+                <div className="leader-rank">{team.rank}</div>
+                <div className="leader-identity">
+                  <strong>{team.team_name}</strong>
+                  <span>Team {team.team_id}</span>
                 </div>
-                <div className="service-card__operations">
+                <div className="leader-composition">
+                  <div className="score-track" aria-label={`${team.team_name} score composition`}>
+                    <i className="is-attack" style={{ '--score-width': `${(team.attack / maxTotal) * 100}%` } as CSSProperties} />
+                    <i className="is-defense" style={{ '--score-width': `${(team.defense / maxTotal) * 100}%` } as CSSProperties} />
+                    <i className="is-sla" style={{ '--score-width': `${(team.sla / maxTotal) * 100}%` } as CSSProperties} />
+                  </div>
+                  <div className="score-legend">
+                    <span><i className="is-attack" />A {formatScore(team.attack)}</span>
+                    <span><i className="is-defense" />D {formatScore(team.defense)}</span>
+                    <span><i className="is-sla" />SLA {formatScore(team.sla)}</span>
+                  </div>
+                </div>
+                <div className="leader-total"><strong>{formatScore(team.total)}</strong><span>points</span></div>
+              </article>
+            ))}
+            {snapshot && snapshot.standings.length === 0 && <div className="empty-state">No teams are registered.</div>}
+            {!snapshot && <div className="loading-block">Loading standings…</div>}
+          </div>
+          {snapshot && snapshot.standings.length > 0 && (
+            <details className="score-details">
+              <summary><ChevronDown size={15} /> Detailed scores</summary>
+              <div>
+                {snapshot.standings.map((team) => (
+                  <span key={team.team_id}><b>#{team.rank} {team.team_name}</b><em>{formatScore(team.attack)} attack</em><em>{formatScore(team.defense)} defense</em><em>{formatScore(team.sla)} SLA</em><strong>{formatScore(team.total)}</strong></span>
+                ))}
+              </div>
+            </details>
+          )}
+        </div>
+
+        <aside className="service-health">
+          <div className="section-heading">
+            <div><span className="section-icon"><ShieldCheck size={17} /></span><div><h2>Service health</h2><p>Latest checker outcomes</p></div></div>
+          </div>
+          <div className="health-list">
+            {snapshot?.services.map((service) => (
+              <article className="health-card" key={`${service.team_id}-${service.service_id}`}>
+                <div className="health-card__top">
+                  <div><strong>{service.team_name}</strong><span>{service.service_name}:{service.port}</span></div>
+                  <span className={`health-status status-${service.status.toLowerCase()}`}>{service.status}</span>
+                </div>
+                <div className="operation-flow">
                   {['PUT', 'CHECK', 'GET'].map((operation) => {
                     const result = service.operations[operation];
                     return (
-                      <span
-                        key={operation}
-                        className={`checker-operation status-${(result?.status || 'PENDING').toLowerCase()}`}
-                        title={result?.message || `${operation} has not completed`}
-                      >
-                        {operation} {result?.status || 'PENDING'}
-                      </span>
+                      <div key={operation} className={`operation-step status-${(result?.status || 'PENDING').toLowerCase()}`} title={result?.message}>
+                        <span>{operation}</span><strong>{result?.status || 'PENDING'}</strong>
+                      </div>
                     );
                   })}
                 </div>
-                <small>
-                  <Clock3 size={12} />
-                  {service.last_checked_at
-                    ? new Date(service.last_checked_at).toLocaleTimeString()
-                    : 'No checker result yet'}
-                </small>
+                <small><Clock3 size={12} />{service.last_checked_at ? new Date(service.last_checked_at).toLocaleTimeString() : 'No result yet'}</small>
               </article>
             ))}
-            {snapshot && snapshot.services.length === 0 && (
-              <div className="score-panel__empty">No services are registered.</div>
-            )}
+            {snapshot && snapshot.services.length === 0 && <div className="empty-state">No services registered.</div>}
           </div>
-        </section>
-      </div>
+        </aside>
+      </section>
+
+      {controlsOpen && (
+        <div className="drawer-backdrop" onMouseDown={() => setControlsOpen(false)}>
+          <aside className="ops-drawer" onMouseDown={(event) => event.stopPropagation()} aria-label="Match controls">
+            <div className="drawer-heading">
+              <div><span className="section-icon"><Gauge size={18} /></span><div><h2>Match controls</h2><p>Authenticated scheduler operations</p></div></div>
+              <button className="icon-button" type="button" onClick={() => setControlsOpen(false)}><X size={18} /></button>
+            </div>
+            <label className="drawer-field">
+              <span>Operator token</span>
+              <input type="password" value={operatorToken} autoComplete="off" placeholder="Required for controls" onChange={(event) => setOperatorToken(event.target.value)} />
+            </label>
+            <div className="control-summary">
+              <span>Current state<strong>{matchStatus || 'Unknown'}</strong></span>
+              <span>Round<strong>{snapshot?.round ? `#${snapshot.round.round_number}` : 'Not started'}</strong></span>
+            </div>
+            <div className="control-actions" role="group" aria-label="Scheduler actions">
+              <button disabled={matchStatus !== 'CREATED' || pendingAction !== null} onClick={() => void runAction('start')}><Play size={16} />Start match</button>
+              <button disabled={matchStatus !== 'RUNNING' || pendingAction !== null} onClick={() => void runAction('pause')}><Pause size={16} />Pause</button>
+              <button disabled={matchStatus !== 'PAUSED' || pendingAction !== null} onClick={() => void runAction('resume')}><Play size={16} />Resume</button>
+              <button disabled={matchStatus !== 'PAUSED' || pendingAction !== null} onClick={() => void runAction('step')}><SkipForward size={16} />Run one round</button>
+              <button className="is-danger" disabled={!['RUNNING', 'PAUSED'].includes(matchStatus || '') || pendingAction !== null} onClick={() => void runAction('finish')}><CircleStop size={16} />Finish match</button>
+            </div>
+            <div className="drawer-status" role="status">
+              {pendingAction ? `Running ${pendingAction}…` : actionError || 'Controls are ready.'}
+            </div>
+          </aside>
+        </div>
+      )}
     </main>
   );
 };

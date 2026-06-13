@@ -43,7 +43,13 @@ const dockerfileSources: Record<string, string> = {
 };
 
 const buildTopology = (yamlSource: string): Topology => {
-  const parsed = parseDockerCompose(yamlSource, dockerfileSources);
+  const parsedCompose = parseDockerCompose(yamlSource, dockerfileSources);
+  const parsed = {
+    ...parsedCompose,
+    services: parsedCompose.services.filter(
+      (service) => service.labels['sandcastle.visualizer.hidden'] !== 'true',
+    ),
+  };
   const flow = buildDockerFlow(parsed);
 
   return {
@@ -73,7 +79,7 @@ const App = () => {
   }, []);
 
   return (
-    <div className="app-shell">
+    <div className="app-shell ops-shell">
       <TopologyNav
         mode={mode}
         onModeChange={setMode}
@@ -84,6 +90,7 @@ const App = () => {
         firewallEventCount={events.length}
       />
 
+      <div className="ops-content">
       {mode === 'scoreboard' && <Scoreboard />}
 
       {mode === 'topology' && (
@@ -111,6 +118,7 @@ const App = () => {
       )}
 
       {mode === 'bot' && <BotPanel />}
+      </div>
     </div>
   );
 };
