@@ -64,6 +64,7 @@ ARENA_SSH_BASE_PORT=2200
 ARENA_SERVICE_PORT=8080
 ARENA_TEAM_USERNAME_PATTERN=team{team}
 ARENA_TEAM_PASSWORD_PATTERN=team{team}pass
+ARENA_TEAM_TOKEN_PATTERN=sandcastle-team{team}-submission-token-change-me
 ARENA_SERVICE_TEMPLATE=services/example-vuln
 ARENA_FIREWALL_WS_PORT=6789
 ARENA_FIREWALL_PROXY_PORT=15000
@@ -129,6 +130,7 @@ after="$(fixture_hashes "${deterministic_fixture}")"
 }
 grep -Fq 'team_count: 2' "${deterministic_fixture}/docker-compose.yml"
 grep -Fq 'checker_max_concurrency: 8' "${deterministic_fixture}/docker-compose.yml"
+grep -Fq 'submission_rate_limit: 60' "${deterministic_fixture}/docker-compose.yml"
 grep -Fq '2202:22' "${deterministic_fixture}/docker-compose.yml"
 team1_service_compose="${deterministic_fixture}/teams/generated/team1/example-vuln/docker-compose.yml"
 team2_service_compose="${deterministic_fixture}/teams/generated/team2/example-vuln/docker-compose.yml"
@@ -147,6 +149,7 @@ fi
 access_output="$(run_setup "${deterministic_fixture}" --show-access)"
 assert_contains "${access_output}" "ssh -p 2201 team1@localhost"
 assert_contains "${access_output}" "Password:     team1pass"
+assert_contains "${access_output}" "API token:    sandcastle-team1-submission-token-change-me"
 assert_contains "${access_output}" "ws://localhost:6789"
 
 printf 'print("participant patch")\n' \

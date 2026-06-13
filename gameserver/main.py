@@ -13,6 +13,7 @@ Exposes:
   - POST /match/pause → Pause automatic round creation
   - POST /match/resume → Resume automatic round creation
   - POST /rounds/step → Run one round while paused
+  - POST /flags/submit → Authenticated flag submission
 """
 
 from __future__ import annotations
@@ -22,12 +23,18 @@ import json
 import re
 import sys
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import urlparse
 
 import db
-from models import Match, MatchState, Service, Team, validate_state_transition
+from models import Match, MatchState, validate_state_transition
+from submissions import (
+    SubmissionCode,
+    TeamRateLimiter,
+    authenticate_team,
+    record_submission,
+)
 from tick_engine import OperatorStateError, RoundEngineError, TickEngine, build_tick_engine
 
 
@@ -36,6 +43,8 @@ ALLOWED_ORIGINS = re.compile(r"^https?://localhost(:\d+)?$")
 
 class GameserverAPIHandler(BaseHTTPRequestHandler):
     tick_engine: TickEngine | None = None
+    submission_rate_limiter = TeamRateLimiter(limit=60, window_seconds=60)
+    max_request_body_bytes = 64 * 1024
 
     def log_message(self, fmt: str, *args: Any) -> None:
         # Silence default access logging to keep stdout clean
@@ -48,27 +57,45 @@ class GameserverAPIHandler(BaseHTTPRequestHandler):
         else:
             self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
         self.send_header("Vary", "Origin")
 
-    def _json(self, code: int, body: Any) -> None:
+    def _json(
+        self,
+        code: int,
+        body: Any,
+        headers: dict[str, str] | None = None,
+    ) -> None:
         data = json.dumps(body).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
+        for name, value in (headers or {}).items():
+            self.send_header(name, value)
         self._cors()
         self.end_headers()
         self.wfile.write(data)
 
     def _read_body(self) -> dict:
-        length = int(self.headers.get("Content-Length", 0))
-        if length == 0:
+        try:
+            length = int(self.headers.get("Content-Length", 0))
+        except (TypeError, ValueError):
+            return {}
+        if length <= 0 or length > self.max_request_body_bytes:
             return {}
         raw = self.rfile.read(length)
         try:
-            return json.loads(raw.decode("utf-8"))
-        except Exception:
+            body = json.loads(raw.decode("utf-8"))
+            return body if isinstance(body, dict) else {}
+        except (UnicodeDecodeError, json.JSONDecodeError):
             return {}
+
+    def _bearer_token(self) -> str | None:
+        authorization = self.headers.get("Authorization", "")
+        scheme, separator, token = authorization.partition(" ")
+        if separator and scheme.lower() == "bearer" and token and " " not in token:
+            return token
+        return None
 
     def do_OPTIONS(self) -> None:
         self.send_response(204)
@@ -119,11 +146,12 @@ class GameserverAPIHandler(BaseHTTPRequestHandler):
             try:
                 conn = db.get_db_connection()
                 cursor = conn.cursor()
-                cursor.execute("SELECT id, name, token, ip_address FROM teams ORDER BY id ASC;")
+                cursor.execute("SELECT id, name, ip_address FROM teams ORDER BY id ASC;")
                 rows = cursor.fetchall()
-                teams_list = [Match.from_row((0, "CREATED", "", "")) if False else {
-                    "id": r[0], "name": r[1], "token": r[2], "ip_address": r[3]
-                } for r in rows]
+                teams_list = [
+                    {"id": row[0], "name": row[1], "ip_address": row[2]}
+                    for row in rows
+                ]
                 self._json(200, {"teams": teams_list})
             except Exception as e:
                 self._json(500, {"error": f"Database error: {str(e)}"})
@@ -188,6 +216,56 @@ class GameserverAPIHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         path = parsed.path.rstrip("/")
+
+        # ── POST /flags/submit ──
+        if path == "/flags/submit" or path == "/api/flags/submit":
+            body = self._read_body()
+            team_id = body.get("team_id")
+            token = self._bearer_token()
+            try:
+                authenticated = token is not None and authenticate_team(team_id, token)
+            except Exception:  # noqa: BLE001 - do not disclose authentication storage errors
+                self._json(
+                    500,
+                    {"code": SubmissionCode.INTERNAL_ERROR.value, "accepted": False},
+                )
+                return
+            if not authenticated:
+                self._json(
+                    401,
+                    {"code": SubmissionCode.UNAUTHORIZED.value, "accepted": False},
+                    {"WWW-Authenticate": "Bearer"},
+                )
+                return
+
+            rate_limit = self.submission_rate_limiter.check(team_id)
+            if not rate_limit.allowed:
+                self._json(
+                    429,
+                    {"code": SubmissionCode.RATE_LIMITED.value, "accepted": False},
+                    {"Retry-After": str(rate_limit.retry_after_seconds)},
+                )
+                return
+
+            try:
+                result = record_submission(team_id, body.get("flag"))
+            except Exception:  # noqa: BLE001 - keep database details out of API responses
+                self._json(
+                    500,
+                    {"code": SubmissionCode.INTERNAL_ERROR.value, "accepted": False},
+                )
+                return
+
+            status_by_code = {
+                SubmissionCode.ACCEPTED: 201,
+                SubmissionCode.DUPLICATE: 409,
+                SubmissionCode.SELF_OWNED: 403,
+                SubmissionCode.EXPIRED: 410,
+                SubmissionCode.MALFORMED: 400,
+                SubmissionCode.UNKNOWN: 404,
+            }
+            self._json(status_by_code[result.code], result.as_dict())
+            return
 
         # ── POST /match/state, /match/pause, /match/resume ──
         if path in {
@@ -313,6 +391,12 @@ def main() -> None:
         print(f"[!] Registry synchronization failed: {e}", file=sys.stderr)
         # We don't fail-hard on registry sync in case file isn't mounted during tests/local startup
 
+    config = db.parse_arena_config(config_file)
+    GameserverAPIHandler.submission_rate_limiter = TeamRateLimiter(
+        limit=int(config.get("ARENA_SUBMISSION_RATE_LIMIT", "60")),
+        window_seconds=int(config.get("ARENA_SUBMISSION_RATE_WINDOW_SECONDS", "60")),
+    )
+
     # 3. Start the persisted round scheduler.
     try:
         tick_engine = build_tick_engine()
@@ -329,8 +413,8 @@ def main() -> None:
     )
     scheduler.start()
 
-    # 4. Start HTTPServer
-    server = HTTPServer((args.host, args.port), GameserverAPIHandler)
+    # 4. Start HTTP server
+    server = ThreadingHTTPServer((args.host, args.port), GameserverAPIHandler)
     print(f"[*] Gameserver API listening on http://{args.host}:{args.port}")
     try:
         server.serve_forever()

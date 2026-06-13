@@ -8,6 +8,7 @@ from typing import Dict, Optional
 
 from checkers.contract import CheckerResult, ServiceTarget
 from models import FlagState, MatchState, RoundState
+from security import hash_team_token, verify_team_token
 
 
 DEFAULT_DB_PATH = "/app/data/gameserver.db"
@@ -33,6 +34,7 @@ def get_db_connection(db_path: Optional[str] = None) -> sqlite3.Connection:
 
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA foreign_keys = ON;")
+    conn.execute("PRAGMA busy_timeout = 5000;")
     return conn
 
 
@@ -103,19 +105,7 @@ def initialize_schema(conn: sqlite3.Connection) -> None:
         );
     """)
 
-    # Score Events table
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS score_events (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            team_id INTEGER NOT NULL,
-            round_number INTEGER NOT NULL,
-            event_type TEXT NOT NULL,
-            points REAL NOT NULL,
-            details TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY(team_id) REFERENCES teams(id) ON DELETE CASCADE
-        );
-    """)
+    _initialize_score_events_schema(conn)
 
     # Trigger to auto-update matches.updated_at
     cursor.execute("""
@@ -307,6 +297,44 @@ def _create_flags_table(conn: sqlite3.Connection) -> None:
     """)
 
 
+def _initialize_score_events_schema(conn: sqlite3.Connection) -> None:
+    existing = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'score_events'"
+    ).fetchone()
+    if existing is None:
+        conn.execute("""
+            CREATE TABLE score_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                team_id INTEGER NOT NULL,
+                round_number INTEGER NOT NULL,
+                event_type TEXT NOT NULL,
+                points REAL NOT NULL,
+                details TEXT,
+                submission_id INTEGER,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(team_id) REFERENCES teams(id) ON DELETE CASCADE,
+                FOREIGN KEY(submission_id) REFERENCES submissions(id) ON DELETE CASCADE
+            );
+        """)
+    else:
+        columns = {
+            row[1] for row in conn.execute("PRAGMA table_info(score_events)").fetchall()
+        }
+        if "submission_id" not in columns:
+            conn.execute(
+                """
+                ALTER TABLE score_events
+                ADD COLUMN submission_id INTEGER REFERENCES submissions(id) ON DELETE CASCADE
+                """
+            )
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS score_events_submission_unique
+        ON score_events(submission_id) WHERE submission_id IS NOT NULL
+        """
+    )
+
+
 def persist_checker_result(
     conn: sqlite3.Connection,
     target: ServiceTarget,
@@ -414,6 +442,13 @@ def sync_registry(conn: sqlite3.Connection, config_path: str) -> None:
     else:
         network_prefix = "10.10"
 
+    team_token_pattern = config.get(
+        "ARENA_TEAM_TOKEN_PATTERN",
+        "sandcastle-team{team}-submission-token-change-me",
+    )
+    if "{team}" not in team_token_pattern:
+        raise ValueError("ARENA_TEAM_TOKEN_PATTERN must contain {team}")
+
     # Synchronize Teams
     if team_count > 0:
         # Keep track of active team IDs
@@ -422,7 +457,15 @@ def sync_registry(conn: sqlite3.Connection, config_path: str) -> None:
             team_id = i
             active_team_ids.add(team_id)
             team_name = f"Team {i}"
-            team_token = f"team{i}-secret-token"
+            team_token = team_token_pattern.replace("{team}", str(i))
+            existing = cursor.execute(
+                "SELECT token FROM teams WHERE id = ?",
+                (team_id,),
+            ).fetchone()
+            if existing is not None and verify_team_token(team_token, existing[0]):
+                team_token_hash = existing[0]
+            else:
+                team_token_hash = hash_team_token(team_token)
             team_ip = f"{network_prefix}.{i}.3"
 
             # Insert or update
@@ -435,7 +478,7 @@ def sync_registry(conn: sqlite3.Connection, config_path: str) -> None:
                     token=excluded.token,
                     ip_address=excluded.ip_address;
                 """,
-                (team_id, team_name, team_token, team_ip)
+                (team_id, team_name, team_token_hash, team_ip)
             )
 
         # Remove extra teams not in configuration

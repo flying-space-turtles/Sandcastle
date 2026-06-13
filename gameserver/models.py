@@ -82,7 +82,7 @@ class Match:
 class Team:
     id: int
     name: str
-    token: str
+    token_hash: str
     ip_address: str
 
     @classmethod
@@ -90,7 +90,7 @@ class Team:
         return cls(
             id=row[0],
             name=row[1],
-            token=row[2],
+            token_hash=row[2],
             ip_address=row[3],
         )
 
@@ -174,4 +174,5 @@ class ScoreEvent:
     event_type: str  # ATTACK, DEFENSE, SLA
     points: float
     details: Optional[str]
+    submission_id: Optional[int]
     created_at: str

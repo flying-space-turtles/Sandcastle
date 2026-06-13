@@ -3,8 +3,8 @@
 This repository models the container layout for a local Attack & Defense CTF,
 includes a template vulnerable service, and provides a persistent gameserver
 core, typed service checkers, and persisted round scheduling. It does not yet
-include submissions, scoreboards, or scoring. See `../VISION.md` for the target
-product and `PROJECT_AUDIT_AND_BACKLOG.md` for the implementation plan.
+include scoreboards or a complete scoring policy. See `../VISION.md` for the
+target product and `PROJECT_AUDIT_AND_BACKLOG.md` for the implementation plan.
 
 ## Topology
 
@@ -122,11 +122,24 @@ bounded executor configured by `ARENA_CHECKER_MAX_CONCURRENCY`. Operator pause,
 resume, and single-step behavior is documented in
 [`round-engine.md`](round-engine.md).
 
+## Flag Submissions
+
+`POST /api/flags/submit` authenticates a declared `team_id` with a Bearer token
+rendered from `ARENA_TEAM_TOKEN_PATTERN`. Registry synchronization stores only a
+salted PBKDF2 hash. The API validates the exact flag format and returns distinct
+codes for duplicate, self-owned, expired, malformed, and unknown flags.
+
+Accepted submissions and their one-point attack events are committed in one
+SQLite transaction. A unique `(flag, attacker_id)` constraint and a unique
+score-event submission reference ensure concurrent requests can award once.
+`ARENA_SUBMISSION_RATE_LIMIT` and `ARENA_SUBMISSION_RATE_WINDOW_SECONDS`
+configure the in-process per-team sliding-window limiter.
+
 ## Iteration Path
 
 The next layers can be added independently:
 
-- authenticated flag submission and scoring
+- deterministic attack, defense, and SLA score calculation
 - a scoreboard or operator dashboard
 
 Keeping these layers separate makes the infrastructure reusable while the

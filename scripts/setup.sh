@@ -375,6 +375,8 @@ x-sandcastle-arena:
   flag_expiry_rounds: ${ARENA_FLAG_EXPIRY_ROUNDS}
   checker_max_concurrency: ${ARENA_CHECKER_MAX_CONCURRENCY}
   gameserver_port: ${ARENA_GAMESERVER_PORT}
+  submission_rate_limit: ${ARENA_SUBMISSION_RATE_LIMIT}
+  submission_rate_window_seconds: ${ARENA_SUBMISSION_RATE_WINDOW_SECONDS}
 
 networks:
   ctf-network:
@@ -505,7 +507,7 @@ EOF
 
 print_summary() {
     local teams="$1"
-    local i username password
+    local i username password submission_token
 
     echo
     echo "Generated ${teams} team(s) from ${ARENA_CONFIG_FILE#${ROOT}/}."
@@ -531,10 +533,12 @@ print_summary() {
         for ((i = 1; i <= teams; i++)); do
             username="$(arena_config_render_team_value "${ARENA_TEAM_USERNAME_PATTERN}" "${i}")"
             password="$(arena_config_render_team_value "${ARENA_TEAM_PASSWORD_PATTERN}" "${i}")"
+            submission_token="$(arena_config_render_team_value "${ARENA_TEAM_TOKEN_PATTERN}" "${i}")"
             echo
             echo "  team${i}"
             echo "    Gateway SSH:  ssh -p $((ARENA_SSH_BASE_PORT + i)) ${username}@localhost"
             echo "    Password:     ${password}"
+            echo "    API token:    ${submission_token}"
             echo "    Vuln machine: ssh ${username}@team${i}-vuln"
             echo "    App target:   http://${ARENA_NETWORK_PREFIX}.${i}.3:${ARENA_SERVICE_PORT}"
             echo "    App health:   docker exec team${i}-vuln curl -fsS http://127.0.0.1:${ARENA_SERVICE_PORT}/health"
@@ -542,6 +546,7 @@ print_summary() {
         echo
         echo "  Firewall feed: ws://localhost:${ARENA_FIREWALL_WS_PORT}"
         echo "  Bot API:       http://${ARENA_BOT_API_HOST}:${ARENA_BOT_API_PORT}"
+        echo "  Gameserver:    http://localhost:${ARENA_GAMESERVER_PORT}"
     else
         echo "Run ./scripts/setup.sh --show-access to print development credentials and connection commands."
     fi
