@@ -57,6 +57,8 @@ RUN useradd -m -u "${TEAM_UID}" -s /bin/bash "${TEAM_USER}" \
     && mkdir -p "/home/${TEAM_USER}/example-vuln" \
     && chown -R "${TEAM_USER}:${TEAM_USER}" "/home/${TEAM_USER}/example-vuln"
 
+COPY bot/service_control.py /usr/local/bin/sandcastle-service-control
+
 RUN mkdir -p /run/sshd \
     && sed -i 's/#PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config \
     && sed -i 's/#PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config \
@@ -102,10 +104,13 @@ if [[ -S /var/run/docker.sock ]]; then
     usermod -aG "${socket_group}" "${TEAM_USER}"
 fi
 
+python3 /usr/local/bin/sandcastle-service-control &
+
 exec "$@"
 EOF
 
 EXPOSE 22
+EXPOSE 7979
 
 ENTRYPOINT ["/usr/local/bin/sandcastle-vuln-entrypoint"]
 CMD ["/usr/sbin/sshd", "-D", "-e"]

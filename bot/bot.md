@@ -14,17 +14,33 @@ it acts as that team and targets the other teams from inside the CTF network.
 | `bot_lib/actions.py` | `teamN-ssh` | Action registry: recon, exploits, probes, maintenance |
 | `bot_lib/planners.py` | `teamN-ssh` | Planner registry and external planner hook |
 | `bot.sh` | `teamN-ssh` | Older interactive shell helper |
+| `service_control.py` | `teamN-vuln` | Team-local service-control API — health check and restart for the team's own app |
 
 The Python runtime is deliberately pluggable: actions are small classes with a
 stable `run(ctx, target_team)` method, and planners produce ordered
 `BotTask(target_team, action_id)` items. A future AI agent can slot in as a
 planner without changing deploy or the visualizer flow.
 
-> Current limitation: bots run in `teamN-ssh`, which does not have Docker CLI,
-> the host Docker socket, or the generated service source. Offensive actions
-> work, but `maintain.watchdog` cannot currently restart the vulnerable machine.
-> The attacker/defender capability split is tracked as SC-013 in
-> `docs/PROJECT_AUDIT_AND_BACKLOG.md`.
+### Attacker / defender capability split
+
+Offensive bots (`bot.py`) run in `teamN-ssh`, which has network access to all
+teams but no Docker socket.  Defensive maintenance (watchdog, service restart)
+requires Docker — available only in `teamN-vuln`.
+
+The split is bridged by `service_control.py`, a small HTTP server started
+automatically inside `teamN-vuln`.  It listens on port 7979 and accepts
+requests **only from the team's own SSH container** (`10.10.N.2`).  The
+watchdog action calls this API instead of touching the Docker socket directly,
+so offensive agents running in `teamN-ssh` can never reach the Docker daemon.
+
+```
+teamN-ssh (bot.py)
+  └─ HTTP → 10.10.N.3:7979/service/health     (read: is app running?)
+  └─ HTTP → 10.10.N.3:7979/service/restart    (write: restart app)
+         ↓ (only from 10.10.N.2)
+teamN-vuln (service_control.py)
+  └─ /var/run/docker.sock → docker restart teamN-vuln-app
+```
 
 ## Visualizer Flow
 
@@ -96,13 +112,30 @@ Topology-bound bot defaults are loaded from the canonical arena config, which
 | `exploit.cmdi` | Exploit | Inject `cat /app/data/flag.txt` through diagnostics |
 | `exploit.sqli` | Exploit | Bypass login and read admin notes |
 | `probe.plant_endpoint` | Probe | Probe `/internal/plant` with a bad token |
-| `maintain.watchdog` | Maintenance | Restart own vuln machine if Docker access is available |
+| `maintain.watchdog` | Maintenance | Restart the team app via the service-control API if it is unhealthy |
 
 See the machine-readable catalog:
 
 ```bash
 python3 bot/bot.py --catalog
 ```
+
+## Capabilities
+
+Every action declares `required_capabilities` (a `frozenset`).  At startup the
+bot probes what is available and logs the result.  If a required capability is
+missing the action is skipped with a clear message rather than silently failing.
+
+| Token | How acquired | Meaning |
+|---|---|---|
+| `network.attack` | Always | Can reach opponent service ports over ctf-network |
+| `network.submit` | Always | Can submit flags to the gameserver |
+| `docker.socket` | `/var/run/docker.sock` present | Direct Docker daemon access (only in `teamN-vuln`) |
+| `service.control.local` | `GET 10.10.N.3:7979/ping` succeeds | Team-local service-control API reachable |
+
+Probing happens once at `BotContext` construction.  Pass
+`capabilities=frozenset()` when constructing `BotContext` in unit tests to
+bypass the network probe.
 
 ## External Planner Contract
 

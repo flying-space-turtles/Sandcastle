@@ -25,6 +25,7 @@ CYAN = "\033[36m"
 RESET = "\033[0m"
 
 DOCKER_SOCK = "/var/run/docker.sock"
+SERVICE_CONTROL_PORT = int(os.environ.get("SERVICE_CONTROL_PORT", "7979"))
 
 
 def ok(msg: str) -> None:
@@ -51,6 +52,36 @@ def detect_my_team() -> Optional[int]:
     return None
 
 
+def _service_control_host(my_team: int) -> str:
+    """Return the ctf-network IP of teamN-vuln (10.10.N.3)."""
+    return f"10.10.{my_team}.3"
+
+
+def discover_capabilities(my_team: Optional[int]) -> frozenset:
+    """Probe available capabilities at startup. Returns a frozenset of token strings."""
+    caps: set[str] = {"network.attack", "network.submit"}
+    if os.path.exists(DOCKER_SOCK):
+        caps.add("docker.socket")
+    if my_team is not None:
+        try:
+            url = f"http://{_service_control_host(my_team)}:{SERVICE_CONTROL_PORT}/ping"
+            urllib.request.urlopen(url, timeout=2)
+            caps.add("service.control.local")
+        except Exception:
+            pass
+    return frozenset(caps)
+
+
+def call_service_control(host: str, method: str, path: str) -> dict:
+    """Call the team-local service-control API. Raises on error."""
+    url = f"http://{host}:{SERVICE_CONTROL_PORT}{path}"
+    req = urllib.request.Request(url, method=method)
+    if method == "POST":
+        req.data = b""
+    with urllib.request.urlopen(req, timeout=5) as resp:
+        return json.loads(resp.read())
+
+
 @dataclass
 class BotContext:
     config: BotConfig
@@ -60,6 +91,12 @@ class BotContext:
     _flag_re_cache: re.Pattern | None = field(default=None, init=False, repr=False)
     _submitted_flags: set[str] = field(default_factory=set, init=False, repr=False)
     event_file: str = field(default_factory=lambda: os.environ.get("BOT_EVENT_FILE", ""))
+    # Pass capabilities=frozenset() in unit tests to skip the network probe.
+    capabilities: frozenset | None = field(default=None)
+
+    def __post_init__(self) -> None:
+        if self.capabilities is None:
+            object.__setattr__(self, "capabilities", discover_capabilities(self.my_team))
 
     def flag_re(self) -> re.Pattern:
         if self._flag_re_cache is None:
