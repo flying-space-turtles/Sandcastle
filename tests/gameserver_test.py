@@ -578,7 +578,7 @@ class GameserverHTTPTest(unittest.TestCase):
         self.assertEqual(len(submissions), 1)
         self.assertEqual(submissions[0][1], "ACCEPTED")
         self.assertEqual(len(score_events), 1)
-        self.assertEqual(score_events[0][0], 1.0)
+        self.assertEqual(score_events[0][0], 10.0)
         self.assertEqual(score_events[0][2], submissions[0][0])
         self.assertNotIn(flags["opponent"], score_events[0][1])
 
@@ -638,6 +638,48 @@ class GameserverHTTPTest(unittest.TestCase):
         self.assertEqual(conn.execute("SELECT COUNT(*) FROM submissions").fetchone()[0], 1)
         self.assertEqual(conn.execute("SELECT COUNT(*) FROM score_events").fetchone()[0], 1)
         conn.close()
+
+    def test_standings_and_round_score_apis(self):
+        flag = self._insert_round_and_flags()["opponent"]
+        conn = db.get_db_connection(self.db_path)
+        conn.execute(
+            "INSERT INTO submissions (flag, attacker_id, status) VALUES (?, 1, 'ACCEPTED')",
+            (flag,),
+        )
+        conn.executemany(
+            """
+            INSERT INTO checker_results (
+                match_id, team_id, service_id, round_number, operation,
+                plugin_name, plugin_version, status, message, duration_ms, data_json
+            ) VALUES (1, 1, 1, 3, ?, 'notes', '1', 'UP', 'ok', 1, '{}')
+            """,
+            [("GET",), ("CHECK",)],
+        )
+        conn.commit()
+        conn.close()
+
+        with urllib.request.urlopen(f"{self.base_url}/api/standings", timeout=5) as resp:
+            standings = json.loads(resp.read().decode())
+        self.assertEqual(standings["policy"]["attack_points"], 10.0)
+        self.assertEqual(standings["standings"][0]["team_id"], 1)
+        self.assertEqual(standings["standings"][0]["total"], 13.0)
+
+        with urllib.request.urlopen(
+            f"{self.base_url}/api/rounds/3/scores",
+            timeout=5,
+        ) as resp:
+            round_scores = json.loads(resp.read().decode())
+        self.assertEqual(round_scores["round_number"], 3)
+        self.assertEqual(round_scores["standings"][0]["attack"], 10.0)
+        self.assertEqual(round_scores["standings"][0]["defense"], 2.0)
+        self.assertEqual(round_scores["standings"][0]["sla"], 1.0)
+
+        with self.assertRaises(urllib.error.HTTPError) as context:
+            urllib.request.urlopen(
+                f"{self.base_url}/rounds/99/scores",
+                timeout=5,
+            )
+        self.assertEqual(context.exception.code, 404)
 
 
 if __name__ == "__main__":

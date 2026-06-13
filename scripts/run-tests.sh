@@ -59,6 +59,7 @@ python3 -B -m py_compile \
     "${ROOT}/gameserver/checkers/"*.py \
     "${ROOT}/tests/checker_test.py" \
     "${ROOT}/tests/gameserver_test.py" \
+    "${ROOT}/tests/scoring_test.py" \
     "${ROOT}/tests/round_engine_test.py" \
     "${ROOT}/services/example-vuln/app/app.py" \
     "${ROOT}/services/example-vuln/checker.py" \
@@ -72,6 +73,10 @@ python3 -B "${ROOT}/tests/firewall_test.py"
 # ---------------------------------------------------------------------------
 step "Gameserver unit tests"
 python3 -B "${ROOT}/tests/gameserver_test.py"
+
+# ---------------------------------------------------------------------------
+step "Deterministic scoring tests"
+python3 -B "${ROOT}/tests/scoring_test.py"
 
 # ---------------------------------------------------------------------------
 step "Checker contract and TurtleNotes tests"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import sqlite3
@@ -13,6 +14,10 @@ from security import hash_team_token, verify_team_token
 
 DEFAULT_DB_PATH = "/app/data/gameserver.db"
 DEFAULT_CONFIG_PATH = "/app/config/arena.env"
+DEFAULT_SCORING_POLICY_VERSION = "sandcastle-v1"
+DEFAULT_ATTACK_POINTS = 10.0
+DEFAULT_DEFENSE_POINTS = 2.0
+DEFAULT_SLA_POINTS = 1.0
 
 
 def get_db_path() -> str:
@@ -63,10 +68,15 @@ def initialize_schema(conn: sqlite3.Connection) -> None:
         CREATE TABLE IF NOT EXISTS matches (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             status TEXT NOT NULL,
+            scoring_policy_version TEXT NOT NULL DEFAULT 'sandcastle-v1',
+            attack_points REAL NOT NULL DEFAULT 10.0 CHECK(attack_points >= 0),
+            defense_points REAL NOT NULL DEFAULT 2.0 CHECK(defense_points >= 0),
+            sla_points REAL NOT NULL DEFAULT 1.0 CHECK(sla_points >= 0),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
     """)
+    _initialize_match_scoring_schema(conn)
 
     # Teams table
     cursor.execute("""
@@ -106,6 +116,7 @@ def initialize_schema(conn: sqlite3.Connection) -> None:
     """)
 
     _initialize_score_events_schema(conn)
+    _migrate_legacy_scoring_policy(conn)
 
     # Trigger to auto-update matches.updated_at
     cursor.execute("""
@@ -147,6 +158,22 @@ def _create_checker_results_table(conn: sqlite3.Connection) -> None:
             UNIQUE(match_id, team_id, service_id, round_number, operation)
         );
     """)
+
+
+def _initialize_match_scoring_schema(conn: sqlite3.Connection) -> None:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(matches)").fetchall()}
+    additions = (
+        (
+            "scoring_policy_version",
+            "TEXT NOT NULL DEFAULT 'legacy-submission-v0'",
+        ),
+        ("attack_points", "REAL NOT NULL DEFAULT 10.0 CHECK(attack_points >= 0)"),
+        ("defense_points", "REAL NOT NULL DEFAULT 2.0 CHECK(defense_points >= 0)"),
+        ("sla_points", "REAL NOT NULL DEFAULT 1.0 CHECK(sla_points >= 0)"),
+    )
+    for name, definition in additions:
+        if name not in columns:
+            conn.execute(f"ALTER TABLE matches ADD COLUMN {name} {definition}")
 
 
 def _initialize_checker_results_schema(conn: sqlite3.Connection) -> None:
@@ -302,37 +329,109 @@ def _initialize_score_events_schema(conn: sqlite3.Connection) -> None:
         "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'score_events'"
     ).fetchone()
     if existing is None:
-        conn.execute("""
-            CREATE TABLE score_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                team_id INTEGER NOT NULL,
-                round_number INTEGER NOT NULL,
-                event_type TEXT NOT NULL,
-                points REAL NOT NULL,
-                details TEXT,
-                submission_id INTEGER,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY(team_id) REFERENCES teams(id) ON DELETE CASCADE,
-                FOREIGN KEY(submission_id) REFERENCES submissions(id) ON DELETE CASCADE
-            );
-        """)
+        _create_score_events_table(conn)
     else:
         columns = {
             row[1] for row in conn.execute("PRAGMA table_info(score_events)").fetchall()
         }
-        if "submission_id" not in columns:
+        if "match_id" not in columns or "checker_result_id" not in columns:
+            conn.execute("ALTER TABLE score_events RENAME TO score_events_legacy")
+            _create_score_events_table(conn)
+            match_id = "match_id" if "match_id" in columns else "1"
+            submission_id = "submission_id" if "submission_id" in columns else "NULL"
+            checker_result_id = (
+                "checker_result_id" if "checker_result_id" in columns else "NULL"
+            )
             conn.execute(
-                """
-                ALTER TABLE score_events
-                ADD COLUMN submission_id INTEGER REFERENCES submissions(id) ON DELETE CASCADE
+                f"""
+                INSERT INTO score_events (
+                    id, match_id, team_id, round_number, event_type, points,
+                    details, submission_id, checker_result_id, created_at
+                )
+                SELECT
+                    id, {match_id}, team_id, round_number, event_type, points,
+                    details, {submission_id}, {checker_result_id}, created_at
+                FROM score_events_legacy
                 """
             )
+            conn.execute("DROP TABLE score_events_legacy")
     conn.execute(
         """
         CREATE UNIQUE INDEX IF NOT EXISTS score_events_submission_unique
         ON score_events(submission_id) WHERE submission_id IS NOT NULL
         """
     )
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS score_events_checker_result_unique
+        ON score_events(event_type, checker_result_id)
+        WHERE checker_result_id IS NOT NULL
+        """
+    )
+    conn.execute(
+        """
+        CREATE TRIGGER IF NOT EXISTS prevent_score_event_updates
+        BEFORE UPDATE ON score_events
+        BEGIN
+            SELECT RAISE(ABORT, 'score events are immutable');
+        END
+        """
+    )
+
+
+def _create_score_events_table(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        CREATE TABLE score_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            match_id INTEGER NOT NULL,
+            team_id INTEGER NOT NULL,
+            round_number INTEGER NOT NULL,
+            event_type TEXT NOT NULL CHECK(event_type IN ('ATTACK', 'DEFENSE', 'SLA')),
+            points REAL NOT NULL CHECK(points >= 0),
+            details TEXT,
+            submission_id INTEGER,
+            checker_result_id INTEGER,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(match_id) REFERENCES matches(id) ON DELETE RESTRICT,
+            FOREIGN KEY(team_id) REFERENCES teams(id) ON DELETE RESTRICT,
+            FOREIGN KEY(submission_id) REFERENCES submissions(id) ON DELETE RESTRICT,
+            FOREIGN KEY(checker_result_id) REFERENCES checker_results(id) ON DELETE RESTRICT
+        )
+    """)
+
+
+def _migrate_legacy_scoring_policy(conn: sqlite3.Connection) -> None:
+    legacy_matches = conn.execute(
+        """
+        SELECT id FROM matches
+        WHERE scoring_policy_version = 'legacy-submission-v0'
+        """
+    ).fetchall()
+    for (match_id,) in legacy_matches:
+        attack_row = conn.execute(
+            """
+            SELECT points FROM score_events
+            WHERE match_id = ? AND event_type = 'ATTACK'
+            ORDER BY id LIMIT 1
+            """,
+            (match_id,),
+        ).fetchone()
+        attack_points = float(attack_row[0]) if attack_row else DEFAULT_ATTACK_POINTS
+        conn.execute(
+            """
+            UPDATE matches
+            SET scoring_policy_version = ?, attack_points = ?,
+                defense_points = ?, sla_points = ?
+            WHERE id = ?
+            """,
+            (
+                DEFAULT_SCORING_POLICY_VERSION,
+                attack_points,
+                DEFAULT_DEFENSE_POINTS,
+                DEFAULT_SLA_POINTS,
+                match_id,
+            ),
+        )
 
 
 def persist_checker_result(
@@ -501,4 +600,47 @@ def sync_registry(conn: sqlite3.Connection, config_path: str) -> None:
         (service_name, service_port)
     )
 
+    scoring_values = (
+        DEFAULT_SCORING_POLICY_VERSION,
+        _parse_non_negative_score(
+            config.get("ARENA_SCORE_ATTACK_POINTS"),
+            DEFAULT_ATTACK_POINTS,
+            "ARENA_SCORE_ATTACK_POINTS",
+        ),
+        _parse_non_negative_score(
+            config.get("ARENA_SCORE_DEFENSE_POINTS"),
+            DEFAULT_DEFENSE_POINTS,
+            "ARENA_SCORE_DEFENSE_POINTS",
+        ),
+        _parse_non_negative_score(
+            config.get("ARENA_SCORE_SLA_POINTS"),
+            DEFAULT_SLA_POINTS,
+            "ARENA_SCORE_SLA_POINTS",
+        ),
+    )
+    cursor.execute(
+        """
+        UPDATE matches
+        SET scoring_policy_version = ?, attack_points = ?,
+            defense_points = ?, sla_points = ?
+        WHERE id = 1 AND status = ?
+          AND NOT EXISTS (
+              SELECT 1 FROM score_events WHERE match_id = matches.id
+          )
+        """,
+        (*scoring_values, MatchState.CREATED.value),
+    )
+
     conn.commit()
+
+
+def _parse_non_negative_score(raw: str | None, default: float, name: str) -> float:
+    if raw is None:
+        return default
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be numeric") from exc
+    if not math.isfinite(value) or value < 0:
+        raise ValueError(f"{name} must be non-negative")
+    return value

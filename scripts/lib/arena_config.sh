@@ -111,6 +111,9 @@ arena_config_load() {
         ARENA_GAMESERVER_PORT
         ARENA_SUBMISSION_RATE_LIMIT
         ARENA_SUBMISSION_RATE_WINDOW_SECONDS
+        ARENA_SCORE_ATTACK_POINTS
+        ARENA_SCORE_DEFENSE_POINTS
+        ARENA_SCORE_SLA_POINTS
         ARENA_CHECKER_SECRET
     )
 
@@ -134,6 +137,9 @@ arena_config_load() {
     ARENA_CHECKER_MAX_CONCURRENCY="${ARENA_CHECKER_MAX_CONCURRENCY:-8}"
     ARENA_SUBMISSION_RATE_LIMIT="${ARENA_SUBMISSION_RATE_LIMIT:-60}"
     ARENA_SUBMISSION_RATE_WINDOW_SECONDS="${ARENA_SUBMISSION_RATE_WINDOW_SECONDS:-60}"
+    ARENA_SCORE_ATTACK_POINTS="${ARENA_SCORE_ATTACK_POINTS:-10}"
+    ARENA_SCORE_DEFENSE_POINTS="${ARENA_SCORE_DEFENSE_POINTS:-2}"
+    ARENA_SCORE_SLA_POINTS="${ARENA_SCORE_SLA_POINTS:-1}"
     ARENA_CHECKER_SECRET="${ARENA_CHECKER_SECRET:-sandcastle-local-checker-secret-change-me}"
 
     for name in "${required[@]}"; do
@@ -162,6 +168,9 @@ arena_config_load() {
     arena_config_require_int ARENA_GAMESERVER_PORT 1 65535 || return 1
     arena_config_require_int ARENA_SUBMISSION_RATE_LIMIT 1 100000 || return 1
     arena_config_require_int ARENA_SUBMISSION_RATE_WINDOW_SECONDS 1 86400 || return 1
+    arena_config_require_int ARENA_SCORE_ATTACK_POINTS 0 100000 || return 1
+    arena_config_require_int ARENA_SCORE_DEFENSE_POINTS 0 100000 || return 1
+    arena_config_require_int ARENA_SCORE_SLA_POINTS 0 100000 || return 1
 
     if ((${#ARENA_CHECKER_SECRET} < 16)); then
         arena_config_error "ARENA_CHECKER_SECRET must contain at least 16 characters"
@@ -248,6 +257,9 @@ arena_config_load() {
         ARENA_GAMESERVER_PORT \
         ARENA_SUBMISSION_RATE_LIMIT \
         ARENA_SUBMISSION_RATE_WINDOW_SECONDS \
+        ARENA_SCORE_ATTACK_POINTS \
+        ARENA_SCORE_DEFENSE_POINTS \
+        ARENA_SCORE_SLA_POINTS \
         ARENA_CHECKER_SECRET \
         ARENA_CONFIG_FILE
 }

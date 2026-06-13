@@ -5,8 +5,8 @@ software agents that patch their own services and attack opponents.
 
 The repository currently provides team environments, an intentionally
 vulnerable service, scripted bots, a topology visualizer, a network monitor, a
-persistent gameserver core, and a typed checker framework. It does **not** yet
-provide SLA/defense scoring, standings, or a scoreboard.
+persistent gameserver core, a typed checker framework, and deterministic
+competition scoring. It does **not** yet provide a scoreboard UI.
 
 - Product direction: [`VISION.md`](VISION.md)
 - Current audit and prioritized agent backlog:
@@ -26,9 +26,9 @@ provide SLA/defense scoring, standings, or a scoreboard.
 | `bot/` | Scripted action/planner runtime and local control API | Offensive path works; watchdog is currently ineffective |
 | `firewall/` | Source-masking proxy and WebSocket activity feed | Enforced and smoke-tested on native Linux |
 | `visualizer/` | React topology, event, and bot UI | Implemented |
-| `gameserver/` | Match state, rounds, flags, authenticated submissions, and recovery | Implemented |
+| `gameserver/` | Match state, rounds, flags, submissions, scoring, and recovery | Implemented |
 | Service checkers | PUT, GET, CHECK contract and TurtleNotes plugin | Implemented |
-| Scoring/standings | Deterministic score calculation and presentation | Not implemented |
+| Scoring/standings | Replayable attack, defense, and SLA scoring APIs | Implemented |
 
 ## Requirements
 
@@ -141,6 +141,20 @@ Responses always include a machine-readable `code`: `ACCEPTED`, `DUPLICATE`,
 `SELF_OWNED`, `EXPIRED`, `MALFORMED`, `UNKNOWN`, `UNAUTHORIZED`, or
 `RATE_LIMITED`. Rate-limited responses include `Retry-After`. Run
 `./scripts/setup.sh --show-access` to print local development tokens.
+
+## Scoring
+
+The gameserver projects submissions and completed checker results into
+immutable attack, defense, and SLA score events. Current and per-round results
+are available from:
+
+```bash
+curl -s http://localhost:8000/api/standings
+curl -s http://localhost:8000/api/rounds/1/scores
+```
+
+See [`docs/scoring.md`](docs/scoring.md) for component definitions, configurable
+weights, replay rules, and deterministic tie ordering.
 
 ## Quick Start
 

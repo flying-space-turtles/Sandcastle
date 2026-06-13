@@ -14,6 +14,8 @@ Exposes:
   - POST /match/resume → Resume automatic round creation
   - POST /rounds/step → Run one round while paused
   - POST /flags/submit → Authenticated flag submission
+  - GET  /standings → Current deterministic standings
+  - GET  /rounds/{number}/scores → Per-round score breakdown
 """
 
 from __future__ import annotations
@@ -29,6 +31,12 @@ from urllib.parse import urlparse
 
 import db
 from models import Match, MatchState, validate_state_transition
+from scoring import (
+    TIEBREAKER,
+    get_scoring_policy,
+    reconcile_score_events,
+    standings_from_events,
+)
 from submissions import (
     SubmissionCode,
     TeamRateLimiter,
@@ -96,6 +104,43 @@ class GameserverAPIHandler(BaseHTTPRequestHandler):
         if separator and scheme.lower() == "bearer" and token and " " not in token:
             return token
         return None
+
+    def _scores(self, round_number: int | None = None) -> None:
+        conn = None
+        try:
+            conn = db.get_db_connection()
+            if round_number is not None:
+                exists = conn.execute(
+                    "SELECT 1 FROM rounds WHERE match_id = 1 AND round_number = ?",
+                    (round_number,),
+                ).fetchone()
+                if exists is None:
+                    self._json(
+                        404,
+                        {"code": "ROUND_NOT_FOUND", "round_number": round_number},
+                    )
+                    return
+            reconcile_score_events(conn, match_id=1)
+            policy = get_scoring_policy(conn, match_id=1)
+            standings = standings_from_events(
+                conn,
+                match_id=1,
+                round_number=round_number,
+            )
+            body: dict[str, object] = {
+                "match_id": 1,
+                "policy": policy.as_dict(),
+                "tiebreaker": list(TIEBREAKER),
+                "standings": standings,
+            }
+            if round_number is not None:
+                body["round_number"] = round_number
+            self._json(200, body)
+        except Exception:  # noqa: BLE001 - do not expose persistence internals
+            self._json(500, {"code": "SCORING_ERROR"})
+        finally:
+            if conn:
+                conn.close()
 
     def do_OPTIONS(self) -> None:
         self.send_response(204)
@@ -209,6 +254,17 @@ class GameserverAPIHandler(BaseHTTPRequestHandler):
             finally:
                 if conn:
                     conn.close()
+            return
+
+        # ── GET /standings ──
+        if path == "/standings" or path == "/api/standings":
+            self._scores()
+            return
+
+        # ── GET /rounds/{number}/scores ──
+        round_scores_match = re.fullmatch(r"(?:/api)?/rounds/(\d+)/scores", path)
+        if round_scores_match:
+            self._scores(int(round_scores_match.group(1)))
             return
 
         self._json(404, {"error": "not found"})

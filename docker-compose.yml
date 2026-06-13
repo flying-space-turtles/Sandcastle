@@ -14,6 +14,9 @@ x-sandcastle-arena:
   gameserver_port: 8000
   submission_rate_limit: 60
   submission_rate_window_seconds: 60
+  score_attack_points: 10
+  score_defense_points: 2
+  score_sla_points: 1
 
 networks:
   ctf-network:
