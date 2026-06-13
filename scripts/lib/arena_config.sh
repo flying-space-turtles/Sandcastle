@@ -143,6 +143,7 @@ arena_config_load() {
     ARENA_SCORE_DEFENSE_POINTS="${ARENA_SCORE_DEFENSE_POINTS:-2}"
     ARENA_SCORE_SLA_POINTS="${ARENA_SCORE_SLA_POINTS:-1}"
     ARENA_CHECKER_SECRET="${ARENA_CHECKER_SECRET:-sandcastle-local-checker-secret-change-me}"
+    ARENA_ISOLATION_MODE="${ARENA_ISOLATION_MODE:-trusted}"
 
     for name in "${required[@]}"; do
         if [[ -z "${!name:-}" ]]; then
@@ -182,6 +183,15 @@ arena_config_load() {
         arena_config_error "ARENA_CHECKER_SECRET must contain at least 16 characters"
         return 1
     fi
+
+    case "${ARENA_ISOLATION_MODE}" in
+        trusted|isolated) ;;
+        *)
+            arena_config_error \
+                "ARENA_ISOLATION_MODE must be 'trusted' or 'isolated', got '${ARENA_ISOLATION_MODE}'"
+            return 1
+            ;;
+    esac
 
     if [[ ! "${ARENA_CTF_SUBNET}" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.0\.0/16$ ]]; then
         arena_config_error \
@@ -268,6 +278,7 @@ arena_config_load() {
         ARENA_SCORE_DEFENSE_POINTS \
         ARENA_SCORE_SLA_POINTS \
         ARENA_CHECKER_SECRET \
+        ARENA_ISOLATION_MODE \
         ARENA_CONFIG_FILE
 }
 

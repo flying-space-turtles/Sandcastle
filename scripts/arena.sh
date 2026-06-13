@@ -471,7 +471,12 @@ up_arena() {
     local setup_complete="${1:-0}"
     local timeout
 
-    print_trusted_mode_banner
+    if [[ "${ARENA_ISOLATION_MODE}" == "isolated" ]]; then
+        mkdir -p /run/sandcastle
+        chmod 755 /run/sandcastle
+    else
+        print_trusted_mode_banner
+    fi
 
     if ((setup_complete == 0)); then
         run_setup
