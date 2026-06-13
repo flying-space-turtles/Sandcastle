@@ -1,15 +1,23 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   Bot,
+  CheckCircle2,
+  ChevronDown,
   CircleStop,
+  Clock3,
   Crosshair,
+  FileText,
+  History,
+  Plus,
   RefreshCw,
   Rocket,
   ScrollText,
+  Settings2,
   ShieldCheck,
-  SlidersHorizontal,
   Terminal,
+  X,
+  XCircle,
 } from 'lucide-react';
 import { botApiUrl } from '../data/arenaConfig';
 import type { BotActionOption, BotConfig, BotPlannerOption } from '../types';
@@ -20,6 +28,42 @@ interface TeamStatus {
   running: boolean;
   pid: number | null;
   container_up: boolean;
+  deployment_id?: string | null;
+}
+
+interface DeploymentEvent {
+  ts: string;
+  type: string;
+  action_id?: string;
+  target_team?: number;
+  status?: string;
+  code?: string;
+  accepted?: boolean;
+  flag_fingerprint?: string;
+  message?: string;
+  seconds?: number;
+}
+
+interface Deployment {
+  id: string;
+  team_id: number;
+  bot_name: string;
+  status: 'DEPLOYING' | 'RUNNING' | 'STOPPED' | 'SUPERSEDED' | 'FAILED';
+  pid: number | null;
+  created_at: string;
+  updated_at: string;
+  stopped_at: string | null;
+  error: string | null;
+  container_up: boolean;
+  config?: Record<string, unknown>;
+  summary: {
+    captures: number;
+    submissions: number;
+    accepted: number;
+    failures: number;
+    last_event: DeploymentEvent | null;
+    current_activity: DeploymentEvent | null;
+  };
 }
 
 interface BotCatalog {
@@ -27,603 +71,360 @@ interface BotCatalog {
   planners: BotPlannerOption[];
 }
 
-interface ArenaBotConfig {
-  num_teams: number;
-  service_port: number;
-  ip_pattern: string;
-  ssh_base_port: number;
-}
-
 const FALLBACK_CATALOG: BotCatalog = {
   actions: [
-    {
-      id: 'recon.health',
-      label: 'Health check',
-      category: 'Recon',
-      scope: 'target',
-      description: 'GET /health before heavier actions.',
-    },
-    {
-      id: 'exploit.path_traversal',
-      label: 'Path traversal',
-      category: 'Exploit',
-      scope: 'target',
-      description: 'Read ../flag.txt through /export.',
-    },
-    {
-      id: 'exploit.cmdi',
-      label: 'Command injection',
-      category: 'Exploit',
-      scope: 'target',
-      description: 'Inject a flag read through /admin/diagnostics.',
-    },
-    {
-      id: 'exploit.sqli',
-      label: 'SQL injection',
-      category: 'Exploit',
-      scope: 'target',
-      description: 'Bypass login as admin and read /notes.',
-    },
-    {
-      id: 'probe.plant_endpoint',
-      label: 'Plant endpoint probe',
-      category: 'Probe',
-      scope: 'target',
-      description: 'Probe /internal/plant with an invalid token.',
-    },
-    {
-      id: 'maintain.watchdog',
-      label: 'Service watchdog',
-      category: 'Maintenance',
-      scope: 'self',
-      description: 'Restart this team service if Docker access is available.',
-    },
+    { id: 'recon.health', label: 'Health check', category: 'Recon', scope: 'target', description: 'Check target health.' },
+    { id: 'exploit.path_traversal', label: 'Path traversal', category: 'Exploit', scope: 'target', description: 'Read the flag through /export.' },
+    { id: 'exploit.cmdi', label: 'Command injection', category: 'Exploit', scope: 'target', description: 'Read the flag through diagnostics.' },
+    { id: 'exploit.sqli', label: 'SQL injection', category: 'Exploit', scope: 'target', description: 'Bypass login and inspect notes.' },
+    { id: 'probe.plant_endpoint', label: 'Plant endpoint probe', category: 'Probe', scope: 'target', description: 'Validate plant endpoint protection.' },
+    { id: 'maintain.watchdog', label: 'Service watchdog', category: 'Maintenance', scope: 'self', description: 'Restart the local service when needed.' },
   ],
   planners: [
-    {
-      id: 'scripted',
-      label: 'Scripted',
-      description: 'Run selected actions in order against each eligible opponent.',
-    },
-    {
-      id: 'recon_first',
-      label: 'Recon, then exploits',
-      description: 'Run recon across all targets, then run offensive actions.',
-    },
+    { id: 'scripted', label: 'Scripted', description: 'Run selected actions in order.' },
+    { id: 'recon_first', label: 'Recon first', description: 'Complete recon before offensive actions.' },
   ],
 };
 
-async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
-  const res = await fetch(`${botApiUrl}${path}`, opts);
-  if (!res.ok) {
-    throw new Error(`HTTP ${res.status}`);
-  }
-  return res.json() as Promise<T>;
+async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
+  const response = await fetch(`${botApiUrl}${path}`, options);
+  const body = await response.json().catch(() => ({})) as T & { error?: string };
+  if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+  return body;
 }
 
-const StatusDot = ({ up, title }: { up: boolean; title: string }) => (
-  <span className={`bot-status-dot ${up ? 'is-up' : 'is-down'}`} title={title} />
-);
+const activityLabel = (event: DeploymentEvent | null) => {
+  if (!event) return 'Waiting for telemetry';
+  if (event.type === 'action.started') return `${event.action_id || 'Action'} on team${event.target_team}`;
+  if (event.type === 'deployment.sleeping') return `Sleeping ${event.seconds || 0}s`;
+  if (event.type === 'round.started') return 'Planning next round';
+  return event.type.replaceAll('.', ' ');
+};
 
-const TeamCard = ({
-  team,
-  selected,
-  onToggle,
-}: {
-  team: TeamStatus;
-  selected: boolean;
-  onToggle: (id: number) => void;
-}) => (
-  <label className={`bot-team-card ${selected ? 'is-selected' : ''} ${!team.container_up ? 'is-offline' : ''}`}>
-    <input type="checkbox" checked={selected} onChange={() => onToggle(team.id)} disabled={!team.container_up} />
-    <div className="bot-team-card__body">
-      <div className="bot-team-card__name">
-        <StatusDot up={team.container_up} title={team.container_up ? 'Container up' : 'Container offline'} />
-        team{team.id}
-      </div>
-      <div className="bot-team-card__state">
-        {!team.container_up ? (
-          <span className="bot-badge is-offline">offline</span>
-        ) : team.running ? (
-          <span className="bot-badge is-running">running{team.pid ? ` pid ${team.pid}` : ''}</span>
-        ) : (
-          <span className="bot-badge is-idle">idle</span>
-        )}
-      </div>
-    </div>
-  </label>
-);
-
-const groupActions = (actions: BotActionOption[]) =>
-  actions.reduce<Record<string, BotActionOption[]>>((acc, action) => {
-    acc[action.category] = [...(acc[action.category] || []), action];
-    return acc;
-  }, {});
+const eventTitle = (event: DeploymentEvent) => {
+  if (event.type === 'action.completed') return `${event.action_id} · ${event.status}`;
+  if (event.type === 'submission.completed') return `Submission · ${event.code}`;
+  if (event.type === 'flag.captured') return `Captured ${event.flag_fingerprint}`;
+  if (event.type === 'action.started') return `Running ${event.action_id}`;
+  return event.type.replaceAll('.', ' ');
+};
 
 const BotPanel = () => {
-  const [config, setConfig] = useState<BotConfig>({ ...DEFAULT_BOT_CONFIG });
-  const [catalog, setCatalog] = useState<BotCatalog>(FALLBACK_CATALOG);
+  const [deployments, setDeployments] = useState<Deployment[]>([]);
   const [teams, setTeams] = useState<TeamStatus[]>([]);
-  const [selectedDeployTeams, setSelectedDeployTeams] = useState<Set<number>>(new Set());
+  const [catalog, setCatalog] = useState<BotCatalog>(FALLBACK_CATALOG);
   const [apiOnline, setApiOnline] = useState<boolean | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedDeployment, setSelectedDeployment] = useState<Deployment | null>(null);
+  const [events, setEvents] = useState<DeploymentEvent[]>([]);
+  const [logs, setLogs] = useState<string[]>([]);
+  const [config, setConfig] = useState<BotConfig>({ ...DEFAULT_BOT_CONFIG });
+  const [selectedTeams, setSelectedTeams] = useState<Set<number>>(new Set());
+  const [advancedOpen, setAdvancedOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [log, setLog] = useState<string[]>([]);
-  const [logTeam, setLogTeam] = useState<number | null>(null);
-  const logRef = useRef<HTMLPreElement>(null);
+  const [notice, setNotice] = useState('');
+  const [filter, setFilter] = useState<'active' | 'all'>('active');
 
-  const onlineTeams = useMemo(() => teams.filter((team) => team.container_up), [teams]);
-  const actionGroups = useMemo(() => groupActions(catalog.actions), [catalog.actions]);
-  const actionOrder = useMemo(() => catalog.actions.map((action) => action.id), [catalog.actions]);
-  const builtinPlanners = useMemo(
-    () => catalog.planners.filter((planner) => !planner.id.startsWith('module:')),
-    [catalog.planners],
-  );
-  const deployTeamCount = selectedDeployTeams.size;
-  const selectedActions = config.actions
-    .map((id) => catalog.actions.find((action) => action.id === id))
-    .filter(Boolean) as BotActionOption[];
-  const targetActionCount = selectedActions.filter((action) => action.scope === 'target').length;
-  const canDeploy =
-    apiOnline === true &&
-    deployTeamCount > 0 &&
-    targetActionCount > 0 &&
-    (config.targetPolicy !== 'selected' || config.targetTeams.length > 0) &&
-    !busy;
-
-  const refreshStatus = useCallback(async () => {
+  const refresh = useCallback(async () => {
     try {
-      const [status, nextCatalog, arena] = await Promise.all([
+      const [deploymentBody, statusBody, catalogBody, arena] = await Promise.all([
+        apiFetch<{ deployments: Deployment[] }>('/deployments'),
         apiFetch<{ teams: TeamStatus[] }>('/status'),
         apiFetch<BotCatalog>('/catalog').catch(() => FALLBACK_CATALOG),
-        apiFetch<ArenaBotConfig>('/arena'),
+        apiFetch<{ num_teams: number; service_port: number; ip_pattern: string }>('/arena'),
       ]);
-      setTeams(status.teams);
-      setCatalog(nextCatalog);
+      setDeployments(deploymentBody.deployments);
+      setTeams(statusBody.teams);
+      setCatalog(catalogBody);
+      setConfig((current) => ({ ...current, numTeams: arena.num_teams, servicePort: arena.service_port, ipPattern: arena.ip_pattern }));
       setApiOnline(true);
-      setConfig((current) => ({
-        ...current,
-        numTeams: arena.num_teams,
-        servicePort: arena.service_port,
-        ipPattern: arena.ip_pattern,
-      }));
-    } catch {
+    } catch (error) {
       setApiOnline(false);
+      setNotice(error instanceof Error ? error.message : 'Bot controller unavailable');
+    }
+  }, []);
+
+  const inspect = useCallback(async (deploymentId: string) => {
+    setSelectedId(deploymentId);
+    try {
+      const [detail, eventBody, logBody] = await Promise.all([
+        apiFetch<{ deployment: Deployment }>(`/deployments/${deploymentId}`),
+        apiFetch<{ events: DeploymentEvent[] }>(`/deployments/${deploymentId}/events?limit=400`),
+        apiFetch<{ lines: string[] }>(`/deployments/${deploymentId}/logs`),
+      ]);
+      setSelectedDeployment(detail.deployment);
+      setEvents(eventBody.events);
+      setLogs(logBody.lines);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not inspect deployment');
     }
   }, []);
 
   useEffect(() => {
-    refreshStatus();
-    const id = setInterval(refreshStatus, 4000);
-    return () => clearInterval(id);
-  }, [refreshStatus]);
+    void refresh();
+    const interval = window.setInterval(() => void refresh(), 4000);
+    return () => window.clearInterval(interval);
+  }, [refresh]);
 
   useEffect(() => {
-    if (logRef.current) {
-      logRef.current.scrollTop = logRef.current.scrollHeight;
-    }
-  }, [log]);
+    if (!selectedId) return;
+    const interval = window.setInterval(() => void inspect(selectedId), 4000);
+    return () => window.clearInterval(interval);
+  }, [inspect, selectedId]);
 
-  const appendLog = (lines: string) => {
-    setLog((prev) => [...prev.slice(-500), ...lines.split('\n').filter(Boolean)]);
-  };
+  const actionGroups = useMemo(
+    () => catalog.actions.reduce<Record<string, BotActionOption[]>>((groups, action) => {
+      groups[action.category] = [...(groups[action.category] || []), action];
+      return groups;
+    }, {}),
+    [catalog.actions],
+  );
+  const visibleDeployments = deployments.filter((deployment) =>
+    filter === 'all' || ['RUNNING', 'DEPLOYING'].includes(deployment.status),
+  );
+  const activeCount = deployments.filter((deployment) => deployment.status === 'RUNNING').length;
+  const acceptedCount = deployments.reduce((total, deployment) => total + deployment.summary.accepted, 0);
+  const canDeploy = apiOnline === true && selectedTeams.size > 0 && config.actions.length > 0 && !busy;
 
-  const toggleDeployTeam = (id: number) =>
-    setSelectedDeployTeams((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
+  const toggleAction = (id: string) => setConfig((current) => ({
+    ...current,
+    actions: current.actions.includes(id)
+      ? current.actions.filter((action) => action !== id)
+      : [...current.actions, id],
+  }));
+  const toggleTeam = (id: number) => setSelectedTeams((current) => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return next;
+  });
+  const toggleTarget = (id: number) => setConfig((current) => ({
+    ...current,
+    targetTeams: current.targetTeams.includes(id)
+      ? current.targetTeams.filter((team) => team !== id)
+      : [...current.targetTeams, id],
+  }));
 
-  const toggleTargetTeam = (id: number) =>
-    setConfig((prev) => ({
-      ...prev,
-      targetTeams: prev.targetTeams.includes(id)
-        ? prev.targetTeams.filter((teamId) => teamId !== id)
-        : [...prev.targetTeams, id].sort((a, b) => a - b),
-    }));
-
-  const toggleAction = (id: string) =>
-    setConfig((prev) => {
-      const nextActions = prev.actions.includes(id)
-        ? prev.actions.filter((actionId) => actionId !== id)
-        : [...prev.actions, id];
-
-      return {
-        ...prev,
-        actions: nextActions.sort((a, b) => actionOrder.indexOf(a) - actionOrder.indexOf(b)),
-      };
-    });
-
-  const selectAllDeployTeams = () => setSelectedDeployTeams(new Set(onlineTeams.map((team) => team.id)));
-  const selectNoDeployTeams = () => setSelectedDeployTeams(new Set());
-
-  const handleDeploy = async () => {
-    if (!canDeploy) {
-      return;
-    }
+  const createDeployment = async () => {
+    if (!canDeploy) return;
     setBusy(true);
-    setLog([]);
+    setNotice('Creating deployments…');
     try {
-      const payload = {
-        teams: [...selectedDeployTeams],
-        bot_name: config.botName,
-        planner: config.planner,
-        target_policy: config.targetPolicy,
-        target_teams: config.targetTeams,
-        actions: config.actions,
-        loop_interval: config.loopInterval,
-        watchdog: config.actions.includes('maintain.watchdog'),
-        flag_re: config.flagRe,
-        stop_on_success: config.stopOnSuccess,
-        timeout: config.timeout,
-      };
-      const res = await apiFetch<{ ok: boolean; output: string }>('/deploy', {
+      const body = await apiFetch<{ deployments: Deployment[] }>('/deployments', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          teams: [...selectedTeams],
+          bot_name: config.botName,
+          planner: config.planner,
+          target_policy: config.targetPolicy,
+          target_teams: config.targetTeams,
+          actions: config.actions,
+          loop_interval: config.loopInterval,
+          watchdog: config.actions.includes('maintain.watchdog'),
+          flag_re: config.flagRe,
+          stop_on_success: config.stopOnSuccess,
+          timeout: config.timeout,
+        }),
       });
-      appendLog(res.output);
-      appendLog(res.ok ? 'Deploy succeeded' : 'Deploy reported errors');
-      await refreshStatus();
+      setNotice(`${body.deployments.length} deployment${body.deployments.length === 1 ? '' : 's'} created.`);
+      setCreateOpen(false);
+      setSelectedTeams(new Set());
+      await refresh();
+      if (body.deployments[0]) await inspect(body.deployments[0].id);
     } catch (error) {
-      appendLog(`Error: ${error}`);
+      setNotice(error instanceof Error ? error.message : 'Deployment failed');
     } finally {
       setBusy(false);
     }
   };
 
-  const handleStop = async () => {
-    if (deployTeamCount === 0) {
-      return;
-    }
+  const stopDeployment = async (deploymentId: string) => {
     setBusy(true);
+    setNotice('Stopping deployment…');
     try {
-      const res = await apiFetch<{ ok: boolean; output: string }>('/stop', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ teams: [...selectedDeployTeams] }),
-      });
-      appendLog(res.output);
-      await refreshStatus();
+      await apiFetch(`/deployments/${deploymentId}/stop`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+      setNotice('Deployment stopped and telemetry archived.');
+      await refresh();
+      await inspect(deploymentId);
     } catch (error) {
-      appendLog(`Error: ${error}`);
+      setNotice(error instanceof Error ? error.message : 'Stop failed');
     } finally {
       setBusy(false);
-    }
-  };
-
-  const handleFetchLogs = async (teamId: number) => {
-    setLogTeam(teamId);
-    try {
-      const res = await apiFetch<{ lines: string[] }>(`/logs/${teamId}`);
-      setLog(res.lines.length > 0 ? res.lines : ['(no log output yet)']);
-    } catch (error) {
-      setLog([`Error: ${error}`]);
     }
   };
 
   return (
-    <main className="bot-panel">
-      <div className="bot-panel__header">
-        <div className="bot-panel__heading">
-          <Bot size={22} />
-          <div>
-            <h1>Bot Workshop</h1>
-            <p>Configure a bot, then deploy it as one or more teams.</p>
-          </div>
+    <main className="fleet-page">
+      <section className="fleet-hero">
+        <div>
+          <span className="page-kicker">Automation control plane</span>
+          <h1>Bot deployments</h1>
+          <p>Deploy offensive workflows, follow their current work, and inspect every capture and submission.</p>
         </div>
-        <div className="bot-api-status">
-          <span className={`bot-status-dot ${apiOnline === true ? 'is-up' : 'is-down'}`} />
-          {apiOnline === null ? 'Connecting' : apiOnline ? 'API online' : 'API offline'}
+        <div className="fleet-hero__actions">
+          <span className={`connection-pill ${apiOnline ? 'is-live' : 'is-stale'}`} role="status">
+            <span />{apiOnline === null ? 'Connecting' : apiOnline ? 'Controller online' : 'Controller offline'}
+          </span>
+          <button className="icon-button" type="button" onClick={() => void refresh()}><RefreshCw size={17} /></button>
+          <button className="primary-button" type="button" disabled={apiOnline !== true} onClick={() => setCreateOpen(true)}><Plus size={17} />New deployment</button>
         </div>
+      </section>
+
+      <section className="fleet-pulse">
+        <div><span className="pulse-icon is-green"><Activity size={18} /></span><p><span>Running now</span><strong>{activeCount}</strong></p></div>
+        <div><span className="pulse-icon is-blue"><ShieldCheck size={18} /></span><p><span>Accepted flags</span><strong>{acceptedCount}</strong></p></div>
+        <div><span className="pulse-icon is-violet"><History size={18} /></span><p><span>Deployment history</span><strong>{deployments.length}</strong></p></div>
+        <div><span className="pulse-icon is-amber"><Terminal size={18} /></span><p><span>Available teams</span><strong>{teams.filter((team) => team.container_up).length}/{teams.length}</strong></p></div>
+      </section>
+
+      <div className="fleet-toolbar">
+        <div className="view-switch" aria-label="Deployment filter">
+          <button className={filter === 'active' ? 'is-active' : ''} onClick={() => setFilter('active')}>Active</button>
+          <button className={filter === 'all' ? 'is-active' : ''} onClick={() => setFilter('all')}>History</button>
+        </div>
+        <span>{visibleDeployments.length} deployment{visibleDeployments.length === 1 ? '' : 's'}</span>
       </div>
 
-      <div className="bot-panel__body">
-        <div className="bot-panel__left">
-          <section className="bot-section">
-            <div className="bot-section__titlebar">
-              <h2 className="bot-section__title">
-                <Bot size={15} />
-                Bot
-              </h2>
+      <section className="deployment-grid">
+        {visibleDeployments.map((deployment) => (
+          <button className={`deployment-card status-${deployment.status.toLowerCase()}`} key={deployment.id} onClick={() => void inspect(deployment.id)}>
+            <div className="deployment-card__top">
+              <span className="team-orb">T{deployment.team_id}</span>
+              <div><strong>{deployment.bot_name}</strong><span>team{deployment.team_id} · {deployment.id}</span></div>
+              <span className="deployment-status">{deployment.status}</span>
             </div>
-
-            <label className="bot-field bot-field--full">
-              <span>Name</span>
-              <input
-                type="text"
-                value={config.botName}
-                onChange={(event) => setConfig((current) => ({ ...current, botName: event.target.value }))}
-              />
-            </label>
-
-            <label className="bot-field bot-field--full">
-              <span>Planner</span>
-              <select
-                value={config.planner}
-                onChange={(event) => setConfig((current) => ({ ...current, planner: event.target.value }))}
-              >
-                {builtinPlanners.map((planner) => (
-                  <option key={planner.id} value={planner.id}>
-                    {planner.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </section>
-
-          <section className="bot-section">
-            <h2 className="bot-section__title">
-              <SlidersHorizontal size={15} />
-              Runtime
-            </h2>
-
-            <div className="bot-field-grid">
-              <label className="bot-field">
-                <span>Loop seconds</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={config.loopInterval}
-                  onChange={(event) =>
-                    setConfig((current) => ({ ...current, loopInterval: Number(event.target.value) }))
-                  }
-                />
-              </label>
-              <label className="bot-field">
-                <span>Total teams</span>
-                <input
-                  type="number"
-                  min={1}
-                  value={config.numTeams}
-                  readOnly
-                  title="Configured in config/arena.env"
-                />
-              </label>
-              <label className="bot-field">
-                <span>Service port</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={65535}
-                  value={config.servicePort}
-                  readOnly
-                  title="Configured in config/arena.env"
-                />
-              </label>
-              <label className="bot-field">
-                <span>Timeout</span>
-                <input
-                  type="number"
-                  min={1}
-                  value={config.timeout}
-                  onChange={(event) => setConfig((current) => ({ ...current, timeout: Number(event.target.value) }))}
-                />
-              </label>
-              <label className="bot-field bot-field--full">
-                <span>IP pattern</span>
-                <input
-                  type="text"
-                  value={config.ipPattern}
-                  readOnly
-                  title="Derived from config/arena.env"
-                />
-              </label>
-              <label className="bot-field bot-field--full">
-                <span>Flag regex</span>
-                <input
-                  type="text"
-                  value={config.flagRe}
-                  onChange={(event) => setConfig((current) => ({ ...current, flagRe: event.target.value }))}
-                />
-              </label>
-            </div>
-
-            <label className="bot-toggle">
-              <input
-                type="checkbox"
-                checked={config.stopOnSuccess}
-                onChange={(event) => setConfig((current) => ({ ...current, stopOnSuccess: event.target.checked }))}
-              />
-              Stop exploit chain after a flag
-            </label>
-          </section>
-
-          <section className="bot-section">
-            <h2 className="bot-section__title">
+            <div className="deployment-activity">
               <Activity size={15} />
-              Actions
-            </h2>
+              <span>{activityLabel(deployment.summary.current_activity)}</span>
+            </div>
+            <div className="deployment-stats">
+              <span><b>{deployment.summary.captures}</b>captures</span>
+              <span><b>{deployment.summary.accepted}</b>accepted</span>
+              <span><b>{deployment.summary.failures}</b>errors</span>
+            </div>
+            <div className="deployment-card__footer">
+              <span><Clock3 size={12} />{new Date(deployment.created_at).toLocaleString()}</span>
+              <span>{deployment.container_up ? 'Container online' : 'Container offline'}</span>
+            </div>
+          </button>
+        ))}
+        {visibleDeployments.length === 0 && (
+          <div className="fleet-empty">
+            <Bot size={28} />
+            <h2>{filter === 'active' ? 'No active deployments' : 'No deployment history'}</h2>
+            <p>Create a bot deployment to begin automated arena operations.</p>
+            <button className="primary-button" disabled={apiOnline !== true} onClick={() => setCreateOpen(true)}><Plus size={16} />New deployment</button>
+          </div>
+        )}
+      </section>
 
-            {Object.entries(actionGroups).map(([category, actions]) => (
-              <div key={category} className="bot-action-group">
-                <div className="bot-action-group__title">{category}</div>
-                <div className="bot-action-list">
-                  {actions.map((action) => {
-                    const checked = config.actions.includes(action.id);
-                    return (
-                      <label
-                        key={action.id}
-                        className={checked ? 'is-selected' : ''}
-                        title={action.description}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={checked}
-                          onChange={() => toggleAction(action.id)}
-                        />
-                        <ShieldCheck size={14} />
-                        <span>{action.label}</span>
-                      </label>
-                    );
-                  })}
+      <div className="sr-status" role="status" aria-live="polite">{notice}</div>
+
+      {createOpen && (
+        <div className="drawer-backdrop" onMouseDown={() => setCreateOpen(false)}>
+          <aside className="ops-drawer ops-drawer--wide" onMouseDown={(event) => event.stopPropagation()} aria-label="New bot deployment">
+            <div className="drawer-heading">
+              <div><span className="section-icon"><Rocket size={18} /></span><div><h2>New deployment</h2><p>Configure once and deploy independently to each team.</p></div></div>
+              <button className="icon-button" onClick={() => setCreateOpen(false)}><X size={18} /></button>
+            </div>
+            <div className="deployment-form">
+              <div className="form-row">
+                <label className="drawer-field"><span>Bot name</span><input value={config.botName} onChange={(event) => setConfig((current) => ({ ...current, botName: event.target.value }))} /></label>
+                <label className="drawer-field"><span>Planner</span><select value={config.planner} onChange={(event) => setConfig((current) => ({ ...current, planner: event.target.value }))}>{catalog.planners.map((planner) => <option key={planner.id} value={planner.id}>{planner.label}</option>)}</select></label>
+              </div>
+              <fieldset className="choice-fieldset">
+                <legend><Bot size={15} />Deploy as teams</legend>
+                <div className="choice-grid">
+                  {teams.map((team) => (
+                    <label className={`${selectedTeams.has(team.id) ? 'is-selected' : ''} ${!team.container_up ? 'is-disabled' : ''}`} key={team.id}>
+                      <input type="checkbox" checked={selectedTeams.has(team.id)} disabled={!team.container_up} onChange={() => toggleTeam(team.id)} />
+                      <span className="team-orb">T{team.id}</span><b>team{team.id}</b><small>{team.container_up ? team.running ? 'Bot running' : 'Ready' : 'Offline'}</small>
+                    </label>
+                  ))}
                 </div>
-              </div>
-            ))}
-          </section>
-
-          <section className="bot-section">
-            <h2 className="bot-section__title">
-              <Crosshair size={15} />
-              Opponents
-            </h2>
-
-            <div className="bot-segmented" aria-label="Target policy">
-              <button
-                type="button"
-                className={config.targetPolicy === 'all_opponents' ? 'is-active' : ''}
-                onClick={() => setConfig((current) => ({ ...current, targetPolicy: 'all_opponents' }))}
-              >
-                All opponents
-              </button>
-              <button
-                type="button"
-                className={config.targetPolicy === 'selected' ? 'is-active' : ''}
-                onClick={() => setConfig((current) => ({ ...current, targetPolicy: 'selected' }))}
-              >
-                Selected
-              </button>
-            </div>
-
-            {config.targetPolicy === 'selected' && (
-              <div className="bot-target-grid">
-                {teams.map((team) => (
-                  <label key={team.id} className="bot-target-chip">
-                    <input
-                      type="checkbox"
-                      checked={config.targetTeams.includes(team.id)}
-                      onChange={() => toggleTargetTeam(team.id)}
-                    />
-                    team{team.id}
-                  </label>
+              </fieldset>
+              <fieldset className="choice-fieldset">
+                <legend><ShieldCheck size={15} />Actions</legend>
+                {Object.entries(actionGroups).map(([group, actions]) => (
+                  <div className="action-choice-group" key={group}>
+                    <span>{group}</span>
+                    <div>{actions.map((action) => <label className={config.actions.includes(action.id) ? 'is-selected' : ''} key={action.id} title={action.description}><input type="checkbox" checked={config.actions.includes(action.id)} onChange={() => toggleAction(action.id)} />{action.label}</label>)}</div>
+                  </div>
                 ))}
-              </div>
-            )}
-          </section>
-
-          <section className="bot-section">
-            <div className="bot-section__titlebar">
-              <h2 className="bot-section__title">
-                <Rocket size={15} />
-                Deploy As Team
-              </h2>
-              <div className="bot-section__actions">
-                <button type="button" onClick={selectAllDeployTeams}>
-                  All
-                </button>
-                <button type="button" onClick={selectNoDeployTeams}>
-                  None
-                </button>
-              </div>
+              </fieldset>
+              <fieldset className="choice-fieldset">
+                <legend><Crosshair size={15} />Targets</legend>
+                <div className="view-switch">
+                  <button className={config.targetPolicy === 'all_opponents' ? 'is-active' : ''} onClick={() => setConfig((current) => ({ ...current, targetPolicy: 'all_opponents' }))}>All opponents</button>
+                  <button className={config.targetPolicy === 'selected' ? 'is-active' : ''} onClick={() => setConfig((current) => ({ ...current, targetPolicy: 'selected' }))}>Selected</button>
+                </div>
+                {config.targetPolicy === 'selected' && <div className="target-chips">{teams.map((team) => <label className={config.targetTeams.includes(team.id) ? 'is-selected' : ''} key={team.id}><input type="checkbox" checked={config.targetTeams.includes(team.id)} onChange={() => toggleTarget(team.id)} />team{team.id}</label>)}</div>}
+              </fieldset>
+              <button className="advanced-toggle" onClick={() => setAdvancedOpen((open) => !open)}><Settings2 size={15} />Advanced runtime settings<ChevronDown className={advancedOpen ? 'is-open' : ''} size={15} /></button>
+              {advancedOpen && (
+                <div className="advanced-grid">
+                  <label className="drawer-field"><span>Loop interval</span><input type="number" min={0} value={config.loopInterval} onChange={(event) => setConfig((current) => ({ ...current, loopInterval: Number(event.target.value) }))} /></label>
+                  <label className="drawer-field"><span>Request timeout</span><input type="number" min={1} value={config.timeout} onChange={(event) => setConfig((current) => ({ ...current, timeout: Number(event.target.value) }))} /></label>
+                  <label className="drawer-field is-wide"><span>Flag pattern</span><input value={config.flagRe} onChange={(event) => setConfig((current) => ({ ...current, flagRe: event.target.value }))} /></label>
+                  <label className="check-field"><input type="checkbox" checked={config.stopOnSuccess} onChange={(event) => setConfig((current) => ({ ...current, stopOnSuccess: event.target.checked }))} />Stop exploit chain after successful capture</label>
+                </div>
+              )}
             </div>
-
-            {teams.length === 0 ? (
-              <p className="bot-empty">
-                {apiOnline === false ? 'Start bot/bot_api.py to deploy bots.' : 'No running teams detected.'}
-              </p>
-            ) : (
-              <div className="bot-team-grid">
-                {teams.map((team) => (
-                  <TeamCard
-                    key={team.id}
-                    team={team}
-                    selected={selectedDeployTeams.has(team.id)}
-                    onToggle={toggleDeployTeam}
-                  />
-                ))}
-              </div>
-            )}
-
-            <div className="bot-deploy-bar">
-              <button type="button" className="bot-btn is-primary" disabled={!canDeploy} onClick={handleDeploy}>
-                <Rocket size={15} />
-                {busy ? 'Working' : `Deploy ${deployTeamCount}`}
-              </button>
-              <button
-                type="button"
-                className="bot-btn is-danger"
-                disabled={deployTeamCount === 0 || busy || apiOnline !== true}
-                onClick={handleStop}
-              >
-                <CircleStop size={15} />
-                Stop
-              </button>
-              <button type="button" className="bot-btn" disabled={apiOnline !== true} onClick={refreshStatus}>
-                <RefreshCw size={15} />
-                Refresh
-              </button>
+            <div className="drawer-footer">
+              <span>{selectedTeams.size} team{selectedTeams.size === 1 ? '' : 's'} selected</span>
+              <button className="primary-button" disabled={!canDeploy} onClick={() => void createDeployment()}><Rocket size={16} />{busy ? 'Deploying…' : 'Deploy bot'}</button>
             </div>
-          </section>
+          </aside>
         </div>
+      )}
 
-        <div className="bot-panel__right">
-          <section className="bot-section bot-section--plan">
-            <h2 className="bot-section__title">
-              <Terminal size={15} />
-              Deployment Plan
-            </h2>
-            <div className="bot-plan">
-              <div>
-                <span>Bot</span>
-                <strong>{config.botName || 'Unnamed bot'}</strong>
-              </div>
-              <div>
-                <span>Deploy</span>
-                <strong>{deployTeamCount > 0 ? [...selectedDeployTeams].map((id) => `team${id}`).join(', ') : 'None'}</strong>
-              </div>
-              <div>
-                <span>Targets</span>
-                <strong>
-                  {config.targetPolicy === 'all_opponents'
-                    ? 'All opponents'
-                    : config.targetTeams.map((id) => `team${id}`).join(', ') || 'None'}
-                </strong>
-              </div>
-              <div>
-                <span>Actions</span>
-                <strong>{selectedActions.map((action) => action.label).join(' -> ') || 'None'}</strong>
-              </div>
+      {selectedId && (
+        <div className="drawer-backdrop" onMouseDown={() => setSelectedId(null)}>
+          <aside className="ops-drawer ops-drawer--inspect" onMouseDown={(event) => event.stopPropagation()} aria-label="Deployment details">
+            <div className="drawer-heading">
+              <div><span className="team-orb">T{selectedDeployment?.team_id || '?'}</span><div><h2>{selectedDeployment?.bot_name || 'Deployment'}</h2><p>{selectedId}</p></div></div>
+              <button className="icon-button" onClick={() => setSelectedId(null)}><X size={18} /></button>
             </div>
-          </section>
-
-          <section className="bot-section bot-section--logs">
-            <div className="bot-section__titlebar">
-              <h2 className="bot-section__title">
-                <ScrollText size={15} />
-                Logs{logTeam !== null ? ` team${logTeam}` : ''}
-              </h2>
-              <div className="bot-section__actions">
-                {onlineTeams.map((team) => (
-                  <button
-                    key={team.id}
-                    type="button"
-                    className={logTeam === team.id ? 'is-active' : ''}
-                    onClick={() => handleFetchLogs(team.id)}
-                  >
-                    team{team.id}
-                  </button>
-                ))}
-                {logTeam !== null && (
-                  <button type="button" title="Refresh log" onClick={() => handleFetchLogs(logTeam)}>
-                    <RefreshCw size={12} />
-                  </button>
-                )}
-                <button type="button" onClick={() => setLog([])}>
-                  Clear
-                </button>
-              </div>
-            </div>
-
-            {log.length === 0 ? (
-              <p className="bot-empty">Select a team log or deploy a bot.</p>
-            ) : (
-              <pre className="bot-log" ref={logRef}>
-                {log.join('\n')}
-              </pre>
+            {selectedDeployment && (
+              <>
+                <div className="inspect-status">
+                  <div><span className={`large-status status-${selectedDeployment.status.toLowerCase()}`}>{selectedDeployment.status}</span><small>{selectedDeployment.pid ? `PID ${selectedDeployment.pid}` : 'No active process'}</small></div>
+                  {selectedDeployment.status === 'RUNNING' && <button className="danger-button" disabled={busy} onClick={() => void stopDeployment(selectedDeployment.id)}><CircleStop size={15} />Stop</button>}
+                </div>
+                <div className="inspect-metrics">
+                  <span><b>{selectedDeployment.summary.captures}</b>Captured</span>
+                  <span><b>{selectedDeployment.summary.submissions}</b>Submitted</span>
+                  <span><b>{selectedDeployment.summary.accepted}</b>Accepted</span>
+                  <span><b>{selectedDeployment.summary.failures}</b>Errors</span>
+                </div>
+                <div className="inspect-section">
+                  <h3><Activity size={15} />Timeline</h3>
+                  <div className="event-timeline">
+                    {[...events].reverse().slice(0, 100).map((event, index) => (
+                      <div className={`event-row ${event.accepted ? 'is-success' : ''}`} key={`${event.ts}-${index}`}>
+                        <span>{event.accepted ? <CheckCircle2 size={14} /> : event.type.includes('failed') ? <XCircle size={14} /> : <Activity size={14} />}</span>
+                        <div><strong>{eventTitle(event)}</strong><small>{event.message || (event.target_team ? `team${event.target_team}` : '')}</small></div>
+                        <time>{new Date(event.ts).toLocaleTimeString()}</time>
+                      </div>
+                    ))}
+                    {events.length === 0 && <div className="empty-state">No structured events yet.</div>}
+                  </div>
+                </div>
+                <details className="inspect-section inspect-details">
+                  <summary><FileText size={15} />Configuration<ChevronDown size={14} /></summary>
+                  <pre>{JSON.stringify(selectedDeployment.config, null, 2)}</pre>
+                </details>
+                <details className="inspect-section inspect-details" open>
+                  <summary><ScrollText size={15} />Raw logs<ChevronDown size={14} /></summary>
+                  <pre className="deployment-log">{logs.join('\n') || 'No log output yet.'}</pre>
+                </details>
+              </>
             )}
-          </section>
+          </aside>
         </div>
-      </div>
+      )}
     </main>
   );
 };

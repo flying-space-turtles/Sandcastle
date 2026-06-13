@@ -1,6 +1,5 @@
-import { useCallback, useMemo, useState, type ChangeEvent } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import defaultComposeYaml from '../../docker-compose.yml?raw';
-import exampleComposeYaml from '../../services/example-vuln/docker-compose.yml?raw';
 import sshDockerfile from '../../docker/ssh/Dockerfile?raw';
 import vulnMachineDockerfile from '../../docker/vuln/Dockerfile?raw';
 import firewallDockerfile from '../../firewall/Dockerfile?raw';
@@ -9,6 +8,7 @@ import BotPanel from './components/BotPanel';
 import DetailsPanel from './components/DetailsPanel';
 import DockerCanvas from './components/DockerCanvas';
 import EventFeed from './components/EventFeed';
+import Scoreboard from './components/Scoreboard';
 import TopologyNav from './components/TopologyNav';
 import { parseDockerCompose } from './data/dockerComposeParser';
 import { buildDockerFlow } from './graph/dockerGraph';
@@ -43,7 +43,13 @@ const dockerfileSources: Record<string, string> = {
 };
 
 const buildTopology = (yamlSource: string): Topology => {
-  const parsed = parseDockerCompose(yamlSource, dockerfileSources);
+  const parsedCompose = parseDockerCompose(yamlSource, dockerfileSources);
+  const parsed = {
+    ...parsedCompose,
+    services: parsedCompose.services.filter(
+      (service) => service.labels['sandcastle.visualizer.hidden'] !== 'true',
+    ),
+  };
   const flow = buildDockerFlow(parsed);
 
   return {
@@ -53,10 +59,8 @@ const buildTopology = (yamlSource: string): Topology => {
 };
 
 const App = () => {
-  const [mode, setMode] = useState<Mode>('editor');
-  const [draftYaml, setDraftYaml] = useState<string>(defaultComposeYaml);
-  const [topology, setTopology] = useState<Topology>(() => buildTopology(defaultComposeYaml));
-  const [parseError, setParseError] = useState<string | null>(null);
+  const [mode, setMode] = useState<Mode>('scoreboard');
+  const topology = useMemo(() => buildTopology(defaultComposeYaml), []);
   const [selectedNode, setSelectedNode] = useState<MachineNodeData | null>(null);
 
   const { events, connected, liveEdges } = useNetworkEvents();
@@ -70,51 +74,15 @@ const App = () => {
     [topology],
   );
 
-  const applyYaml = useCallback(
-    (yamlSource: string = draftYaml) => {
-      try {
-        const nextTopology = buildTopology(yamlSource);
-        setTopology(nextTopology);
-        setDraftYaml(yamlSource);
-        setParseError(null);
-        setSelectedNode(null);
-        setMode('editor');
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Failed to parse YAML.';
-        setParseError(message);
-        setMode('yaml');
-      }
-    },
-    [draftYaml],
-  );
-
-  const handlePreset = (yamlSource: string) => {
-    setDraftYaml(yamlSource);
-    applyYaml(yamlSource);
-  };
-
-  const handleFileUpload = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.currentTarget.files?.[0];
-    if (!file) {
-      return;
-    }
-
-    const text = await file.text();
-    setDraftYaml(text);
-    applyYaml(text);
-    event.currentTarget.value = '';
-  };
-
   const handleSelectNode = useCallback((node: MachineNodeData | null) => {
     setSelectedNode(node);
   }, []);
 
   return (
-    <div className="app-shell">
+    <div className="app-shell ops-shell">
       <TopologyNav
         mode={mode}
         onModeChange={setMode}
-        parseError={parseError}
         serviceCount={summary.serviceCount}
         networkCount={summary.networkCount}
         edgeCount={summary.edgeCount}
@@ -122,9 +90,15 @@ const App = () => {
         firewallEventCount={events.length}
       />
 
-      {mode === 'editor' && (
+      <div className="ops-content">
+      {mode === 'scoreboard' && <Scoreboard />}
+
+      {mode === 'topology' && (
         <main className="workspace workspace--canvas">
           <section className="canvas-shell">
+            <div className="topology-context">
+              Configured topology <span>Not live container health</span>
+            </div>
             <DockerCanvas topology={topology} onSelectNode={handleSelectNode} liveEdges={liveEdges} />
           </section>
           <DetailsPanel node={selectedNode} />
@@ -134,78 +108,17 @@ const App = () => {
       {mode === 'firewall' && (
         <main className="workspace workspace--canvas">
           <section className="canvas-shell">
+            <div className="topology-context">
+              Live traffic <span>Nodes come from configured Compose</span>
+            </div>
             <DockerCanvas topology={topology} onSelectNode={handleSelectNode} liveEdges={liveEdges} />
           </section>
           <EventFeed events={events} connected={connected} />
         </main>
       )}
 
-      {mode === 'yaml' && (
-        <main className="workspace workspace--yaml">
-          <section className="yaml-editor">
-            <div className="yaml-editor__toolbar">
-              <div>
-                <h1>Compose Source</h1>
-                <p>Paste a Docker Compose file or load one from disk.</p>
-              </div>
-              <div className="yaml-editor__actions">
-                <button type="button" onClick={() => handlePreset(defaultComposeYaml)}>
-                  Repository Compose
-                </button>
-                <button type="button" onClick={() => handlePreset(exampleComposeYaml)}>
-                  Example Service
-                </button>
-                <label>
-                  Upload YAML
-                  <input type="file" accept=".yml,.yaml,text/yaml,text/plain" onChange={handleFileUpload} />
-                </label>
-                <button type="button" className="is-primary" onClick={() => applyYaml()}>
-                  Render Diagram
-                </button>
-              </div>
-            </div>
-
-            {parseError && <pre className="yaml-editor__error">{parseError}</pre>}
-
-            <textarea
-              value={draftYaml}
-              spellCheck="false"
-              onChange={(event) => setDraftYaml(event.target.value)}
-              aria-label="Docker Compose YAML"
-            />
-          </section>
-        </main>
-      )}
-
-      {mode === 'inspector' && (
-        <main className="workspace workspace--inspector">
-          <section className="inspector-panel">
-            <div>
-              <h1>Parsed Topology</h1>
-              <p>Normalized Compose metadata used by React Flow.</p>
-            </div>
-            <pre>
-              {JSON.stringify(
-                {
-                  services: topology.parsed.services,
-                  networks: topology.parsed.networks,
-                  edges: topology.edges.map(({ id, source, target, label, data }) => ({
-                    id,
-                    source,
-                    target,
-                    label,
-                    kind: data?.kind,
-                  })),
-                },
-                null,
-                2,
-              )}
-            </pre>
-          </section>
-        </main>
-      )}
-
       {mode === 'bot' && <BotPanel />}
+      </div>
     </div>
   );
 };

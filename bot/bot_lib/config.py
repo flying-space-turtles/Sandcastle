@@ -33,6 +33,9 @@ class BotConfig:
     )
     stop_on_success: bool = True
     timeout: int = 6
+    deployment_id: str = ""
+    gameserver_url: str = ""
+    submission_token: str = ""
 
 
 def _as_bool(value: Any) -> bool:
@@ -96,6 +99,9 @@ def merge_config(config: BotConfig, data: dict[str, Any]) -> BotConfig:
         "ip_pattern": str,
         "service_port": int,
         "timeout": int,
+        "deployment_id": str,
+        "gameserver_url": str,
+        "submission_token": str,
     }
     for key, caster in scalar_keys.items():
         if key in data and data[key] is not None:
@@ -117,7 +123,8 @@ def merge_config(config: BotConfig, data: dict[str, Any]) -> BotConfig:
     return replace(config, **updates)
 
 
-def load_config_file(path: str = CONFIG_FILE) -> BotConfig:
+def load_config_file(path: str | None = None) -> BotConfig:
+    path = path or os.environ.get("BOT_CONFIG_FILE", CONFIG_FILE)
     config = BotConfig()
     file_path = Path(path)
     if not file_path.exists():

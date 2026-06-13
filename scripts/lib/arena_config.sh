@@ -109,6 +109,7 @@ arena_config_load() {
         ARENA_FLAG_EXPIRY_ROUNDS
         ARENA_CHECKER_MAX_CONCURRENCY
         ARENA_GAMESERVER_PORT
+        ARENA_OPERATOR_TOKEN
         ARENA_SUBMISSION_RATE_LIMIT
         ARENA_SUBMISSION_RATE_WINDOW_SECONDS
         ARENA_SCORE_ATTACK_POINTS
@@ -134,6 +135,7 @@ arena_config_load() {
 
     # Default to 8000 if not specified
     ARENA_GAMESERVER_PORT="${ARENA_GAMESERVER_PORT:-8000}"
+    ARENA_OPERATOR_TOKEN="${ARENA_OPERATOR_TOKEN:-sandcastle-local-operator-token-change-me}"
     ARENA_CHECKER_MAX_CONCURRENCY="${ARENA_CHECKER_MAX_CONCURRENCY:-8}"
     ARENA_SUBMISSION_RATE_LIMIT="${ARENA_SUBMISSION_RATE_LIMIT:-60}"
     ARENA_SUBMISSION_RATE_WINDOW_SECONDS="${ARENA_SUBMISSION_RATE_WINDOW_SECONDS:-60}"
@@ -172,6 +174,10 @@ arena_config_load() {
     arena_config_require_int ARENA_SCORE_DEFENSE_POINTS 0 100000 || return 1
     arena_config_require_int ARENA_SCORE_SLA_POINTS 0 100000 || return 1
 
+    if ((${#ARENA_OPERATOR_TOKEN} < 24)); then
+        arena_config_error "ARENA_OPERATOR_TOKEN must contain at least 24 characters"
+        return 1
+    fi
     if ((${#ARENA_CHECKER_SECRET} < 16)); then
         arena_config_error "ARENA_CHECKER_SECRET must contain at least 16 characters"
         return 1
@@ -255,6 +261,7 @@ arena_config_load() {
         ARENA_FLAG_EXPIRY_ROUNDS \
         ARENA_CHECKER_MAX_CONCURRENCY \
         ARENA_GAMESERVER_PORT \
+        ARENA_OPERATOR_TOKEN \
         ARENA_SUBMISSION_RATE_LIMIT \
         ARENA_SUBMISSION_RATE_WINDOW_SECONDS \
         ARENA_SCORE_ATTACK_POINTS \

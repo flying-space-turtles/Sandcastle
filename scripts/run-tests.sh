@@ -58,6 +58,7 @@ python3 -B -m py_compile \
     "${ROOT}/gameserver/"*.py \
     "${ROOT}/gameserver/checkers/"*.py \
     "${ROOT}/tests/checker_test.py" \
+    "${ROOT}/tests/bot_test.py" \
     "${ROOT}/tests/gameserver_test.py" \
     "${ROOT}/tests/scoring_test.py" \
     "${ROOT}/tests/round_engine_test.py" \
@@ -65,6 +66,10 @@ python3 -B -m py_compile \
     "${ROOT}/services/example-vuln/checker.py" \
     "${ROOT}/services/example-vuln/exploits/"*.py
 ok "py_compile: all Python files are syntactically valid"
+
+# ---------------------------------------------------------------------------
+step "Bot submission and telemetry tests"
+python3 -B "${ROOT}/tests/bot_test.py"
 
 # ---------------------------------------------------------------------------
 step "Firewall unit tests"

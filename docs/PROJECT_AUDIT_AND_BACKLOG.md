@@ -421,6 +421,9 @@ jobs added in `.github/workflows/ci.yml`. Contributing guide added as
 
 **Dependencies:** SC-006, SC-008, SC-010
 
+**Status:** Implemented on 2026-06-13 in the gameserver dashboard/operator APIs
+and the visualizer scoreboard console.
+
 **Agent prompt**
 
 > Extend the existing visualizer or add a focused gameserver UI that shows match

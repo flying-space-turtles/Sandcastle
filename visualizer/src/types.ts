@@ -1,7 +1,7 @@
 import type { Edge, Node } from 'reactflow';
 import { ARENA_CONFIG } from './data/arenaConfig';
 
-export type Mode = 'editor' | 'yaml' | 'inspector' | 'firewall' | 'bot';
+export type Mode = 'scoreboard' | 'topology' | 'firewall' | 'bot';
 
 export type BotTargetPolicy = 'all_opponents' | 'selected';
 

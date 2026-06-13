@@ -188,6 +188,12 @@ class TickEngine:
             active = self._running_round()
             return self._process_round(active or self._start_round())
 
+    def restart_match(self) -> tuple:
+        """Reset persisted match activity after any in-flight tick has finished."""
+        with self._lock:
+            with closing(self._connection()) as conn:
+                return db.restart_match(conn, self.match_id)
+
     def start_round(self) -> RoundRecord:
         """Persist a round and its target/flag snapshot without running checkers."""
         with self._lock:

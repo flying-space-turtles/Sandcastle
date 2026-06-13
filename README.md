@@ -1,12 +1,127 @@
 # Sandcastle
 
+## Quick Start
+
+Sandcastle reads its topology, ports, credentials, and match settings from
+[`config/arena.env`](config/arena.env).
+
+### 1. Configure The Operator Token
+
+`ARENA_OPERATOR_TOKEN` is the organizer credential used by the UI and API to
+start, pause, finish, and restart matches.
+
+The repository contains this local-development default:
+
+```text
+sandcastle-local-operator-token-change-me
+```
+
+It is not unique, is not regenerated when the arena starts, and must not be
+used for a shared or exposed event. Generate a token once and write it into the
+configuration:
+
+```bash
+OPERATOR_TOKEN="$(openssl rand -hex 32)"
+sed -i "s/^ARENA_OPERATOR_TOKEN=.*/ARENA_OPERATOR_TOKEN=${OPERATOR_TOKEN}/" config/arena.env
+```
+
+The configured token remains the same across restarts until you replace it.
+Print it later with either command:
+
+```bash
+sed -n 's/^ARENA_OPERATOR_TOKEN=//p' config/arena.env
+./scripts/setup.sh --show-access
+```
+
+Team submission tokens are separate credentials generated from
+`ARENA_TEAM_TOKEN_PATTERN`. The organizer token is not a team token.
+
+### 2. Prepare The Host
+
+Sandcastle requires a native Linux Docker host. Apply the firewall prerequisites
+once, then run the read-only checks:
+
+```bash
+sudo ./scripts/firewall-preflight.sh --apply
+./scripts/doctor.sh
+```
+
+### 3. Start The Complete Arena
+
+This is the main startup command:
+
+```bash
+./scripts/arena.sh up
+```
+
+It validates and generates configuration, builds and starts the team
+containers, vulnerable applications, firewall, gameserver, and bot controller,
+then waits for health checks. Do not run a separate `docker compose up`.
+
+Useful lifecycle commands:
+
+```bash
+./scripts/arena.sh status
+./scripts/arena.sh restart
+./scripts/arena.sh down
+```
+
+### 4. Start The Operator UI
+
+The backend arena is started by `arena.sh`; the Vite development UI is a
+separate process:
+
+```bash
+cd visualizer
+npm ci
+npm run dev
+```
+
+Open `http://localhost:5173`, select **Match**, open **Match controls**, and
+paste `ARENA_OPERATOR_TOKEN`.
+
+### 5. Start Or Restart A Match
+
+For a new arena, click **Start match** in the UI. From the terminal:
+
+```bash
+OPERATOR_TOKEN="$(sed -n 's/^ARENA_OPERATOR_TOKEN=//p' config/arena.env)"
+
+curl -s -X POST http://localhost:8000/api/match/start \
+  -H "Authorization: Bearer ${OPERATOR_TOKEN}"
+```
+
+To start a clean match after one has already run:
+
+1. Finish the current running or paused match.
+2. Restart it, which deletes its rounds, flags, submissions, checker results,
+   and scores.
+3. Start it again to create a clean round 1.
+
+```bash
+curl -s -X POST http://localhost:8000/api/match/finish \
+  -H "Authorization: Bearer ${OPERATOR_TOKEN}"
+
+curl -s -X POST http://localhost:8000/api/match/restart \
+  -H "Authorization: Bearer ${OPERATOR_TOKEN}"
+
+curl -s -X POST http://localhost:8000/api/match/start \
+  -H "Authorization: Bearer ${OPERATOR_TOKEN}"
+```
+
+The restart endpoint accepts only `FINISHED` or `FAILED` matches. In the UI,
+the equivalent sequence is **Finish match**, **Restart match**, then
+**Start match**.
+
+---
+
 Sandcastle is a local Docker-based Attack & Defense CTF prototype for testing
 software agents that patch their own services and attack opponents.
 
 The repository currently provides team environments, an intentionally
 vulnerable service, scripted bots, a topology visualizer, a network monitor, a
 persistent gameserver core, a typed checker framework, and deterministic
-competition scoring. It does **not** yet provide a scoreboard UI.
+competition scoring with a live scoreboard and operator console.
 
 - Product direction: [`VISION.md`](VISION.md)
 - Current audit and prioritized agent backlog:
@@ -23,9 +138,9 @@ competition scoring. It does **not** yet provide a scoreboard UI.
 | `teamN-vuln` | Mutable Linux machine with service source and Docker CLI | Implemented |
 | `teamN-vuln-app` | Per-team vulnerable Flask service | Generated, started, and health-checked automatically |
 | `services/example-vuln` | TurtleNotes challenge template and exploits | Implemented |
-| `bot/` | Scripted action/planner runtime and local control API | Offensive path works; watchdog is currently ineffective |
+| `bot/` | Scripted runtime, managed deployment controller, telemetry, and submissions | Implemented |
 | `firewall/` | Source-masking proxy and WebSocket activity feed | Enforced and smoke-tested on native Linux |
-| `visualizer/` | React topology, event, and bot UI | Implemented |
+| `visualizer/` | Live scoreboard, operator controls, topology, event, and bot UI | Implemented |
 | `gameserver/` | Match state, rounds, flags, submissions, scoring, and recovery | Implemented |
 | Service checkers | PUT, GET, CHECK contract and TurtleNotes plugin | Implemented |
 | Scoring/standings | Replayable attack, defense, and SLA scoring APIs | Implemented |
@@ -42,14 +157,13 @@ Required:
 - Bash
 - permission to access `/var/run/docker.sock`
 
-Optional operator tools:
+Optional operator tool:
 
-- Python 3.10+ for `bot/bot_api.py`
-- Node.js 22+ and npm for the visualizer
+- Node.js 22+ and npm for visualizer development
 
 The current trusted-local mode mounts the host Docker socket into every
-`teamN-vuln` container. This is not a security boundary. Do not expose the
-arena to untrusted participants.
+`teamN-vuln` container and the localhost-only bot controller. This is not a
+security boundary. Do not expose the arena to untrusted participants.
 
 ## Check Host And Arena Readiness
 
@@ -69,7 +183,7 @@ The doctor checks:
 - running or stopped orphan team containers
 - vulnerable-machine Docker access and vulnerable-app health
 - firewall bridge-netfilter support, redirect rule, and packet counter
-- local bot API prerequisites and health
+- managed bot controller prerequisites and health
 
 Results are classified as:
 
@@ -92,7 +206,7 @@ resources.
 Edit [`config/arena.env`](config/arena.env) to change the arena topology. It is
 the canonical source for team count, network, service and host ports,
 credentials, startup timeout, bot defaults, round duration, flag expiry, and
-checker concurrency.
+checker concurrency. `ARENA_OPERATOR_TOKEN` protects match-control mutations.
 
 Keep it as simple `KEY=VALUE` entries. `scripts/setup.sh` validates the values
 and rejects port collisions, unsupported subnet layouts, missing templates,
@@ -117,13 +231,22 @@ and GET checker operations. See
 [`docs/round-engine.md`](docs/round-engine.md) for lifecycle and recovery rules.
 
 ```bash
-curl -s -X POST http://localhost:8000/match/resume
-curl -s -X POST http://localhost:8000/match/pause
-curl -s -X POST http://localhost:8000/rounds/step
-curl -s http://localhost:8000/rounds/current
+OPERATOR_TOKEN="$(sed -n 's/^ARENA_OPERATOR_TOKEN=//p' config/arena.env)"
+
+# Start the match. The scheduler creates round 1 within about one second.
+curl -s -X POST http://localhost:8000/api/match/start \
+  -H "Authorization: Bearer ${OPERATOR_TOKEN}"
+
+curl -s -X POST http://localhost:8000/api/match/pause \
+  -H "Authorization: Bearer ${OPERATOR_TOKEN}"
+curl -s -X POST http://localhost:8000/api/rounds/step \
+  -H "Authorization: Bearer ${OPERATOR_TOKEN}"
+curl -s http://localhost:8000/api/rounds/current
 ```
 
 Single-step requires a paused match and does not resume automatic scheduling.
+Start, pause, resume, step, finish, and the generic state endpoint all require
+the operator Bearer token.
 
 ## Flag Submission
 
@@ -266,23 +389,15 @@ Stop the bot:
 ./bot/deploy.sh --stop 2
 ```
 
-The offensive actions work against the bundled challenge. The
-`maintain.watchdog` action does not currently work because `teamN-ssh` does not
-have Docker control; this is tracked as SC-013.
+Captured flags are submitted automatically to the gameserver and recorded as
+structured deployment events. The `maintain.watchdog` action remains limited
+because `teamN-ssh` does not have Docker control.
 
 More detail: [`bot/bot.md`](bot/bot.md).
 
-## Run The Visualizer And Bot UI
+## Run The Scoreboard And Operator Console
 
-Use two terminals from the repository root.
-
-Terminal 1, local bot-control bridge:
-
-```bash
-python3 bot/bot_api.py
-```
-
-Terminal 2, visualizer:
+After `./scripts/arena.sh up`, start the UI:
 
 ```bash
 cd visualizer
@@ -292,9 +407,18 @@ npm run dev
 
 Open `http://localhost:5173`.
 
-The topology view parses the generated Compose file. It is not an authoritative
-view of running container health. The Bot view and firewall feed use the host
-and ports in `config/arena.env`.
+The scoreboard polls the authoritative gameserver and shows match state, round
+timing, component scores, and checker results. Paste the operator token printed
+by `./scripts/setup.sh --show-access` to use Start, Pause, Resume, Step, and
+Finish. After finishing a match, use Restart match to clear its rounds and
+scores, return it to CREATED, and then use Start match for a clean round 1.
+
+The topology view parses generated Compose configuration and is explicitly not
+live container health. YAML editing and the raw parser inspector are not part
+of the operator console.
+
+The Bots view uses the Compose-managed controller started by
+`./scripts/arena.sh up`; no additional Python process is required.
 
 ## Firewall And Activity Feed
 
@@ -440,7 +564,7 @@ traffic is being intercepted.
 ├── README.md
 ├── config/arena.env                # canonical arena configuration
 ├── docker-compose.yml              # generated topology
-├── bot/                            # team bot runtime and local bridge
+├── bot/                            # team bot runtime and deployment controller
 ├── context/context.md              # broad original A&D design notes
 ├── docker/
 │   ├── ssh/Dockerfile

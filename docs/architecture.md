@@ -3,7 +3,7 @@
 This repository models the container layout for a local Attack & Defense CTF,
 includes a template vulnerable service, and provides a persistent gameserver
 core, typed service checkers, persisted round scheduling, authenticated flag
-submission, and deterministic scoring. It does not yet include a scoreboard.
+submission, deterministic scoring, and a live operator scoreboard.
 See `../VISION.md` for the target product and `PROJECT_AUDIT_AND_BACKLOG.md` for
 the implementation plan.
 
@@ -72,8 +72,6 @@ reported while capture continues.
 - a mounted Docker socket in each vulnerable machine for local app orchestration
 - one `firewall` service built from `firewall/Dockerfile`
 - one persistent `gameserver` service at `10.10.0.2`
-
-No scoreboard is generated in this iteration.
 
 The generated root Compose defines SSH gateways, vulnerable machines, and the
 firewall. Each `team<N>-vuln-app` remains a nested Compose project so teams can
@@ -148,11 +146,12 @@ Current standings and per-round component breakdowns are exposed by the
 gameserver API. The full policy and tie ordering are documented in
 [`scoring.md`](scoring.md).
 
-## Iteration Path
+## Operator Console
 
-The next layers can be added independently:
+The visualizer polls `GET /api/dashboard` for match state, the latest round,
+standings, and current-round checker outcomes. It does not infer runtime health
+from Compose. The topology tab remains a separate configured-topology view.
 
-- a scoreboard or operator dashboard
-
-Keeping these layers separate makes the infrastructure reusable while the
-challenge and scoring models are still changing.
+Start, pause, resume, single-step, finish, and generic match-state mutations
+require the local operator Bearer token configured by `ARENA_OPERATOR_TOKEN`.
+The token is separate from team submission credentials.

@@ -1,6 +1,7 @@
-# Sandcastle Docker Visualizer
+# Sandcastle Operator Console
 
-React + React Flow module for rendering the Sandcastle Docker topology.
+React operator UI for the live gameserver scoreboard, checker state, match
+controls, configured Docker topology, traffic feed, and bot controls.
 
 ## Run
 
@@ -10,21 +11,28 @@ npm install
 npm run dev
 ```
 
-The app loads the repository root `docker-compose.yml` by default. Use
-`Yaml Mode` to paste or upload another Compose file, then render it into the
-diagram.
-
-## Bot Mode
-
-Bot Mode talks to the local Sandcastle bot bridge:
+The scoreboard is the default view and polls the authoritative gameserver API.
+Operator actions require the token printed by:
 
 ```bash
-python3 bot/bot_api.py
+./scripts/setup.sh --show-access
 ```
 
-From there you can create a bot profile, choose actions and a planner, then
-deploy that bot into selected team SSH containers. Deployed bots act on behalf
-of their team from inside the CTF network.
+The topology view loads the repository root `docker-compose.yml`. It is
+configuration metadata, not live container health. The old YAML editing and
+raw inspector modes were removed to keep the console focused on arena
+operations.
+
+## Bot Deployments
+
+The bot controller starts automatically with `./scripts/arena.sh up`. The Bots
+view shows active and historical deployments, structured action events,
+captures, submission outcomes, configuration, and archived raw logs.
+
+Create a deployment, choose actions and a planner, then select the team SSH
+containers where it should run. Captured flags are submitted automatically to
+the authoritative gameserver using credentials injected inside the target
+container; credentials are never returned to the browser.
 
 Bot and firewall endpoints, team count, service port, and generated target IPs
 come from the repository root `config/arena.env`.

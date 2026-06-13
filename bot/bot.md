@@ -9,7 +9,7 @@ it acts as that team and targets the other teams from inside the CTF network.
 | Path | Where | Role |
 |---|---|---|
 | `deploy.sh` | Host | Copies bot files into team SSH containers and starts/stops them |
-| `bot_api.py` | Host | Local HTTP bridge used by the visualizer Bot tab |
+| `bot_api.py` | `bot-controller` | Persistent deployment API, state, logs, and event inspection |
 | `bot.py` | `teamN-ssh` | Runtime loop: loads config, asks a planner for tasks, runs actions |
 | `bot_lib/actions.py` | `teamN-ssh` | Action registry: recon, exploits, probes, maintenance |
 | `bot_lib/planners.py` | `teamN-ssh` | Planner registry and external planner hook |
@@ -28,11 +28,10 @@ planner without changing deploy or the visualizer flow.
 
 ## Visualizer Flow
 
-Start the platform, then start the local bot bridge:
+Start the platform:
 
 ```bash
 ./scripts/arena.sh up
-python3 bot/bot_api.py
 ```
 
 In the visualizer, open `Bot`:
@@ -43,9 +42,19 @@ In the visualizer, open `Bot`:
 4. Select the team containers where the bot should run.
 5. Deploy.
 
-The bridge address, team count, service port, IP pattern, and default loop
-interval come from `config/arena.env`. The bridge only shells out to
-`bot/deploy.sh`.
+The controller address, team count, service port, IP pattern, and default loop
+interval come from `config/arena.env`. It creates one durable deployment record
+per selected team, invokes `bot/deploy.sh`, and archives telemetry when a
+deployment stops or is replaced.
+
+The controller is published on `127.0.0.1` and mounts the host Docker socket.
+It therefore has Docker-host authority and must not be exposed outside the
+trusted local operator environment.
+
+Captured flags are immediately submitted to `/api/flags/submit`. Team
+credentials are injected only into the runtime configuration inside the
+selected SSH container. UI deployment records expose redacted flag
+fingerprints and submission outcomes, never tokens or raw flags.
 
 ## CLI Quickstart
 

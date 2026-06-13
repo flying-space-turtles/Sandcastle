@@ -40,21 +40,46 @@ flag, so a crash after the service side effect is deterministic.
 
 ## Operator Controls
 
-With the default host port `8000`:
+All operator mutations require the Bearer token configured as
+`ARENA_OPERATOR_TOKEN`. With the default host port `8000`:
 
 ```bash
-# Start or resume automatic scheduling.
-curl -s -X POST http://localhost:8000/match/resume
+OPERATOR_TOKEN="$(sed -n 's/^ARENA_OPERATOR_TOKEN=//p' config/arena.env)"
+
+# Start a CREATED match. Round 1 is created by the scheduler within one poll.
+curl -s -X POST http://localhost:8000/api/match/start \
+  -H "Authorization: Bearer ${OPERATOR_TOKEN}"
 
 # Stop creation of future rounds. An operation already running may finish.
-curl -s -X POST http://localhost:8000/match/pause
+curl -s -X POST http://localhost:8000/api/match/pause \
+  -H "Authorization: Bearer ${OPERATOR_TOKEN}"
 
 # Run or recover exactly one round while paused.
-curl -s -X POST http://localhost:8000/rounds/step
+curl -s -X POST http://localhost:8000/api/rounds/step \
+  -H "Authorization: Bearer ${OPERATOR_TOKEN}"
+
+# Resume automatic scheduling.
+curl -s -X POST http://localhost:8000/api/match/resume \
+  -H "Authorization: Bearer ${OPERATOR_TOKEN}"
+
+# Finish a running or paused match permanently.
+curl -s -X POST http://localhost:8000/api/match/finish \
+  -H "Authorization: Bearer ${OPERATOR_TOKEN}"
+
+# Clear a FINISHED or FAILED match and return it to CREATED.
+curl -s -X POST http://localhost:8000/api/match/restart \
+  -H "Authorization: Bearer ${OPERATOR_TOKEN}"
+
+# Start the clean match. The next scheduler tick creates round 1.
+curl -s -X POST http://localhost:8000/api/match/start \
+  -H "Authorization: Bearer ${OPERATOR_TOKEN}"
 
 # Read the latest persisted round.
-curl -s http://localhost:8000/rounds/current
+curl -s http://localhost:8000/api/rounds/current
 ```
 
 Single-step returns `409` unless the match is `PAUSED`. It never changes the
-match back to `RUNNING`.
+match back to `RUNNING`. Restart returns `409` unless the match is `FINISHED`
+or `FAILED`; it permanently deletes rounds, flags, submissions, checker
+results, and score events while preserving teams, services, credentials, and
+the scoring policy.
