@@ -400,6 +400,42 @@ EOF
             printf '\n' >> "${COMPOSE_FILE}"
         fi
 
+        if [[ "${ARENA_ISOLATION_MODE}" == "isolated" ]]; then
+            # In isolated mode the proxy holds the host socket and exposes a
+            # filtered team-scoped socket. teamN-vuln mounts that filtered
+            # socket instead, so it can only control its own containers.
+            cat >> "${COMPOSE_FILE}" <<EOF
+  team${i}-docker-proxy:
+    build:
+      context: .
+      dockerfile: docker/docker-proxy/Dockerfile
+    image: sandcastle/team${i}-docker-proxy:latest
+    container_name: team${i}-docker-proxy
+    hostname: team${i}-docker-proxy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /run/sandcastle:/run/sandcastle
+    environment:
+      TEAM_ID: "${i}"
+      PROXY_SOCKET: "/run/sandcastle/team${i}.sock"
+    labels:
+      sandcastle.role: "docker-proxy"
+      sandcastle.team: "team${i}"
+    restart: unless-stopped
+
+EOF
+        fi
+
+        if [[ "${ARENA_ISOLATION_MODE}" == "isolated" ]]; then
+            vuln_depends="
+    depends_on:
+      - team${i}-docker-proxy"
+            vuln_docker_mount="      - /run/sandcastle/team${i}.sock:/var/run/docker.sock"
+        else
+            vuln_depends=""
+            vuln_docker_mount="      - /var/run/docker.sock:/var/run/docker.sock"
+        fi
+
         cat >> "${COMPOSE_FILE}" <<EOF
   team${i}-vuln:
     build:
@@ -413,12 +449,12 @@ EOF
         TEAM_UID: "1000"
     image: sandcastle/team${i}-vuln:latest
     container_name: team${i}-vuln
-    hostname: team${i}-vuln
+    hostname: team${i}-vuln${vuln_depends}
     networks:
       ctf-network:
         ipv4_address: ${ARENA_NETWORK_PREFIX}.${i}.3
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+${vuln_docker_mount}
       - ./teams/generated/team${i}/example-vuln:/home/${username}/example-vuln
     cap_add:
       - NET_ADMIN
