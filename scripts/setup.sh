@@ -377,6 +377,9 @@ x-sandcastle-arena:
   gameserver_port: ${ARENA_GAMESERVER_PORT}
   submission_rate_limit: ${ARENA_SUBMISSION_RATE_LIMIT}
   submission_rate_window_seconds: ${ARENA_SUBMISSION_RATE_WINDOW_SECONDS}
+  score_attack_points: ${ARENA_SCORE_ATTACK_POINTS}
+  score_defense_points: ${ARENA_SCORE_DEFENSE_POINTS}
+  score_sla_points: ${ARENA_SCORE_SLA_POINTS}
 
 networks:
   ctf-network:

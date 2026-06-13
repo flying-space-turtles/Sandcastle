@@ -31,6 +31,7 @@ from checkers.credentials import derive_checker_credentials
 from checkers.loader import load_checker
 from checkers.runner import CheckerRunner
 from models import FlagState, MatchState, RoundState
+from scoring import reconcile_score_events
 
 
 logger = logging.getLogger("sandcastle.tick_engine")
@@ -521,6 +522,11 @@ class TickEngine:
                 ),
             )
             conn.commit()
+        try:
+            with closing(self._connection()) as conn:
+                reconcile_score_events(conn, match_id=record.match_id)
+        except Exception:  # noqa: BLE001 - scoring can be repaired by replay
+            logger.exception("could not reconcile score events for completed round")
         completed = self._round_by_id(record.id)
         if completed is None:
             raise RoundEngineError("completed round disappeared")

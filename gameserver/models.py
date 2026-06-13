@@ -169,10 +169,12 @@ class Submission:
 @dataclass
 class ScoreEvent:
     id: int
+    match_id: int
     team_id: int
     round_number: int
     event_type: str  # ATTACK, DEFENSE, SLA
     points: float
     details: Optional[str]
     submission_id: Optional[int]
+    checker_result_id: Optional[int]
     created_at: str

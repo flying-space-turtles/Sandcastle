@@ -2,9 +2,10 @@
 
 This repository models the container layout for a local Attack & Defense CTF,
 includes a template vulnerable service, and provides a persistent gameserver
-core, typed service checkers, and persisted round scheduling. It does not yet
-include scoreboards or a complete scoring policy. See `../VISION.md` for the
-target product and `PROJECT_AUDIT_AND_BACKLOG.md` for the implementation plan.
+core, typed service checkers, persisted round scheduling, authenticated flag
+submission, and deterministic scoring. It does not yet include a scoreboard.
+See `../VISION.md` for the target product and `PROJECT_AUDIT_AND_BACKLOG.md` for
+the implementation plan.
 
 ## Topology
 
@@ -135,11 +136,22 @@ score-event submission reference ensure concurrent requests can award once.
 `ARENA_SUBMISSION_RATE_LIMIT` and `ARENA_SUBMISSION_RATE_WINDOW_SECONDS`
 configure the in-process per-team sliding-window limiter.
 
+## Deterministic Scoring
+
+The match stores its scoring-policy version and attack, defense, and SLA
+weights. Accepted submissions project to attack events, completed-round `GET`
+results project to defense events, and completed-round benign `CHECK` results
+project to SLA events. Source-specific unique indexes make reconciliation
+idempotent, while standings remain a pure aggregation of immutable events.
+
+Current standings and per-round component breakdowns are exposed by the
+gameserver API. The full policy and tie ordering are documented in
+[`scoring.md`](scoring.md).
+
 ## Iteration Path
 
 The next layers can be added independently:
 
-- deterministic attack, defense, and SLA score calculation
 - a scoreboard or operator dashboard
 
 Keeping these layers separate makes the infrastructure reusable while the

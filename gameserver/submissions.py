@@ -163,6 +163,12 @@ def record_submission(
             (flag, attacker_id, SubmissionCode.ACCEPTED.value),
         )
         submission_id = int(submission_cursor.lastrowid)
+        policy_row = conn.execute(
+            "SELECT attack_points FROM matches WHERE id = ?",
+            (match_id,),
+        ).fetchone()
+        if policy_row is None:
+            raise RuntimeError(f"match {match_id} does not exist")
         details = json.dumps(
             {
                 "submission_id": submission_id,
@@ -176,10 +182,18 @@ def record_submission(
         score_cursor = conn.execute(
             """
             INSERT INTO score_events (
-                team_id, round_number, event_type, points, details, submission_id
-            ) VALUES (?, ?, 'ATTACK', 1.0, ?, ?)
+                match_id, team_id, round_number, event_type, points,
+                details, submission_id
+            ) VALUES (?, ?, ?, 'ATTACK', ?, ?, ?)
             """,
-            (attacker_id, flag_round, details, submission_id),
+            (
+                match_id,
+                attacker_id,
+                flag_round,
+                float(policy_row[0]),
+                details,
+                submission_id,
+            ),
         )
         score_event_id = int(score_cursor.lastrowid)
         conn.commit()
