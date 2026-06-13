@@ -1,5 +1,120 @@
 # Sandcastle
 
+## Quick Start
+
+Sandcastle reads its topology, ports, credentials, and match settings from
+[`config/arena.env`](config/arena.env).
+
+### 1. Configure The Operator Token
+
+`ARENA_OPERATOR_TOKEN` is the organizer credential used by the UI and API to
+start, pause, finish, and restart matches.
+
+The repository contains this local-development default:
+
+```text
+sandcastle-local-operator-token-change-me
+```
+
+It is not unique, is not regenerated when the arena starts, and must not be
+used for a shared or exposed event. Generate a token once and write it into the
+configuration:
+
+```bash
+OPERATOR_TOKEN="$(openssl rand -hex 32)"
+sed -i "s/^ARENA_OPERATOR_TOKEN=.*/ARENA_OPERATOR_TOKEN=${OPERATOR_TOKEN}/" config/arena.env
+```
+
+The configured token remains the same across restarts until you replace it.
+Print it later with either command:
+
+```bash
+sed -n 's/^ARENA_OPERATOR_TOKEN=//p' config/arena.env
+./scripts/setup.sh --show-access
+```
+
+Team submission tokens are separate credentials generated from
+`ARENA_TEAM_TOKEN_PATTERN`. The organizer token is not a team token.
+
+### 2. Prepare The Host
+
+Sandcastle requires a native Linux Docker host. Apply the firewall prerequisites
+once, then run the read-only checks:
+
+```bash
+sudo ./scripts/firewall-preflight.sh --apply
+./scripts/doctor.sh
+```
+
+### 3. Start The Complete Arena
+
+This is the main startup command:
+
+```bash
+./scripts/arena.sh up
+```
+
+It validates and generates configuration, builds and starts the team
+containers, vulnerable applications, firewall, gameserver, and bot controller,
+then waits for health checks. Do not run a separate `docker compose up`.
+
+Useful lifecycle commands:
+
+```bash
+./scripts/arena.sh status
+./scripts/arena.sh restart
+./scripts/arena.sh down
+```
+
+### 4. Start The Operator UI
+
+The backend arena is started by `arena.sh`; the Vite development UI is a
+separate process:
+
+```bash
+cd visualizer
+npm ci
+npm run dev
+```
+
+Open `http://localhost:5173`, select **Match**, open **Match controls**, and
+paste `ARENA_OPERATOR_TOKEN`.
+
+### 5. Start Or Restart A Match
+
+For a new arena, click **Start match** in the UI. From the terminal:
+
+```bash
+OPERATOR_TOKEN="$(sed -n 's/^ARENA_OPERATOR_TOKEN=//p' config/arena.env)"
+
+curl -s -X POST http://localhost:8000/api/match/start \
+  -H "Authorization: Bearer ${OPERATOR_TOKEN}"
+```
+
+To start a clean match after one has already run:
+
+1. Finish the current running or paused match.
+2. Restart it, which deletes its rounds, flags, submissions, checker results,
+   and scores.
+3. Start it again to create a clean round 1.
+
+```bash
+curl -s -X POST http://localhost:8000/api/match/finish \
+  -H "Authorization: Bearer ${OPERATOR_TOKEN}"
+
+curl -s -X POST http://localhost:8000/api/match/restart \
+  -H "Authorization: Bearer ${OPERATOR_TOKEN}"
+
+curl -s -X POST http://localhost:8000/api/match/start \
+  -H "Authorization: Bearer ${OPERATOR_TOKEN}"
+```
+
+The restart endpoint accepts only `FINISHED` or `FAILED` matches. In the UI,
+the equivalent sequence is **Finish match**, **Restart match**, then
+**Start match**.
+
+---
+
 Sandcastle is a local Docker-based Attack & Defense CTF prototype for testing
 software agents that patch their own services and attack opponents.
 
