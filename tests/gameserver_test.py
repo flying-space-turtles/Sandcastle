@@ -282,6 +282,7 @@ class SubmissionServiceTest(unittest.TestCase):
 
 
 class GameserverHTTPTest(unittest.TestCase):
+    operator_token = "test-operator-token-secret-123"
     team_tokens = {
         1: "test-team1-submission-token-secret",
         2: "test-team2-submission-token-secret",
@@ -321,6 +322,7 @@ class GameserverHTTPTest(unittest.TestCase):
         # Start HTTP server in background thread
         import main
         cls.main_module = main
+        cls.main_module.GameserverAPIHandler.operator_token = cls.operator_token
         cls.server = ThreadingHTTPServer((cls.host, cls.port), main.GameserverAPIHandler)
         cls.assigned_port = cls.server.server_port
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
@@ -444,38 +446,61 @@ class GameserverHTTPTest(unittest.TestCase):
             self.assertEqual(body["status"], MatchState.CREATED.value)
 
     def test_post_match_state_transition(self):
-        url = f"{self.base_url}/match/state"
-        
         # 1. Valid Transition: CREATED -> RUNNING
-        data = json.dumps({"status": "RUNNING"}).encode()
-        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            self.assertEqual(resp.status, 200)
-            body = json.loads(resp.read().decode())
-            self.assertEqual(body["status"], "RUNNING")
+        status, body, _ = self._post_result(
+            "/match/state",
+            {"status": "RUNNING"},
+            self.operator_token,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(body["status"], "RUNNING")
 
         # 2. Idempotent Transition: RUNNING -> RUNNING
-        data = json.dumps({"status": "RUNNING"}).encode()
-        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            self.assertEqual(resp.status, 200)
-            body = json.loads(resp.read().decode())
-            self.assertEqual(body["status"], "RUNNING")
+        status, body, _ = self._post_result(
+            "/match/state",
+            {"status": "RUNNING"},
+            self.operator_token,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(body["status"], "RUNNING")
 
         # 3. Invalid Transition: RUNNING -> CREATED (should fail with 400)
-        data = json.dumps({"status": "CREATED"}).encode()
-        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
-        with self.assertRaises(urllib.error.HTTPError) as ctx:
-            urllib.request.urlopen(req, timeout=5)
-        self.assertEqual(ctx.exception.code, 400)
-        err_body = json.loads(ctx.exception.read().decode())
-        self.assertIn("error", err_body)
-        self.assertIn("Invalid match state transition", err_body["error"])
+        status, body, _ = self._post_result(
+            "/match/state",
+            {"status": "CREATED"},
+            self.operator_token,
+        )
+        self.assertEqual(status, 400)
+        self.assertIn("Invalid match state transition", body["error"])
+
+    def test_operator_controls_require_valid_bearer_token(self):
+        status, body, headers = self._post_result("/match/start")
+        self.assertEqual(status, 401)
+        self.assertEqual(body["code"], "OPERATOR_UNAUTHORIZED")
+        self.assertEqual(headers["WWW-Authenticate"], "Bearer")
+
+        status, body, _ = self._post_result("/match/start", token="wrong-token")
+        self.assertEqual(status, 401)
+        self.assertEqual(body["code"], "OPERATOR_UNAUTHORIZED")
+
+        status, body, _ = self._post_result(
+            "/match/start",
+            token=self.operator_token,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(body["status"], "RUNNING")
+
+        status, body, _ = self._post_result(
+            "/match/finish",
+            token=self.operator_token,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(body["status"], "FINISHED")
 
     def test_pause_resume_and_single_step_controls(self):
-        with self._post("/match/resume") as resp:
+        with self._post("/match/resume", token=self.operator_token) as resp:
             self.assertEqual(json.loads(resp.read().decode())["status"], "RUNNING")
-        with self._post("/match/pause") as resp:
+        with self._post("/match/pause", token=self.operator_token) as resp:
             self.assertEqual(json.loads(resp.read().decode())["status"], "PAUSED")
 
         class FakeRound:
@@ -487,10 +512,39 @@ class GameserverHTTPTest(unittest.TestCase):
                 return FakeRound()
 
         self.main_module.GameserverAPIHandler.tick_engine = FakeEngine()
-        with self._post("/rounds/step") as resp:
+        with self._post("/rounds/step", token=self.operator_token) as resp:
             body = json.loads(resp.read().decode())
             self.assertEqual(body["round"]["round_number"], 7)
             self.assertEqual(body["round"]["status"], "COMPLETED")
+
+    def test_dashboard_combines_live_match_scores_and_checker_status(self):
+        self._insert_round_and_flags()
+        conn = db.get_db_connection(self.db_path)
+        conn.execute(
+            """
+            INSERT INTO checker_results (
+                match_id, team_id, service_id, round_number, operation,
+                plugin_name, plugin_version, status, message,
+                duration_ms, data_json
+            ) VALUES (1, 1, 1, 3, 'CHECK', 'notes', '1', 'DOWN',
+                      'health request failed', 12, '{}')
+            """
+        )
+        conn.commit()
+        conn.close()
+
+        with urllib.request.urlopen(f"{self.base_url}/api/dashboard", timeout=5) as resp:
+            body = json.loads(resp.read().decode())
+
+        self.assertEqual(body["match"]["status"], "CREATED")
+        self.assertEqual(body["round"]["round_number"], 3)
+        self.assertEqual(len(body["standings"]), 2)
+        team1 = next(service for service in body["services"] if service["team_id"] == 1)
+        self.assertEqual(team1["status"], "DOWN")
+        self.assertEqual(
+            team1["operations"]["CHECK"]["message"],
+            "health request failed",
+        )
 
     def test_get_current_round(self):
         conn = db.get_db_connection(self.db_path)

@@ -496,6 +496,7 @@ EOF
       - ./config/arena.env:/app/config/arena.env:ro
     environment:
       CHECKER_MASTER_SECRET: "${ARENA_CHECKER_SECRET}"
+      GAMESERVER_OPERATOR_TOKEN: "${ARENA_OPERATOR_TOKEN}"
     labels:
       sandcastle.role: "gameserver"
     restart: unless-stopped
@@ -533,6 +534,7 @@ print_summary() {
     if ((SHOW_ACCESS)); then
         echo
         echo "Development access details (contains credentials):"
+        echo "Operator token: ${ARENA_OPERATOR_TOKEN}"
         for ((i = 1; i <= teams; i++)); do
             username="$(arena_config_render_team_value "${ARENA_TEAM_USERNAME_PATTERN}" "${i}")"
             password="$(arena_config_render_team_value "${ARENA_TEAM_PASSWORD_PATTERN}" "${i}")"

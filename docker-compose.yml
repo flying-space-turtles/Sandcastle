@@ -171,6 +171,7 @@ services:
       - ./config/arena.env:/app/config/arena.env:ro
     environment:
       CHECKER_MASTER_SECRET: "sandcastle-local-checker-secret-change-me"
+      GAMESERVER_OPERATOR_TOKEN: "sandcastle-local-operator-token-change-me"
     labels:
       sandcastle.role: "gameserver"
     restart: unless-stopped

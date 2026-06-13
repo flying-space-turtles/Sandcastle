@@ -12,16 +12,21 @@ Exposes:
   - GET  /rounds/current → Read the latest persisted round
   - POST /match/pause → Pause automatic round creation
   - POST /match/resume → Resume automatic round creation
+  - POST /match/start → Start a created match
+  - POST /match/finish → Finish a running or paused match
   - POST /rounds/step → Run one round while paused
   - POST /flags/submit → Authenticated flag submission
   - GET  /standings → Current deterministic standings
   - GET  /rounds/{number}/scores → Per-round score breakdown
+  - GET  /dashboard → Authoritative operator-console snapshot
 """
 
 from __future__ import annotations
 
 import argparse
+import hmac
 import json
+import os
 import re
 import sys
 import threading
@@ -51,6 +56,7 @@ ALLOWED_ORIGINS = re.compile(r"^https?://localhost(:\d+)?$")
 
 class GameserverAPIHandler(BaseHTTPRequestHandler):
     tick_engine: TickEngine | None = None
+    operator_token = ""
     submission_rate_limiter = TeamRateLimiter(limit=60, window_seconds=60)
     max_request_body_bytes = 64 * 1024
 
@@ -104,6 +110,148 @@ class GameserverAPIHandler(BaseHTTPRequestHandler):
         if separator and scheme.lower() == "bearer" and token and " " not in token:
             return token
         return None
+
+    def _require_operator(self) -> bool:
+        token = self._bearer_token()
+        if (
+            not self.operator_token
+            or token is None
+            or not hmac.compare_digest(token, self.operator_token)
+        ):
+            self._json(
+                401,
+                {
+                    "code": "OPERATOR_UNAUTHORIZED",
+                    "error": "operator credential required",
+                },
+                {"WWW-Authenticate": "Bearer"},
+            )
+            return False
+        return True
+
+    def _dashboard(self) -> None:
+        conn = None
+        try:
+            conn = db.get_db_connection()
+            match_row = conn.execute(
+                """
+                SELECT id, status, created_at, updated_at
+                FROM matches WHERE id = 1
+                """
+            ).fetchone()
+            if match_row is None:
+                self._json(404, {"code": "MATCH_NOT_FOUND"})
+                return
+
+            round_row = conn.execute(
+                """
+                SELECT id, match_id, round_number, status, started_at,
+                       deadline_at, completed_at, duration_seconds, error
+                FROM rounds WHERE match_id = 1
+                ORDER BY round_number DESC LIMIT 1
+                """
+            ).fetchone()
+            round_number = int(round_row[2]) if round_row is not None else None
+
+            reconcile_score_events(conn, match_id=1)
+            policy = get_scoring_policy(conn, match_id=1)
+            standings = standings_from_events(conn, match_id=1)
+            service_rows = conn.execute(
+                """
+                SELECT
+                    t.id, t.name, s.id, s.name, s.port,
+                    cr.operation, cr.status, cr.message, cr.duration_ms,
+                    cr.created_at
+                FROM teams t
+                CROSS JOIN services s
+                LEFT JOIN checker_results cr
+                  ON cr.team_id = t.id
+                 AND cr.service_id = s.id
+                 AND cr.match_id = 1
+                 AND cr.round_number = ?
+                ORDER BY t.id, s.id, cr.operation
+                """,
+                (round_number if round_number is not None else -1,),
+            ).fetchall()
+
+            services: dict[tuple[int, int], dict[str, object]] = {}
+            for row in service_rows:
+                key = (int(row[0]), int(row[2]))
+                service = services.setdefault(
+                    key,
+                    {
+                        "team_id": int(row[0]),
+                        "team_name": str(row[1]),
+                        "service_id": int(row[2]),
+                        "service_name": str(row[3]),
+                        "port": int(row[4]),
+                        "round_number": round_number,
+                        "status": "PENDING",
+                        "operations": {},
+                        "last_checked_at": None,
+                    },
+                )
+                if row[5] is None:
+                    continue
+                operations = service["operations"]
+                assert isinstance(operations, dict)
+                operations[str(row[5])] = {
+                    "status": str(row[6]),
+                    "message": str(row[7]),
+                    "duration_ms": int(row[8]),
+                    "created_at": str(row[9]),
+                }
+                service["last_checked_at"] = str(row[9])
+
+            status_priority = {"DOWN": 4, "CORRUPT": 3, "MUMBLE": 2, "UP": 1}
+            for service in services.values():
+                operations = service["operations"]
+                assert isinstance(operations, dict)
+                statuses = [
+                    str(operation["status"])
+                    for operation in operations.values()
+                    if isinstance(operation, dict)
+                ]
+                if statuses:
+                    service["status"] = max(
+                        statuses,
+                        key=lambda status: status_priority.get(status, 0),
+                    )
+
+            match_obj = Match.from_row(match_row)
+            current_round = None
+            if round_row is not None:
+                current_round = {
+                    "id": round_row[0],
+                    "match_id": round_row[1],
+                    "round_number": round_row[2],
+                    "status": round_row[3],
+                    "started_at": round_row[4],
+                    "deadline_at": round_row[5],
+                    "completed_at": round_row[6],
+                    "duration_seconds": round_row[7],
+                    "error": round_row[8],
+                }
+            self._json(
+                200,
+                {
+                    "match": {
+                        "match_id": match_obj.id,
+                        "status": match_obj.status.value,
+                        "created_at": match_obj.created_at,
+                        "updated_at": match_obj.updated_at,
+                    },
+                    "round": current_round,
+                    "policy": policy.as_dict(),
+                    "standings": standings,
+                    "services": list(services.values()),
+                },
+            )
+        except Exception:  # noqa: BLE001 - do not expose persistence internals
+            self._json(500, {"code": "DASHBOARD_ERROR"})
+        finally:
+            if conn:
+                conn.close()
 
     def _scores(self, round_number: int | None = None) -> None:
         conn = None
@@ -261,6 +409,11 @@ class GameserverAPIHandler(BaseHTTPRequestHandler):
             self._scores()
             return
 
+        # ── GET /dashboard ──
+        if path == "/dashboard" or path == "/api/dashboard":
+            self._dashboard()
+            return
+
         # ── GET /rounds/{number}/scores ──
         round_scores_match = re.fullmatch(r"(?:/api)?/rounds/(\d+)/scores", path)
         if round_scores_match:
@@ -327,16 +480,24 @@ class GameserverAPIHandler(BaseHTTPRequestHandler):
         if path in {
             "/match/state",
             "/api/match/state",
+            "/match/start",
+            "/api/match/start",
             "/match/pause",
             "/api/match/pause",
             "/match/resume",
             "/api/match/resume",
+            "/match/finish",
+            "/api/match/finish",
         }:
+            if not self._require_operator():
+                return
             body = self._read_body()
-            if path.endswith("/pause"):
-                target_status = MatchState.PAUSED.value
-            elif path.endswith("/resume"):
+            if path.endswith("/start") or path.endswith("/resume"):
                 target_status = MatchState.RUNNING.value
+            elif path.endswith("/pause"):
+                target_status = MatchState.PAUSED.value
+            elif path.endswith("/finish"):
+                target_status = MatchState.FINISHED.value
             else:
                 target_status = body.get("status")
             if not target_status:
@@ -392,6 +553,8 @@ class GameserverAPIHandler(BaseHTTPRequestHandler):
 
         # ── POST /rounds/step ──
         if path == "/rounds/step" or path == "/api/rounds/step":
+            if not self._require_operator():
+                return
             if self.tick_engine is None:
                 self._json(503, {"error": "round engine is not configured"})
                 return
@@ -452,6 +615,16 @@ def main() -> None:
         limit=int(config.get("ARENA_SUBMISSION_RATE_LIMIT", "60")),
         window_seconds=int(config.get("ARENA_SUBMISSION_RATE_WINDOW_SECONDS", "60")),
     )
+    GameserverAPIHandler.operator_token = (
+        os.environ.get("GAMESERVER_OPERATOR_TOKEN")
+        or config.get("ARENA_OPERATOR_TOKEN", "")
+    )
+    if len(GameserverAPIHandler.operator_token) < 24:
+        print(
+            "[!] Gameserver operator token must contain at least 24 characters",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
     # 3. Start the persisted round scheduler.
     try:
