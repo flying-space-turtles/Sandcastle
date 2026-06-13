@@ -446,9 +446,32 @@ remove_app_data() {
     docker volume rm -f "${volumes[@]}" >/dev/null
 }
 
+print_trusted_mode_banner() {
+    if [[ "${SANDCASTLE_SKIP_TRUSTED_BANNER:-0}" == "1" ]]; then
+        return
+    fi
+    printf '\n'
+    printf '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n'
+    printf '!!  SANDCASTLE TRUSTED-LOCAL MODE                                !!\n'
+    printf '!!                                                                !!\n'
+    printf '!!  Each vulnerable machine has FULL HOST DOCKER DAEMON ACCESS.  !!\n'
+    printf '!!  A participant with SSH access can escape to the host.         !!\n'
+    printf '!!                                                                !!\n'
+    printf '!!  Only run this mode with trusted participants on a private     !!\n'
+    printf '!!  network.  DO NOT use it for public events or with external    !!\n'
+    printf '!!  teams.                                                        !!\n'
+    printf '!!                                                                !!\n'
+    printf '!!  Read docs/THREAT_MODEL.md before sharing this arena.         !!\n'
+    printf '!!  Run ./scripts/doctor.sh to review active warnings.           !!\n'
+    printf '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n'
+    printf '\n'
+}
+
 up_arena() {
     local setup_complete="${1:-0}"
     local timeout
+
+    print_trusted_mode_banner
 
     if ((setup_complete == 0)); then
         run_setup

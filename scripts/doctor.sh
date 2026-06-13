@@ -350,7 +350,7 @@ check_host_and_docker() {
     else
         report WARN docker.socket \
             "${DOCKER_SOCKET} is accessible and will grant team vulnerable machines host-level Docker control." \
-            "Use only trusted local participants; read VISION.md and the planned threat-model task SC-016."
+            "Use only trusted local participants. Read docs/THREAT_MODEL.md (Docker Socket section) before sharing this arena."
     fi
 
     if ((DOCKER_COMPOSE)) && [[ -f "${COMPOSE_FILE}" ]]; then
@@ -681,7 +681,7 @@ check_runtime_docker_access() {
     else
         report WARN runtime.docker-access \
             "Running vulnerable machines have host Docker control as required by trusted-local mode." \
-            "Do not use this mode with untrusted participants; see VISION.md and SC-016."
+            "Do not use this mode with untrusted participants. Read docs/THREAT_MODEL.md for escape paths and required controls."
     fi
 }
 
