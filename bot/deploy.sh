@@ -107,7 +107,7 @@ start_bot() {
     # keeps running after `docker exec` returns
     # shellcheck disable=SC2086
     docker exec "$cname" bash -c \
-        "cd '${remote_dir}'; BOT_CONFIG_FILE='${remote_dir}/bot_config.json' BOT_EVENT_FILE='${remote_dir}/events.jsonl' setsid python3 -u '${remote_dir}/bot.py' ${bot_args} </dev/null > '${remote_dir}/bot.log' 2>&1 & pid=\$!; echo \${pid} > '${remote_dir}/bot.pid'; disown" || true
+        "cd '${remote_dir}'; ARENA_CONFIG_FILE='${remote_dir}/arena.env' BOT_CONFIG_FILE='${remote_dir}/bot_config.json' BOT_EVENT_FILE='${remote_dir}/events.jsonl' setsid python3 -u '${remote_dir}/bot.py' ${bot_args} </dev/null > '${remote_dir}/bot.log' 2>&1 & pid=\$!; echo \${pid} > '${remote_dir}/bot.pid'; disown" || true
     # Poll up to 3 s for the process to appear
     local pid=""
     for _ in 1 2 3; do
