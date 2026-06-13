@@ -169,6 +169,7 @@ def initialize_schema(conn: sqlite3.Connection) -> None:
 
     _initialize_score_events_schema(conn)
     _migrate_legacy_scoring_policy(conn)
+    _initialize_telemetry_schema(conn)
 
     # Trigger to auto-update matches.updated_at
     cursor.execute("""
@@ -696,3 +697,29 @@ def _parse_non_negative_score(raw: str | None, default: float, name: str) -> flo
     if not math.isfinite(value) or value < 0:
         raise ValueError(f"{name} must be non-negative")
     return value
+
+
+def _initialize_telemetry_schema(conn: sqlite3.Connection) -> None:
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS telemetry_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            schema_version INTEGER NOT NULL DEFAULT 1,
+            event_type TEXT NOT NULL,
+            source TEXT NOT NULL,
+            match_id INTEGER,
+            round_number INTEGER,
+            team_id INTEGER,
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            correlation_id TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(match_id) REFERENCES matches(id) ON DELETE CASCADE
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS telemetry_match_type_idx
+        ON telemetry_events(match_id, event_type)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS telemetry_team_idx
+        ON telemetry_events(team_id, event_type)
+    """)
