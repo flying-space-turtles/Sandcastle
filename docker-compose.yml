@@ -17,6 +17,18 @@ x-sandcastle-arena:
   score_attack_points: 10
   score_defense_points: 2
   score_sla_points: 1
+  team_vuln_mem_limit: 512m
+  team_vuln_cpu_limit: 0.50
+  team_vuln_pids_limit: 200
+  team_ssh_mem_limit: 128m
+  team_ssh_cpu_limit: 0.25
+  team_ssh_pids_limit: 100
+  team_app_mem_limit: 256m
+  team_app_cpu_limit: 0.50
+  team_app_pids_limit: 100
+  team_max_restarts: 5
+  log_max_size: 50m
+  log_max_files: 3
 
 networks:
   ctf-network:
@@ -51,7 +63,18 @@ services:
     labels:
       sandcastle.role: "vuln-machine"
       sandcastle.team: "team1"
-    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: '0.50'
+          pids: 200
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+    restart: "on-failure:5"
 
   team1-ssh:
     build:
@@ -78,7 +101,18 @@ services:
     labels:
       sandcastle.role: "ssh-gateway"
       sandcastle.team: "team1"
-    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: '0.25'
+          pids: 100
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+    restart: "on-failure:5"
 
   team2-vuln:
     build:
@@ -104,7 +138,18 @@ services:
     labels:
       sandcastle.role: "vuln-machine"
       sandcastle.team: "team2"
-    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: '0.50'
+          pids: 200
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+    restart: "on-failure:5"
 
   team2-ssh:
     build:
@@ -131,7 +176,18 @@ services:
     labels:
       sandcastle.role: "ssh-gateway"
       sandcastle.team: "team2"
-    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: '0.25'
+          pids: 100
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+    restart: "on-failure:5"
 
   firewall:
     build:
@@ -152,6 +208,16 @@ services:
       - NET_RAW
     labels:
       sandcastle.role: "firewall"
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: '0.50'
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     restart: unless-stopped
 
   gameserver:
@@ -174,6 +240,16 @@ services:
       GAMESERVER_OPERATOR_TOKEN: "sandcastle-local-operator-token-change-me"
     labels:
       sandcastle.role: "gameserver"
+    deploy:
+      resources:
+        limits:
+          memory: 512m
+          cpus: '1.00'
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     restart: unless-stopped
 
   bot-controller:
@@ -194,6 +270,16 @@ services:
     labels:
       sandcastle.role: "bot-controller"
       sandcastle.visualizer.hidden: "true"
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+          cpus: '0.50'
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
     restart: unless-stopped
 
 volumes:

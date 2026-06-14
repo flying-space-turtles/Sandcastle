@@ -347,7 +347,18 @@ services:
     labels:
       sandcastle.role: "vuln-app"
       sandcastle.team: "team${team_num}"
-    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: ${ARENA_TEAM_APP_MEM_LIMIT}
+          cpus: '${ARENA_TEAM_APP_CPU_LIMIT}'
+          pids: ${ARENA_TEAM_APP_PIDS_LIMIT}
+    logging:
+      driver: json-file
+      options:
+        max-size: "${ARENA_LOG_MAX_SIZE}"
+        max-file: "${ARENA_LOG_MAX_FILES}"
+    restart: "on-failure:${ARENA_TEAM_MAX_RESTARTS}"
 
 volumes:
   team-data:
@@ -382,6 +393,18 @@ x-sandcastle-arena:
   score_attack_points: ${ARENA_SCORE_ATTACK_POINTS}
   score_defense_points: ${ARENA_SCORE_DEFENSE_POINTS}
   score_sla_points: ${ARENA_SCORE_SLA_POINTS}
+  team_vuln_mem_limit: ${ARENA_TEAM_VULN_MEM_LIMIT}
+  team_vuln_cpu_limit: ${ARENA_TEAM_VULN_CPU_LIMIT}
+  team_vuln_pids_limit: ${ARENA_TEAM_VULN_PIDS_LIMIT}
+  team_ssh_mem_limit: ${ARENA_TEAM_SSH_MEM_LIMIT}
+  team_ssh_cpu_limit: ${ARENA_TEAM_SSH_CPU_LIMIT}
+  team_ssh_pids_limit: ${ARENA_TEAM_SSH_PIDS_LIMIT}
+  team_app_mem_limit: ${ARENA_TEAM_APP_MEM_LIMIT}
+  team_app_cpu_limit: ${ARENA_TEAM_APP_CPU_LIMIT}
+  team_app_pids_limit: ${ARENA_TEAM_APP_PIDS_LIMIT}
+  team_max_restarts: ${ARENA_TEAM_MAX_RESTARTS}
+  log_max_size: ${ARENA_LOG_MAX_SIZE}
+  log_max_files: ${ARENA_LOG_MAX_FILES}
 
 networks:
   ctf-network:
@@ -423,6 +446,16 @@ EOF
     labels:
       sandcastle.role: "docker-proxy"
       sandcastle.team: "team${i}"
+    deploy:
+      resources:
+        limits:
+          memory: 64m
+          cpus: '0.10'
+    logging:
+      driver: json-file
+      options:
+        max-size: "${ARENA_LOG_MAX_SIZE}"
+        max-file: "${ARENA_LOG_MAX_FILES}"
     restart: unless-stopped
 
 EOF
@@ -463,7 +496,18 @@ ${vuln_docker_mount}
     labels:
       sandcastle.role: "vuln-machine"
       sandcastle.team: "team${i}"
-    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: ${ARENA_TEAM_VULN_MEM_LIMIT}
+          cpus: '${ARENA_TEAM_VULN_CPU_LIMIT}'
+          pids: ${ARENA_TEAM_VULN_PIDS_LIMIT}
+    logging:
+      driver: json-file
+      options:
+        max-size: "${ARENA_LOG_MAX_SIZE}"
+        max-file: "${ARENA_LOG_MAX_FILES}"
+    restart: "on-failure:${ARENA_TEAM_MAX_RESTARTS}"
 
   team${i}-ssh:
     build:
@@ -490,7 +534,18 @@ ${vuln_docker_mount}
     labels:
       sandcastle.role: "ssh-gateway"
       sandcastle.team: "team${i}"
-    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: ${ARENA_TEAM_SSH_MEM_LIMIT}
+          cpus: '${ARENA_TEAM_SSH_CPU_LIMIT}'
+          pids: ${ARENA_TEAM_SSH_PIDS_LIMIT}
+    logging:
+      driver: json-file
+      options:
+        max-size: "${ARENA_LOG_MAX_SIZE}"
+        max-file: "${ARENA_LOG_MAX_FILES}"
+    restart: "on-failure:${ARENA_TEAM_MAX_RESTARTS}"
 EOF
     done
 
@@ -515,6 +570,16 @@ EOF
       - NET_RAW
     labels:
       sandcastle.role: "firewall"
+    deploy:
+      resources:
+        limits:
+          memory: ${ARENA_FIREWALL_MEM_LIMIT}
+          cpus: '${ARENA_FIREWALL_CPU_LIMIT}'
+    logging:
+      driver: json-file
+      options:
+        max-size: "${ARENA_LOG_MAX_SIZE}"
+        max-file: "${ARENA_LOG_MAX_FILES}"
     restart: unless-stopped
 
   gameserver:
@@ -537,6 +602,16 @@ EOF
       GAMESERVER_OPERATOR_TOKEN: "${ARENA_OPERATOR_TOKEN}"
     labels:
       sandcastle.role: "gameserver"
+    deploy:
+      resources:
+        limits:
+          memory: ${ARENA_GAMESERVER_MEM_LIMIT}
+          cpus: '${ARENA_GAMESERVER_CPU_LIMIT}'
+    logging:
+      driver: json-file
+      options:
+        max-size: "${ARENA_LOG_MAX_SIZE}"
+        max-file: "${ARENA_LOG_MAX_FILES}"
     restart: unless-stopped
 
   bot-controller:
@@ -557,6 +632,16 @@ EOF
     labels:
       sandcastle.role: "bot-controller"
       sandcastle.visualizer.hidden: "true"
+    deploy:
+      resources:
+        limits:
+          memory: ${ARENA_BOT_MEM_LIMIT}
+          cpus: '${ARENA_BOT_CPU_LIMIT}'
+    logging:
+      driver: json-file
+      options:
+        max-size: "${ARENA_LOG_MAX_SIZE}"
+        max-file: "${ARENA_LOG_MAX_FILES}"
     restart: unless-stopped
 
 volumes:

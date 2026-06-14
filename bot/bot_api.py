@@ -123,6 +123,93 @@ def _runtime_status(team_id: int, deployment_id: str) -> tuple[bool, int | None]
     return True, int(first) if first.isdigit() else None
 
 
+_RESTART_LOOP_THRESHOLD = 3
+_DISK_PRESSURE_THRESHOLD_PCT = 80
+
+
+def _parse_df(output: str) -> tuple[int | None, int | None]:
+    """Parse `df -k` output. Returns (used_pct, available_bytes) or (None, None)."""
+    for line in output.splitlines():
+        line = line.strip()
+        if not line or line.startswith("Filesystem"):
+            continue
+        parts = line.split()
+        if len(parts) < 5:
+            continue
+        try:
+            return int(parts[4].rstrip("%")), int(parts[3]) * 1024
+        except (ValueError, IndexError):
+            continue
+    return None, None
+
+
+def _resource_status() -> dict[str, Any]:
+    """Inspect all team containers and return resource health and violations."""
+    num_teams = ARENA_DEFAULTS.team_count
+    names = [
+        name
+        for i in range(1, num_teams + 1)
+        for name in (f"team{i}-vuln", f"team{i}-ssh", f"team{i}-vuln-app")
+    ]
+    containers: list[dict[str, Any]] = []
+    for name in names:
+        rc, out = _run(["docker", "inspect", name])
+        if rc != 0:
+            continue
+        try:
+            data_list = json.loads(out)
+            if not data_list:
+                continue
+            d = data_list[0]
+            state = d.get("State", {})
+            mem = (d.get("HostConfig") or {}).get("Memory", 0)
+            running = bool(state.get("Running"))
+            entry: dict[str, Any] = {
+                "name": name,
+                "running": running,
+                "oom_killed": bool(state.get("OOMKilled")),
+                "restart_count": int(d.get("RestartCount", 0)),
+                "exit_code": state.get("ExitCode"),
+                "mem_limit_bytes": int(mem) if mem else None,
+                "disk_used_pct": None,
+                "disk_available_bytes": None,
+            }
+            if running:
+                df_rc, df_out = _run(["docker", "exec", name, "df", "-k", "/"])
+                if df_rc == 0:
+                    used_pct, avail = _parse_df(df_out)
+                    entry["disk_used_pct"] = used_pct
+                    entry["disk_available_bytes"] = avail
+            containers.append(entry)
+        except (json.JSONDecodeError, KeyError, TypeError):
+            continue
+
+    flagged: list[dict[str, Any]] = []
+    for c in containers:
+        if c["oom_killed"]:
+            flagged.append({
+                "container": c["name"],
+                "type": "resource.oom_kill",
+                "restart_count": c["restart_count"],
+                "mem_limit_bytes": c["mem_limit_bytes"],
+            })
+        elif c["restart_count"] >= _RESTART_LOOP_THRESHOLD:
+            flagged.append({
+                "container": c["name"],
+                "type": "resource.restart_loop",
+                "restart_count": c["restart_count"],
+            })
+        if (c["disk_used_pct"] is not None
+                and c["disk_used_pct"] >= _DISK_PRESSURE_THRESHOLD_PCT):
+            flagged.append({
+                "container": c["name"],
+                "type": "resource.disk_pressure",
+                "disk_used_pct": c["disk_used_pct"],
+                "disk_available_bytes": c["disk_available_bytes"],
+            })
+    return {"containers": containers, "violations": flagged}
+
+
 def _parse_events(raw: str) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     for line in raw.splitlines():
@@ -507,6 +594,9 @@ class BotAPIHandler(BaseHTTPRequestHandler):
                     }
                 )
             self._json(200, {"teams": teams})
+            return
+        if path == "/resources":
+            self._json(200, _resource_status())
             return
 
         match = re.fullmatch(r"/deployments/([a-zA-Z0-9._-]+)(?:/(events|logs))?", path)

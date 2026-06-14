@@ -8,6 +8,24 @@ arena_config_error() {
     fi
 }
 
+arena_config_require_mem_limit() {
+    local name="$1"
+    local value="${!name:-}"
+    if [[ -z "${value}" || ! "${value}" =~ ^[0-9]+[bBkKmMgG]$ ]]; then
+        arena_config_error "${name} must be a Docker memory value like 256m or 1g, got '${value}'"
+        return 1
+    fi
+}
+
+arena_config_require_cpu_limit() {
+    local name="$1"
+    local value="${!name:-}"
+    if [[ -z "${value}" || ! "${value}" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+        arena_config_error "${name} must be a decimal CPU fraction like 0.50 or 1.00, got '${value}'"
+        return 1
+    fi
+}
+
 arena_config_require_int() {
     local name="$1"
     local min="$2"
@@ -133,6 +151,26 @@ arena_config_load() {
     # shellcheck disable=SC1090
     source "${config_file}"
 
+    # Resource limit defaults (all optional; safe values for development)
+    ARENA_TEAM_VULN_MEM_LIMIT="${ARENA_TEAM_VULN_MEM_LIMIT:-512m}"
+    ARENA_TEAM_VULN_CPU_LIMIT="${ARENA_TEAM_VULN_CPU_LIMIT:-0.50}"
+    ARENA_TEAM_VULN_PIDS_LIMIT="${ARENA_TEAM_VULN_PIDS_LIMIT:-200}"
+    ARENA_TEAM_SSH_MEM_LIMIT="${ARENA_TEAM_SSH_MEM_LIMIT:-128m}"
+    ARENA_TEAM_SSH_CPU_LIMIT="${ARENA_TEAM_SSH_CPU_LIMIT:-0.25}"
+    ARENA_TEAM_SSH_PIDS_LIMIT="${ARENA_TEAM_SSH_PIDS_LIMIT:-100}"
+    ARENA_TEAM_APP_MEM_LIMIT="${ARENA_TEAM_APP_MEM_LIMIT:-256m}"
+    ARENA_TEAM_APP_CPU_LIMIT="${ARENA_TEAM_APP_CPU_LIMIT:-0.50}"
+    ARENA_TEAM_APP_PIDS_LIMIT="${ARENA_TEAM_APP_PIDS_LIMIT:-100}"
+    ARENA_TEAM_MAX_RESTARTS="${ARENA_TEAM_MAX_RESTARTS:-5}"
+    ARENA_GAMESERVER_MEM_LIMIT="${ARENA_GAMESERVER_MEM_LIMIT:-512m}"
+    ARENA_GAMESERVER_CPU_LIMIT="${ARENA_GAMESERVER_CPU_LIMIT:-1.00}"
+    ARENA_BOT_MEM_LIMIT="${ARENA_BOT_MEM_LIMIT:-256m}"
+    ARENA_BOT_CPU_LIMIT="${ARENA_BOT_CPU_LIMIT:-0.50}"
+    ARENA_FIREWALL_MEM_LIMIT="${ARENA_FIREWALL_MEM_LIMIT:-128m}"
+    ARENA_FIREWALL_CPU_LIMIT="${ARENA_FIREWALL_CPU_LIMIT:-0.50}"
+    ARENA_LOG_MAX_SIZE="${ARENA_LOG_MAX_SIZE:-50m}"
+    ARENA_LOG_MAX_FILES="${ARENA_LOG_MAX_FILES:-3}"
+
     # Default to 8000 if not specified
     ARENA_GAMESERVER_PORT="${ARENA_GAMESERVER_PORT:-8000}"
     ARENA_OPERATOR_TOKEN="${ARENA_OPERATOR_TOKEN:-sandcastle-local-operator-token-change-me}"
@@ -174,6 +212,25 @@ arena_config_load() {
     arena_config_require_int ARENA_SCORE_ATTACK_POINTS 0 100000 || return 1
     arena_config_require_int ARENA_SCORE_DEFENSE_POINTS 0 100000 || return 1
     arena_config_require_int ARENA_SCORE_SLA_POINTS 0 100000 || return 1
+
+    arena_config_require_mem_limit ARENA_TEAM_VULN_MEM_LIMIT || return 1
+    arena_config_require_cpu_limit ARENA_TEAM_VULN_CPU_LIMIT || return 1
+    arena_config_require_int ARENA_TEAM_VULN_PIDS_LIMIT 1 65535 || return 1
+    arena_config_require_mem_limit ARENA_TEAM_SSH_MEM_LIMIT || return 1
+    arena_config_require_cpu_limit ARENA_TEAM_SSH_CPU_LIMIT || return 1
+    arena_config_require_int ARENA_TEAM_SSH_PIDS_LIMIT 1 65535 || return 1
+    arena_config_require_mem_limit ARENA_TEAM_APP_MEM_LIMIT || return 1
+    arena_config_require_cpu_limit ARENA_TEAM_APP_CPU_LIMIT || return 1
+    arena_config_require_int ARENA_TEAM_APP_PIDS_LIMIT 1 65535 || return 1
+    arena_config_require_int ARENA_TEAM_MAX_RESTARTS 0 100 || return 1
+    arena_config_require_mem_limit ARENA_GAMESERVER_MEM_LIMIT || return 1
+    arena_config_require_cpu_limit ARENA_GAMESERVER_CPU_LIMIT || return 1
+    arena_config_require_mem_limit ARENA_BOT_MEM_LIMIT || return 1
+    arena_config_require_cpu_limit ARENA_BOT_CPU_LIMIT || return 1
+    arena_config_require_mem_limit ARENA_FIREWALL_MEM_LIMIT || return 1
+    arena_config_require_cpu_limit ARENA_FIREWALL_CPU_LIMIT || return 1
+    arena_config_require_mem_limit ARENA_LOG_MAX_SIZE || return 1
+    arena_config_require_int ARENA_LOG_MAX_FILES 1 100 || return 1
 
     if ((${#ARENA_OPERATOR_TOKEN} < 24)); then
         arena_config_error "ARENA_OPERATOR_TOKEN must contain at least 24 characters"
@@ -279,6 +336,24 @@ arena_config_load() {
         ARENA_SCORE_SLA_POINTS \
         ARENA_CHECKER_SECRET \
         ARENA_ISOLATION_MODE \
+        ARENA_TEAM_VULN_MEM_LIMIT \
+        ARENA_TEAM_VULN_CPU_LIMIT \
+        ARENA_TEAM_VULN_PIDS_LIMIT \
+        ARENA_TEAM_SSH_MEM_LIMIT \
+        ARENA_TEAM_SSH_CPU_LIMIT \
+        ARENA_TEAM_SSH_PIDS_LIMIT \
+        ARENA_TEAM_APP_MEM_LIMIT \
+        ARENA_TEAM_APP_CPU_LIMIT \
+        ARENA_TEAM_APP_PIDS_LIMIT \
+        ARENA_TEAM_MAX_RESTARTS \
+        ARENA_GAMESERVER_MEM_LIMIT \
+        ARENA_GAMESERVER_CPU_LIMIT \
+        ARENA_BOT_MEM_LIMIT \
+        ARENA_BOT_CPU_LIMIT \
+        ARENA_FIREWALL_MEM_LIMIT \
+        ARENA_FIREWALL_CPU_LIMIT \
+        ARENA_LOG_MAX_SIZE \
+        ARENA_LOG_MAX_FILES \
         ARENA_CONFIG_FILE
 }
 
