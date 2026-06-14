@@ -128,6 +128,18 @@ step "Agent memory and telemetry tests (AI-007)"
 python3 -B "${ROOT}/tests/agent_memory_test.py"
 
 # ---------------------------------------------------------------------------
+step "Challenge renderer and spec tests (AI-008)"
+python3 -B "${ROOT}/tests/challenge_renderer_test.py"
+
+# ---------------------------------------------------------------------------
+step "Challenge validator and registry tests (AI-009 / AI-010)"
+python3 -B "${ROOT}/tests/challenge_validator_test.py"
+
+# ---------------------------------------------------------------------------
+step "ChallengeGeneratorAgent tests (AI-011)"
+python3 -B "${ROOT}/tests/challenge_generator_agent_test.py"
+
+# ---------------------------------------------------------------------------
 step "Firewall unit tests"
 python3 -B "${ROOT}/tests/firewall_test.py"
 
