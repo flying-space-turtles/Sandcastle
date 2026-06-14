@@ -140,6 +140,14 @@ step "ChallengeGeneratorAgent tests (AI-011)"
 python3 -B "${ROOT}/tests/challenge_generator_agent_test.py"
 
 # ---------------------------------------------------------------------------
+step "Defensive tools and patch workflow tests (AI-012 / AI-013)"
+python3 -B "${ROOT}/tests/defensive_tools_test.py"
+
+# ---------------------------------------------------------------------------
+step "AttackDefenseAgent tests (AI-014)"
+python3 -B "${ROOT}/tests/attack_defense_agent_test.py"
+
+# ---------------------------------------------------------------------------
 step "Firewall unit tests"
 python3 -B "${ROOT}/tests/firewall_test.py"
 
