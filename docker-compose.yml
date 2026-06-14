@@ -59,6 +59,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./teams/generated/team1/example-vuln:/home/team1/example-vuln
+      - ./services/example-vuln:/srv/example-vuln:ro
     cap_add:
       - NET_ADMIN
     labels:
@@ -134,6 +135,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./teams/generated/team2/example-vuln:/home/team2/example-vuln
+      - ./services/example-vuln:/srv/example-vuln:ro
     cap_add:
       - NET_ADMIN
     labels:

@@ -639,6 +639,7 @@ ${vuln_networks}
     volumes:
 ${vuln_docker_mount}
       - ./teams/generated/team${i}/example-vuln:/home/${username}/example-vuln
+      - ./services/example-vuln:/srv/example-vuln:ro
     cap_add:
       - NET_ADMIN
     labels:

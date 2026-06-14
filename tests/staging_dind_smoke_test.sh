@@ -61,9 +61,11 @@ chmod +x \
     "${FIXTURE}/tests/dind_isolation_test.sh" \
     "${FIXTURE}/tests/integration_test.sh"
 
-SANDCASTLE_ROOT="${FIXTURE}" \
-    STAGING_DIND_SMOKE_TEST_LOG="${LOG_FILE}" \
-    "${FIXTURE}/scripts/staging-dind-smoke.sh" --teams 4 --timeout 321
+smoke_output="$(
+    SANDCASTLE_ROOT="${FIXTURE}" \
+        STAGING_DIND_SMOKE_TEST_LOG="${LOG_FILE}" \
+        "${FIXTURE}/scripts/staging-dind-smoke.sh" --teams 4 --timeout 321
+)"
 
 expected="$(
     cat <<'EOF'
@@ -85,3 +87,19 @@ if [[ "${actual}" != "${expected}" ]]; then
     echo "${actual}" >&2
     exit 1
 fi
+
+for marker in \
+    "[*] [staging-smoke] Generating DinD topology..." \
+    "[*] [staging-smoke] Checking firewall preflight..." \
+    "[*] [staging-smoke] Running doctor before startup..." \
+    "[*] [staging-smoke] Starting disposable DinD arena..." \
+    "[*] [staging-smoke] Running DinD isolation test..." \
+    "[*] [staging-smoke] Running full integration test..."
+do
+    if ! grep -Fq "${marker}" <<< "${smoke_output}"; then
+        echo "Missing smoke marker: ${marker}" >&2
+        echo "--- output ---" >&2
+        echo "${smoke_output}" >&2
+        exit 1
+    fi
+done

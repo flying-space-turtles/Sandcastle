@@ -58,9 +58,15 @@ while (($#)); do
     esac
 done
 
+echo "[*] [staging-smoke] Generating DinD topology..."
 "${ROOT}/scripts/setup.sh" --teams "${TEAMS}" --dind --remove-orphan-containers
+echo "[*] [staging-smoke] Checking firewall preflight..."
 "${ROOT}/scripts/firewall-preflight.sh" --check
+echo "[*] [staging-smoke] Running doctor before startup..."
 "${ROOT}/scripts/doctor.sh"
+echo "[*] [staging-smoke] Starting disposable DinD arena..."
 "${ROOT}/scripts/arena.sh" reset --timeout "${TIMEOUT}"
+echo "[*] [staging-smoke] Running DinD isolation test..."
 "${ROOT}/tests/dind_isolation_test.sh"
+echo "[*] [staging-smoke] Running full integration test..."
 "${ROOT}/tests/integration_test.sh"
