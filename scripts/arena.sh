@@ -603,7 +603,7 @@ up_arena() {
     echo
     echo "[+] Complete arena is healthy."
     STATUS_FORMAT="text"
-    print_status
+    print_status || true
 }
 
 main() {

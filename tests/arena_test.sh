@@ -132,6 +132,9 @@ case "${1:-}" in
         if [[ "${scenario}" == "health-fail" && "${machine}" == "team2-vuln" ]]; then
             exit 1
         fi
+        if [[ "${scenario}" == "final-status-fail" && "${machine}" == "sandcastle-bot-controller" ]]; then
+            exit 1
+        fi
         if [[ "${scenario}" == "firewall-runtime-fail" && "${machine}" == "sandcastle-firewall" ]]; then
             exit 1
         fi
@@ -215,6 +218,10 @@ up_line="$(
     echo "App container was not removed before nested Compose recreation" >&2
     exit 1
 }
+
+: > "${LOG_FILE}"
+final_status_output="$(run_arena final-status-fail up --teams 2 --timeout 2)"
+grep -Fq "Complete arena is healthy" <<< "${final_status_output}"
 
 status_output="$(run_arena healthy status --format tsv)"
 grep -Fq $'team1\tgateway\trunning\t-' <<< "${status_output}"
