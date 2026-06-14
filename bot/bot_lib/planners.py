@@ -92,6 +92,15 @@ def planner_catalog() -> list[dict[str, str]]:
         for planner in PLANNER_REGISTRY.values()
     ] + [
         {
+            "id": "model",
+            "label": "Model-backed agent",
+            "description": (
+                "Delegates planning to an LLM via the bot-controller /plan endpoint. "
+                "Requires PLAN_ENDPOINT and PLAN_TOKEN environment variables. "
+                "LLM credentials stay on the host, not in team containers."
+            ),
+        },
+        {
             "id": "module:package.object",
             "label": "External module",
             "description": "Import a custom planner object with plan(ctx, override_target).",
@@ -100,6 +109,10 @@ def planner_catalog() -> list[dict[str, str]]:
 
 
 def load_planner(planner_id: str) -> Planner:
+    if planner_id == "model":
+        from .model_planner import make_model_planner  # lazy: avoids circular import
+        return make_model_planner()
+
     if planner_id in PLANNER_REGISTRY:
         return PLANNER_REGISTRY[planner_id]
 
