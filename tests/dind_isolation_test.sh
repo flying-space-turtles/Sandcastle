@@ -10,6 +10,8 @@ source "${ROOT}/scripts/lib/arena_config.sh"
 
 PASS=0
 FAIL=0
+HEALTH_TIMEOUT="${ARENA_DIND_ISOLATION_HEALTH_TIMEOUT_SECONDS:-30}"
+HEALTH_POLL_SECONDS="${ARENA_DIND_ISOLATION_POLL_SECONDS:-1}"
 
 pass() { printf '[PASS] %s\n' "$1"; ((PASS++)) || true; }
 fail() { printf '[FAIL] %s\n' "$1"; ((FAIL++)) || true; }
@@ -37,6 +39,22 @@ team_service_dir() {
     printf '/home/%s/example-vuln\n' "${username}"
 }
 
+require_positive_int() {
+    local name="$1"
+    local value="${!name}"
+
+    [[ "${value}" =~ ^[0-9]+$ ]] || {
+        echo "ERROR: ${name} must be a positive integer." >&2
+        exit 1
+    }
+    value="$((10#${value}))"
+    ((value > 0)) || {
+        echo "ERROR: ${name} must be a positive integer." >&2
+        exit 1
+    }
+    printf -v "${name}" '%s' "${value}"
+}
+
 expect_running() {
     local name="$1"
     if [[ "$(container_state "${name}")" == "running" ]]; then
@@ -44,6 +62,46 @@ expect_running() {
     else
         fail "${name} is not running"
     fi
+}
+
+service_diagnostics() {
+    local source_container="$1"
+    local target="$2"
+
+    {
+        echo "--- DinD service reachability diagnostics ---"
+        echo "source: ${source_container}"
+        echo "target: ${target}"
+        echo "--- ${source_container}: route to target ---"
+        docker exec "${source_container}" sh -lc \
+            "ip route get $(shell_quote "${target}") || true"
+        echo "--- ${source_container}: curl target ---"
+        docker exec "${source_container}" curl -v --max-time 5 \
+            "http://${target}:${ARENA_SERVICE_PORT}/health" || true
+        echo "--- team2-vuln: listeners ---"
+        docker exec team2-vuln sh -lc \
+            "ss -lntp || true"
+        echo "--- sandcastle-firewall logs ---"
+        docker logs --tail=120 sandcastle-firewall || true
+    } >&2
+}
+
+wait_for_service_health() {
+    local source_container="$1"
+    local target="$2"
+    local attempts=$((HEALTH_TIMEOUT / HEALTH_POLL_SECONDS + 1))
+    local attempt
+
+    for ((attempt = 1; attempt <= attempts; attempt++)); do
+        if docker exec "${source_container}" curl -fsS --max-time 3 \
+            "http://${target}:${ARENA_SERVICE_PORT}/health" >/dev/null; then
+            return 0
+        fi
+        ((attempt < attempts)) && sleep "${HEALTH_POLL_SECONDS}"
+    done
+
+    service_diagnostics "${source_container}" "${target}"
+    return 1
 }
 
 arena_config_load "${ROOT}" || exit 1
@@ -65,6 +123,8 @@ docker info >/dev/null 2>&1 || {
     echo "ERROR: Docker daemon is not reachable." >&2
     exit 1
 }
+require_positive_int HEALTH_TIMEOUT
+require_positive_int HEALTH_POLL_SECONDS
 
 echo ""
 echo "=== Sandcastle DinD isolation tests ==="
@@ -117,12 +177,19 @@ fi
 
 for team in 1 2; do
     target="http://${ARENA_NETWORK_PREFIX}.${team}.3:${ARENA_SERVICE_PORT}/health"
-    if docker exec team1-vuln curl -fsS --max-time 3 "${target}" >/dev/null; then
-        pass "team${team} service is reachable at ${target}"
+    if wait_for_service_health "team${team}-vuln" "${ARENA_NETWORK_PREFIX}.${team}.3"; then
+        pass "team${team} service is reachable from its own vulnerable machine at ${target}"
     else
-        fail "team${team} service is not reachable at ${target}"
+        fail "team${team} service is not reachable from its own vulnerable machine at ${target}"
     fi
 done
+
+target="http://${ARENA_NETWORK_PREFIX}.2.3:${ARENA_SERVICE_PORT}/health"
+if wait_for_service_health team1-vuln "${ARENA_NETWORK_PREFIX}.2.3"; then
+    pass "team1 can reach team2 service through the CTF network at ${target}"
+else
+    fail "team1 cannot reach team2 service through the CTF network at ${target}"
+fi
 
 team1_service_dir="$(team_service_dir 1)"
 if docker exec team1-vuln sh -lc \
