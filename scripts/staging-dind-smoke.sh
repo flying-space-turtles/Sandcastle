@@ -58,9 +58,9 @@ while (($#)); do
     esac
 done
 
+"${ROOT}/scripts/setup.sh" --teams "${TEAMS}" --dind --remove-orphan-containers
 "${ROOT}/scripts/firewall-preflight.sh" --check
 "${ROOT}/scripts/doctor.sh"
-"${ROOT}/scripts/setup.sh" --teams "${TEAMS}" --dind --remove-orphan-containers
 "${ROOT}/scripts/arena.sh" reset --timeout "${TIMEOUT}"
 "${ROOT}/tests/dind_isolation_test.sh"
 "${ROOT}/tests/integration_test.sh"

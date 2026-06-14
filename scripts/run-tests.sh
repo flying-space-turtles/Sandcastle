@@ -150,6 +150,10 @@ step "Arena lifecycle tests"
 "${ROOT}/tests/arena_test.sh"
 
 # ---------------------------------------------------------------------------
+step "Staging DinD smoke orchestration tests"
+"${ROOT}/tests/staging_dind_smoke_test.sh"
+
+# ---------------------------------------------------------------------------
 step "Staging deployment tests"
 "${ROOT}/tests/staging_deploy_test.sh"
 

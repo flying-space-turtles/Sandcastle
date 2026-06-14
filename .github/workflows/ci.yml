@@ -241,6 +241,8 @@ jobs:
             command: ./tests/setup_test.sh
           - layer: lifecycle
             command: ./tests/arena_test.sh
+          - layer: staging-dind-smoke
+            command: ./tests/staging_dind_smoke_test.sh
           - layer: staging-deploy
             command: ./tests/staging_deploy_test.sh
     steps:

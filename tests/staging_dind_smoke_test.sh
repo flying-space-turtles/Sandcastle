@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TMP_ROOT="$(mktemp -d)"
+FIXTURE="${TMP_ROOT}/fixture"
+LOG_FILE="${TMP_ROOT}/staging-dind-smoke.log"
+
+cleanup() {
+    rm -rf "${TMP_ROOT}"
+}
+trap cleanup EXIT
+
+mkdir -p "${FIXTURE}/scripts" "${FIXTURE}/tests"
+
+cp "${ROOT}/scripts/staging-dind-smoke.sh" "${FIXTURE}/scripts/staging-dind-smoke.sh"
+chmod +x "${FIXTURE}/scripts/staging-dind-smoke.sh"
+
+cat > "${FIXTURE}/scripts/setup.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'setup %s\n' "$*" >> "${STAGING_DIND_SMOKE_TEST_LOG:?}"
+EOF
+
+cat > "${FIXTURE}/scripts/firewall-preflight.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'preflight %s\n' "$*" >> "${STAGING_DIND_SMOKE_TEST_LOG:?}"
+EOF
+
+cat > "${FIXTURE}/scripts/doctor.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'doctor\n' >> "${STAGING_DIND_SMOKE_TEST_LOG:?}"
+EOF
+
+cat > "${FIXTURE}/scripts/arena.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'arena %s\n' "$*" >> "${STAGING_DIND_SMOKE_TEST_LOG:?}"
+EOF
+
+cat > "${FIXTURE}/tests/dind_isolation_test.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'dind-isolation\n' >> "${STAGING_DIND_SMOKE_TEST_LOG:?}"
+EOF
+
+cat > "${FIXTURE}/tests/integration_test.sh" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+printf 'integration\n' >> "${STAGING_DIND_SMOKE_TEST_LOG:?}"
+EOF
+
+chmod +x \
+    "${FIXTURE}/scripts/setup.sh" \
+    "${FIXTURE}/scripts/firewall-preflight.sh" \
+    "${FIXTURE}/scripts/doctor.sh" \
+    "${FIXTURE}/scripts/arena.sh" \
+    "${FIXTURE}/tests/dind_isolation_test.sh" \
+    "${FIXTURE}/tests/integration_test.sh"
+
+SANDCASTLE_ROOT="${FIXTURE}" \
+    STAGING_DIND_SMOKE_TEST_LOG="${LOG_FILE}" \
+    "${FIXTURE}/scripts/staging-dind-smoke.sh" --teams 4 --timeout 321
+
+expected="$(
+    cat <<'EOF'
+setup --teams 4 --dind --remove-orphan-containers
+preflight --check
+doctor
+arena reset --timeout 321
+dind-isolation
+integration
+EOF
+)"
+actual="$(cat "${LOG_FILE}")"
+
+if [[ "${actual}" != "${expected}" ]]; then
+    echo "Unexpected staging DinD smoke order" >&2
+    echo "--- expected ---" >&2
+    echo "${expected}" >&2
+    echo "--- actual ---" >&2
+    echo "${actual}" >&2
+    exit 1
+fi
