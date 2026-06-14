@@ -30,7 +30,7 @@ x-sandcastle-arena:
   log_max_size: 50m
   log_max_files: 3
   agent_provider: fake
-  agent_model: disabled
+  agent_model: gpt-5.4-mini
   agent_max_calls_per_round: 2
   agent_max_calls_per_match: 30
   agent_max_cost_usd_per_match: 0.50

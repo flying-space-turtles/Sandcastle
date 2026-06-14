@@ -29,6 +29,8 @@ class ArenaDefaults:
     agent_max_cost_usd_per_day: float
     agent_timeout_seconds: float
     agent_max_retries: int
+    openai_input_cost_per_million: float
+    openai_output_cost_per_million: float
 
 
 def _candidate_paths() -> list[Path]:
@@ -161,6 +163,12 @@ def load_arena_defaults(path: Path | None = None) -> ArenaDefaults:
             values, "ARENA_AGENT_TIMEOUT_SECONDS", 15.0, 0.1, 300.0
         ),
         agent_max_retries=_optional_int(values, "ARENA_AGENT_MAX_RETRIES", 1, 0, 3),
+        openai_input_cost_per_million=_optional_float(
+            values, "ARENA_OPENAI_INPUT_COST_PER_MTOK", 0.75, 0.0, 1000.0
+        ),
+        openai_output_cost_per_million=_optional_float(
+            values, "ARENA_OPENAI_OUTPUT_COST_PER_MTOK", 4.50, 0.0, 1000.0
+        ),
     )
 
 

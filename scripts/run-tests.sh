@@ -112,6 +112,10 @@ step "Persistent model budget tests"
 python3 -B "${ROOT}/tests/model_budget_test.py"
 
 # ---------------------------------------------------------------------------
+step "OpenAI provider contract tests"
+python3 -B "${ROOT}/tests/openai_provider_test.py"
+
+# ---------------------------------------------------------------------------
 step "Firewall unit tests"
 python3 -B "${ROOT}/tests/firewall_test.py"
 
