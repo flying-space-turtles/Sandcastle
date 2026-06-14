@@ -112,7 +112,7 @@ PATH="${MOCK_BIN}:${PATH}" \
 
 assert_file_contains "${LOG_FILE}" "ssh -i"
 assert_file_contains "${LOG_FILE}" "mkdir -p '/srv/sandcastle-staging'"
-assert_file_contains "${LOG_FILE}" "rsync -az --delete"
+assert_file_contains "${LOG_FILE}" "rsync -az --delete --delete-excluded"
 assert_file_contains "${LOG_FILE}" "--exclude teams/generated/"
 assert_file_contains "${LOG_FILE}" "--exclude visualizer/node_modules/"
 assert_file_contains "${LOG_FILE}" "deploy@staging.example.test:/srv/sandcastle-staging/"

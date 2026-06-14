@@ -202,6 +202,25 @@ dind_daemon_ready() {
         >/dev/null 2>&1
 }
 
+dind_app_diagnostics() {
+    local team_id="$1"
+    local machine="team${team_id}-vuln"
+    local username service_dir
+
+    [[ "${ARENA_ISOLATION_MODE}" == "dind" ]] || return 0
+    [[ "$(container_state "${machine}")" == "running" ]] || return 0
+
+    username="$(team_username "${team_id}")"
+    service_dir="/home/${username}/example-vuln"
+    {
+        echo "--- team${team_id} nested DinD compose diagnostics ---"
+        docker exec "${machine}" sh -lc \
+            "cd '${service_dir}' && docker compose ps || true"
+        docker exec "${machine}" sh -lc \
+            "cd '${service_dir}' && docker compose logs --no-color --tail=120 || true"
+    } >&2 || true
+}
+
 app_container_state() {
     local team_id="$1"
     local app="team${team_id}-vuln-app"
@@ -300,8 +319,12 @@ recreate_apps() {
             service_dir="/home/${username}/example-vuln"
             docker exec "team${id}-vuln" sh -lc \
                 "cd '${service_dir}' && docker rm -f '${app}' >/dev/null 2>&1 || true"
-            docker exec "team${id}-vuln" sh -lc \
-                "cd '${service_dir}' && docker compose up -d --build --force-recreate --remove-orphans"
+            if ! docker exec "team${id}-vuln" sh -lc \
+                "cd '${service_dir}' && docker compose up -d --build --force-recreate --remove-orphans"; then
+                echo "arena.sh: nested DinD compose failed for team${id}" >&2
+                dind_app_diagnostics "${id}"
+                return 1
+            fi
         else
             # network_mode: container:<parent> stores the parent container ID.
             # Removing the old app before Compose up prevents stale namespace reuse.
@@ -558,10 +581,17 @@ up_arena() {
         die "infrastructure startup failed; run ./scripts/arena.sh status"
     verify_firewall_runtime
 
-    recreate_apps
+    recreate_apps ||
+        die "vulnerable app recreation failed"
     wait_for_apps "${timeout}" || {
         STATUS_FORMAT="text"
         print_status || true
+        if [[ "${ARENA_ISOLATION_MODE}" == "dind" ]]; then
+            local id
+            for ((id = 1; id <= ARENA_TEAM_COUNT; id++)); do
+                dind_app_diagnostics "${id}"
+            done
+        fi
         die "one or more vulnerable apps failed health checks"
     }
     verify_network_path

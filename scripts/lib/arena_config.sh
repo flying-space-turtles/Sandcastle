@@ -183,6 +183,8 @@ arena_config_load() {
     ARENA_SCORE_SLA_POINTS="${ARENA_SCORE_SLA_POINTS:-1}"
     ARENA_CHECKER_SECRET="${ARENA_CHECKER_SECRET:-sandcastle-local-checker-secret-change-me}"
     ARENA_ISOLATION_MODE="${ARENA_ISOLATION_MODE:-trusted}"
+    ARENA_SSH_BIND_HOST="${ARENA_SSH_BIND_HOST:-127.0.0.1}"
+    ARENA_DIND_DNS_SERVERS="${ARENA_DIND_DNS_SERVERS:-1.1.1.1,8.8.8.8}"
 
     for name in "${required[@]}"; do
         if [[ -z "${!name:-}" ]]; then
@@ -285,6 +287,15 @@ arena_config_load() {
         arena_config_error "ARENA_BOT_API_HOST contains unsupported characters"
         return 1
     fi
+    if [[ ! "${ARENA_SSH_BIND_HOST}" =~ ^[a-zA-Z0-9_.:-]+$ ]]; then
+        arena_config_error "ARENA_SSH_BIND_HOST contains unsupported characters"
+        return 1
+    fi
+    if [[ -n "${ARENA_DIND_DNS_SERVERS}" &&
+          ! "${ARENA_DIND_DNS_SERVERS}" =~ ^[a-zA-Z0-9_.:-]+(,[a-zA-Z0-9_.:-]+)*$ ]]; then
+        arena_config_error "ARENA_DIND_DNS_SERVERS must be a comma-separated list of DNS server addresses"
+        return 1
+    fi
 
     arena_config_validate_port_layout || return 1
 
@@ -307,6 +318,7 @@ arena_config_load() {
         ARENA_CTF_GATEWAY \
         ARENA_NETWORK_PREFIX \
         ARENA_SSH_BASE_PORT \
+        ARENA_SSH_BIND_HOST \
         ARENA_SERVICE_PORT \
         ARENA_SERVICE_IP_PATTERN \
         ARENA_TEAM_USERNAME_PATTERN \
@@ -337,6 +349,7 @@ arena_config_load() {
         ARENA_SCORE_SLA_POINTS \
         ARENA_CHECKER_SECRET \
         ARENA_ISOLATION_MODE \
+        ARENA_DIND_DNS_SERVERS \
         ARENA_TEAM_VULN_MEM_LIMIT \
         ARENA_TEAM_VULN_CPU_LIMIT \
         ARENA_TEAM_VULN_PIDS_LIMIT \

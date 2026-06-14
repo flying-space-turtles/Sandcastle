@@ -7,6 +7,7 @@ x-sandcastle-arena:
   team_count: 2
   service_port: 8080
   ssh_base_port: 2200
+  ssh_bind_host: 127.0.0.1
   startup_timeout_seconds: 120
   round_duration_seconds: 120
   flag_expiry_rounds: 5
@@ -95,7 +96,7 @@ services:
       ctf-network:
         ipv4_address: 10.10.1.2
     ports:
-      - "2201:22"
+      - "127.0.0.1:2201:22"
     cap_add:
       - NET_ADMIN
     labels:
@@ -170,7 +171,7 @@ services:
       ctf-network:
         ipv4_address: 10.10.2.2
     ports:
-      - "2202:22"
+      - "127.0.0.1:2202:22"
     cap_add:
       - NET_ADMIN
     labels:

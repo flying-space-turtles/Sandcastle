@@ -273,7 +273,7 @@ check_arena_configuration() {
 }
 
 load_compose_metadata() {
-    local line current_service=""
+    local line current_service="" port_spec host_port container_port
     local -a ssh_raw=()
     local -a vuln_raw=()
     local -a configured_raw=()
@@ -299,8 +299,14 @@ load_compose_metadata() {
             current_service=""
         fi
 
-        if [[ -n "${current_service}" && "${line}" =~ ^[[:space:]]+-[[:space:]]*\"?([0-9]+):([0-9]+) ]]; then
-            required_port_owner_set "${BASH_REMATCH[1]}" "${current_service}"
+        if [[ -n "${current_service}" && "${line}" =~ ^[[:space:]]+-[[:space:]]*\"?([^[:space:]\"#]+) ]]; then
+            port_spec="${BASH_REMATCH[1]}"
+            container_port="${port_spec##*:}"
+            host_port="${port_spec%:*}"
+            host_port="${host_port##*:}"
+            if [[ "${host_port}" =~ ^[0-9]+$ && "${container_port}" =~ ^[0-9]+$ ]]; then
+                required_port_owner_set "${host_port}" "${current_service}"
+            fi
         fi
 
         if [[ -z "${COMPOSE_SUBNET}" && "${line}" =~ subnet:[[:space:]]*([^[:space:]#]+) ]]; then

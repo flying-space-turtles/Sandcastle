@@ -187,7 +187,7 @@ services:
   team1-ssh:
     image: test
     ports:
-      - "2201:22"
+      - "127.0.0.1:2201:22"
   firewall:
     image: test
 EOF

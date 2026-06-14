@@ -111,6 +111,20 @@ case "${1:-}" in
         ;;
     exec)
         machine="${2:-}"
+        if [[ "$*" == *"docker compose up"* ]]; then
+            if [[ "${scenario}" == "dind-compose-fail" ]]; then
+                exit 1
+            fi
+            exit 0
+        fi
+        if [[ "$*" == *"docker compose ps"* ]]; then
+            echo "nested compose ps"
+            exit 0
+        fi
+        if [[ "$*" == *"docker compose logs"* ]]; then
+            echo "nested compose logs"
+            exit 0
+        fi
         if [[ "${scenario}" == "health-fail" && "${machine}" == "team2-vuln" ]]; then
             exit 1
         fi
@@ -292,5 +306,21 @@ set -e
     exit 1
 }
 grep -Fq "firewall network smoke test failed" <<< "${smoke_failure}"
+
+printf '\nARENA_ISOLATION_MODE=dind\n' >> "${FIXTURE}/config/arena.env"
+: > "${LOG_FILE}"
+set +e
+dind_failure="$(
+    run_arena dind-compose-fail up --timeout 1 2>&1
+)"
+dind_rc=$?
+set -e
+((dind_rc != 0)) || {
+    echo "Startup should fail when nested DinD compose fails" >&2
+    exit 1
+}
+grep -Fq "nested DinD compose failed for team1" <<< "${dind_failure}"
+grep -Fq "nested compose ps" <<< "${dind_failure}"
+grep -Fq "nested compose logs" <<< "${dind_failure}"
 
 echo "arena lifecycle tests: ok"

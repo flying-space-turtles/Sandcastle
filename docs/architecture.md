@@ -16,19 +16,19 @@ root and per-team Compose files.
 ```text
 ctf-network (bridge, 10.10.0.0/16)
 
-  team1-ssh   10.10.1.2   host port 2201 -> 22
+  team1-ssh   10.10.1.2   127.0.0.1:2201 -> 22
   team1-vuln  10.10.1.3   vulnerable Linux machine
   team1-vuln-app
                10.10.1.3   shares team1-vuln networking
 
-  team2-ssh   10.10.2.2   host port 2202 -> 22
+  team2-ssh   10.10.2.2   127.0.0.1:2202 -> 22
   team2-vuln  10.10.2.3   vulnerable Linux machine
   team2-vuln-app
                10.10.2.3   shares team2-vuln networking
 
   ...
 
-  teamN-ssh   10.10.N.2   host port 2200+N -> 22
+  teamN-ssh   10.10.N.2   127.0.0.1:(2200+N) -> 22
   teamN-vuln  10.10.N.3   vulnerable Linux machine
   teamN-vuln-app
                10.10.N.3   shares teamN-vuln networking
