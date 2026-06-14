@@ -386,13 +386,15 @@ collect_app_containers() {
     local -a containers=()
     local -a matches=()
 
-    mapfile -t matches < <(
-        docker ps -aq --filter "label=sandcastle.role=vuln-app" 2>/dev/null
-    )
+    matches=()
+    while IFS= read -r match; do
+        matches+=("${match}")
+    done < <(docker ps -aq --filter "label=sandcastle.role=vuln-app" 2>/dev/null)
     containers+=("${matches[@]}")
-    mapfile -t matches < <(
-        docker ps -aq --filter "name=^/team[0-9]+-vuln-app$" 2>/dev/null
-    )
+    matches=()
+    while IFS= read -r match; do
+        matches+=("${match}")
+    done < <(docker ps -aq --filter "name=^/team[0-9]+-vuln-app$" 2>/dev/null)
     containers+=("${matches[@]}")
 
     ((${#containers[@]} > 0)) || return 0
@@ -403,7 +405,9 @@ down_arena() {
     local -a app_containers=()
 
     echo "[*] Stopping vulnerable apps while preserving data volumes..."
-    mapfile -t app_containers < <(collect_app_containers)
+    while IFS= read -r app_container; do
+        app_containers+=("${app_container}")
+    done < <(collect_app_containers)
     if ((${#app_containers[@]} > 0)); then
         docker rm -f "${app_containers[@]}" >/dev/null
     fi
@@ -419,13 +423,15 @@ remove_app_data() {
     local -a volumes=()
     local -a matches=()
 
-    mapfile -t matches < <(
-        docker volume ls -q --filter "label=sandcastle.role=vuln-data" 2>/dev/null
-    )
+    matches=()
+    while IFS= read -r match; do
+        matches+=("${match}")
+    done < <(docker volume ls -q --filter "label=sandcastle.role=vuln-data" 2>/dev/null)
     volumes+=("${matches[@]}")
-    mapfile -t matches < <(
-        docker volume ls -q --filter "name=^sandcastle_team[0-9]+-data$" 2>/dev/null
-    )
+    matches=()
+    while IFS= read -r match; do
+        matches+=("${match}")
+    done < <(docker volume ls -q --filter "name=^sandcastle_team[0-9]+-data$" 2>/dev/null)
     volumes+=("${matches[@]}")
 
     ((${#volumes[@]} > 0)) || {
@@ -433,7 +439,11 @@ remove_app_data() {
         return 0
     }
 
-    mapfile -t volumes < <(printf '%s\n' "${volumes[@]}" | awk 'NF' | sort -u)
+    matches=()
+    while IFS= read -r match; do
+        matches+=("${match}")
+    done < <(printf '%s\n' "${volumes[@]}" | awk 'NF' | sort -u)
+    volumes=("${matches[@]}")
     echo "[!] RESET: deleting vulnerable-app data volumes: ${volumes[*]}"
     docker volume rm -f "${volumes[@]}" >/dev/null
 }

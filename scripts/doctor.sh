@@ -231,9 +231,18 @@ load_compose_metadata() {
         fi
     done < "${COMPOSE_FILE}"
 
-    mapfile -t SSH_IDS < <(printf '%s\n' "${ssh_raw[@]}" | awk 'NF' | sort -nu)
-    mapfile -t VULN_IDS < <(printf '%s\n' "${vuln_raw[@]}" | awk 'NF' | sort -nu)
-    mapfile -t CONFIGURED_IDS < <(printf '%s\n' "${configured_raw[@]}" | awk 'NF' | sort -nu)
+    SSH_IDS=()
+    while IFS= read -r id; do
+        SSH_IDS+=("${id}")
+    done < <(printf '%s\n' "${ssh_raw[@]}" | awk 'NF' | sort -nu)
+    VULN_IDS=()
+    while IFS= read -r id; do
+        VULN_IDS+=("${id}")
+    done < <(printf '%s\n' "${vuln_raw[@]}" | awk 'NF' | sort -nu)
+    CONFIGURED_IDS=()
+    while IFS= read -r id; do
+        CONFIGURED_IDS+=("${id}")
+    done < <(printf '%s\n' "${configured_raw[@]}" | awk 'NF' | sort -nu)
 
     if ((${#CONFIGURED_IDS[@]} == 0)); then
         report FAIL compose.teams \
@@ -388,7 +397,10 @@ check_required_ports() {
         REQUIRED_PORT_OWNER["${ARENA_FIREWALL_WS_PORT}"]="sandcastle-firewall"
         REQUIRED_PORT_OWNER["${ARENA_FIREWALL_PROXY_PORT}"]="sandcastle-firewall"
     fi
-    mapfile -t ports < <(printf '%s\n' "${!REQUIRED_PORT_OWNER[@]}" | sort -n)
+    ports=()
+    while IFS= read -r port; do
+        ports+=("${port}")
+    done < <(printf '%s\n' "${!REQUIRED_PORT_OWNER[@]}" | sort -n)
 
     if ((${#missing_config[@]} > 0)); then
         report FAIL host.ports \

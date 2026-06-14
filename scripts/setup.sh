@@ -222,7 +222,9 @@ handle_orphan_containers() {
     local teams="$1"
     local -a orphans=()
 
-    mapfile -t orphans < <(find_orphan_containers "${teams}" | sort -V)
+    while IFS= read -r orphan; do
+        orphans+=("${orphan}")
+    done < <(find_orphan_containers "${teams}" | sort -V)
     ((${#orphans[@]} > 0)) || return 0
 
     if ((REMOVE_ORPHAN_CONTAINERS)); then
