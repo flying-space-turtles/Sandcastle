@@ -68,7 +68,7 @@ services:
         limits:
           memory: 512m
           cpus: '0.50'
-    pids_limit: 200
+          pids: 200
     logging:
       driver: json-file
       options:
@@ -106,7 +106,7 @@ services:
         limits:
           memory: 128m
           cpus: '0.25'
-    pids_limit: 100
+          pids: 100
     logging:
       driver: json-file
       options:
@@ -143,7 +143,7 @@ services:
         limits:
           memory: 512m
           cpus: '0.50'
-    pids_limit: 200
+          pids: 200
     logging:
       driver: json-file
       options:
@@ -181,7 +181,7 @@ services:
         limits:
           memory: 128m
           cpus: '0.25'
-    pids_limit: 100
+          pids: 100
     logging:
       driver: json-file
       options:

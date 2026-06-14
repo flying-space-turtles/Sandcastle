@@ -350,7 +350,7 @@ services:
         limits:
           memory: ${ARENA_TEAM_APP_MEM_LIMIT}
           cpus: '${ARENA_TEAM_APP_CPU_LIMIT}'
-    pids_limit: ${ARENA_TEAM_APP_PIDS_LIMIT}
+          pids: ${ARENA_TEAM_APP_PIDS_LIMIT}
     logging:
       driver: json-file
       options:
@@ -499,7 +499,7 @@ ${vuln_docker_mount}
         limits:
           memory: ${ARENA_TEAM_VULN_MEM_LIMIT}
           cpus: '${ARENA_TEAM_VULN_CPU_LIMIT}'
-    pids_limit: ${ARENA_TEAM_VULN_PIDS_LIMIT}
+          pids: ${ARENA_TEAM_VULN_PIDS_LIMIT}
     logging:
       driver: json-file
       options:
@@ -537,7 +537,7 @@ ${vuln_docker_mount}
         limits:
           memory: ${ARENA_TEAM_SSH_MEM_LIMIT}
           cpus: '${ARENA_TEAM_SSH_CPU_LIMIT}'
-    pids_limit: ${ARENA_TEAM_SSH_PIDS_LIMIT}
+          pids: ${ARENA_TEAM_SSH_PIDS_LIMIT}
     logging:
       driver: json-file
       options:
