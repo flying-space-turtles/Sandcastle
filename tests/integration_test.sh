@@ -491,9 +491,14 @@ run_docker_tests() {
     log_info "[docker] 3/7  SSH gateway reachability"
     for team in 1 2; do
         ssh_port="$((ARENA_SSH_BASE_PORT + team))"
-        timeout 10 bash -c "
-            until nc -z -w2 127.0.0.1 ${ssh_port}; do sleep 1; done
-        " || die "team${team} SSH gateway port ${ssh_port} not reachable"
+        timeout 10 bash -c '
+            host="$1"
+            port="$2"
+            until (: >"/dev/tcp/${host}/${port}") >/dev/null 2>&1; do
+                sleep 1
+            done
+        ' _ 127.0.0.1 "${ssh_port}" ||
+            die "team${team} SSH gateway port ${ssh_port} not reachable"
     done
     log_ok "[docker] 3/7  SSH reachability: ok"
 
