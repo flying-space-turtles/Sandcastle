@@ -173,40 +173,47 @@ class ModelBudgetLedgerTest(unittest.TestCase):
 
 
 class BudgetedGatewayTest(unittest.TestCase):
-    def test_reconciles_success_and_charges_failure(self) -> None:
+    def test_reserves_each_provider_attempt_and_charges_paid_failure(self) -> None:
+        class FailingOpenAI:
+            provider = ModelProvider.OPENAI
+            model_id = "paid-test"
+
+            def complete(self, request, timeout):
+                del request, timeout
+                raise ModelGatewayError("failed")
+
         with tempfile.TemporaryDirectory() as tmp:
             ledger = ModelBudgetLedger(Path(tmp) / "controller.db")
-            provider = FakeModelProvider(
-                script=[
-                    {
-                        "model_id": "fake-v1",
-                        "tool_calls": [],
-                        "usage": {
-                            "input_tokens": 5,
-                            "output_tokens": 2,
-                            "cost_usd": 0,
-                        },
-                    },
-                    ModelGatewayError("failed"),
-                ]
-            )
             gateway = ModelGateway(
-                {ModelProvider.FAKE: provider},
-                primary_provider=ModelProvider.FAKE,
+                {ModelProvider.OPENAI: FailingOpenAI()},
+                primary_provider=ModelProvider.OPENAI,
                 max_retries=0,
             )
             budgeted = BudgetedModelGateway(gateway, ledger)
-            budgeted.call(_request(), model_id="fake-v1", estimated_cost_usd=0)
             with self.assertRaises(ModelGatewayError):
                 budgeted.call(
-                    _request(round_number=2),
-                    model_id="fake-v1",
-                    estimated_cost_usd=0.01,
+                    _request(),
+                    model_id="paid-test",
                 )
             summary = ledger.summary(run_id="run-1")
-            self.assertEqual(summary["statuses"]["COMPLETED"]["calls"], 1)
             self.assertEqual(summary["statuses"]["FAILED"]["calls"], 1)
-            self.assertAlmostEqual(summary["total_cost_usd"], 0.01)
+            self.assertAlmostEqual(summary["total_cost_usd"], 0.05)
+
+    def test_fake_provider_attempt_is_counted_without_cost(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = ModelBudgetLedger(Path(tmp) / "controller.db")
+            gateway = ModelGateway(
+                {ModelProvider.FAKE: FakeModelProvider()},
+                primary_provider=ModelProvider.FAKE,
+                max_retries=0,
+            )
+            BudgetedModelGateway(gateway, ledger).call(
+                _request(),
+                model_id="fake-v1",
+            )
+            summary = ledger.summary(run_id="run-1")
+            self.assertEqual(summary["statuses"]["COMPLETED"]["calls"], 1)
+            self.assertEqual(summary["total_cost_usd"], 0)
 
 
 if __name__ == "__main__":

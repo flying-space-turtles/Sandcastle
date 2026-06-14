@@ -43,6 +43,8 @@ SERVICE_PORT="${ARENA_SERVICE_PORT}"
 IP_PATTERN="${ARENA_SERVICE_IP_PATTERN}"
 LOOP_INTERVAL=${LOOP_INTERVAL:-${ARENA_BOT_LOOP_SECONDS}}
 WATCHDOG=${WATCHDOG:-false}          # also monitor own service (true/false)
+PLAN_ENDPOINT=${PLAN_ENDPOINT:-}
+PLAN_TOKEN=${PLAN_TOKEN:-}
 
 # Extra bot.py CLI args assembled from --service-port / --flag-re / etc.
 EXTRA_BOT_ARGS=""
@@ -94,9 +96,23 @@ start_bot() {
     local remote_dir; remote_dir="$(deployment_dir)"
 
     local bot_args="--teams ${NUM_TEAMS} --loop ${LOOP_INTERVAL} --service-port ${SERVICE_PORT} --ip-pattern ${IP_PATTERN}"
+    local -a docker_env_args=()
     [[ "$WATCHDOG" == "true" ]] && bot_args="${bot_args} --watchdog"
     # Append any extra args built from --service-port / --flag-re / etc.
     [[ -n "$EXTRA_BOT_ARGS" ]] && bot_args="${bot_args} ${EXTRA_BOT_ARGS}"
+    if [[ -n "${PLAN_ENDPOINT}" || -n "${PLAN_TOKEN}" ]]; then
+        [[ -n "${PLAN_ENDPOINT}" && -n "${PLAN_TOKEN}" ]] || {
+            log_err "PLAN_ENDPOINT and PLAN_TOKEN must be provided together"
+            return 1
+        }
+        docker_env_args+=(
+            --env "PLAN_ENDPOINT=${PLAN_ENDPOINT}"
+            --env "PLAN_TOKEN=${PLAN_TOKEN}"
+            --env "PLAN_MAX_ACTIONS=${ARENA_AGENT_MAX_CALLS_PER_ROUND}"
+            --env "PLAN_TIMEOUT_SECONDS=${ARENA_AGENT_TIMEOUT_SECONDS}"
+            --env "PLAN_MAX_COST_USD=${ARENA_AGENT_MAX_COST_USD_PER_CALL}"
+        )
+    fi
 
     log_info "Starting bot in ${cname} (interval=${LOOP_INTERVAL}s, watchdog=${WATCHDOG}) …"
     # Kill any existing bot first (ignore errors — nothing running is fine)
@@ -106,13 +122,15 @@ start_bot() {
     # Start bot in background; setsid detaches it from the exec session so it
     # keeps running after `docker exec` returns
     # shellcheck disable=SC2086
-    docker exec "$cname" bash -c \
+    docker exec "${docker_env_args[@]}" "$cname" bash -c \
         "cd '${remote_dir}'; ARENA_CONFIG_FILE='${remote_dir}/arena.env' BOT_CONFIG_FILE='${remote_dir}/bot_config.json' BOT_EVENT_FILE='${remote_dir}/events.jsonl' setsid python3 -u '${remote_dir}/bot.py' ${bot_args} </dev/null > '${remote_dir}/bot.log' 2>&1 & pid=\$!; echo \${pid} > '${remote_dir}/bot.pid'; disown" || true
     # Poll up to 3 s for the process to appear
     local pid=""
     for _ in 1 2 3; do
-        pid=$(docker exec "$cname" pgrep -a -f "${remote_dir}/bot.py" 2>/dev/null |
-            awk '$0 ~ /python3/ {print $1; exit}') && break || true
+        if pid=$(docker exec "$cname" pgrep -a -f "${remote_dir}/bot.py" 2>/dev/null |
+            awk '$0 ~ /python3/ {print $1; exit}'); then
+            break
+        fi
         docker exec "$cname" bash -c 'sleep 1' || true
     done
     if [[ -n "$pid" ]]; then

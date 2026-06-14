@@ -749,6 +749,9 @@ EOF
     image: sandcastle/bot-controller:latest
     container_name: sandcastle-bot-controller
     hostname: sandcastle-bot-controller
+    networks:
+      ctf-network:
+        ipv4_address: ${ARENA_NETWORK_PREFIX}.0.4
     ports:
       - "127.0.0.1:${ARENA_BOT_API_PORT}:${ARENA_BOT_API_PORT}"
     volumes:

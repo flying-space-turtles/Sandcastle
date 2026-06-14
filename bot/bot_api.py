@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hmac
 import json
 import os
 import re
@@ -19,7 +20,17 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from bot_lib import ARENA_DEFAULTS, action_catalog, planner_catalog
-from bot_lib.model_budget import ModelBudgetLedger
+from bot_lib.agent_contracts import BudgetPolicy, ModelProvider
+from bot_lib.agent_planning import (
+    AgentPlanningService,
+    DeterministicPlanningFakeProvider,
+    PlanningCredentialStore,
+    PlanningIdentity,
+    PlanningRequestError,
+)
+from bot_lib.model_budget import BudgetedModelGateway, ModelBudgetExceeded, ModelBudgetLedger
+from bot_lib.model_gateway import ModelGateway, ModelGatewayError, ModelProviderAdapter
+from bot_lib.openai_provider import OpenAIProvider
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEPLOY_SH = REPO_ROOT / "bot" / "deploy.sh"
@@ -29,6 +40,7 @@ DATABASE = Path(
 )
 ALLOWED_ORIGINS = re.compile(r"^https?://(?:localhost|127\.0\.0\.1)(?::\d+)?$")
 ACTIVE_STATUSES = ("DEPLOYING", "RUNNING")
+MAX_PLAN_REQUEST_BYTES = 256_000
 
 
 def _now() -> str:
@@ -70,6 +82,10 @@ def _team_token(team_id: int) -> str:
 
 def _gameserver_url() -> str:
     return f"http://{ARENA_DEFAULTS.network_prefix}.0.2:8000"
+
+
+def _planning_url() -> str:
+    return f"http://{ARENA_DEFAULTS.network_prefix}.0.4:{ARENA_DEFAULTS.bot_api_port}"
 
 
 def _container_name(team_id: int) -> str:
@@ -317,6 +333,73 @@ class DeploymentStore:
 
 STORE = DeploymentStore(DATABASE)
 BUDGET_LEDGER = ModelBudgetLedger(DATABASE)
+PLAN_CREDENTIALS = PlanningCredentialStore(DATABASE)
+
+
+class _UnavailableProvider:
+    charges_budget = False
+
+    def __init__(self, provider: ModelProvider, message: str) -> None:
+        self.provider = provider
+        self.message = message
+
+    def complete(self, request, timeout):
+        del request, timeout
+        raise ModelGatewayError(self.message)
+
+
+def _build_planning_service() -> AgentPlanningService:
+    primary = ModelProvider(ARENA_DEFAULTS.agent_provider)
+    fallback = ModelProvider(ARENA_DEFAULTS.agent_fallback_provider)
+    adapters: dict[ModelProvider, ModelProviderAdapter] = {
+        ModelProvider.FAKE: DeterministicPlanningFakeProvider()
+    }
+    openai_key = os.environ.get("OPENAI_API_KEY", "")
+    if openai_key:
+        adapters[ModelProvider.OPENAI] = OpenAIProvider(
+            api_key=openai_key,
+            model_id=ARENA_DEFAULTS.agent_model or "gpt-5.4-mini",
+            input_cost_per_million=ARENA_DEFAULTS.openai_input_cost_per_million,
+            output_cost_per_million=ARENA_DEFAULTS.openai_output_cost_per_million,
+        )
+    else:
+        adapters[ModelProvider.OPENAI] = _UnavailableProvider(
+            ModelProvider.OPENAI,
+            "OpenAI provider is selected but OPENAI_API_KEY is not configured",
+        )
+    for provider in (ModelProvider.OLLAMA, ModelProvider.GEMINI):
+        adapters[provider] = _UnavailableProvider(
+            provider,
+            f"{provider.value} provider is not implemented",
+        )
+
+    policy = BudgetPolicy(
+        max_actions_per_round=ARENA_DEFAULTS.agent_max_calls_per_round,
+        max_calls_per_round=ARENA_DEFAULTS.agent_max_calls_per_round,
+        max_calls_per_match=ARENA_DEFAULTS.agent_max_calls_per_match,
+        max_input_chars=ARENA_DEFAULTS.agent_max_input_chars,
+        max_output_tokens=ARENA_DEFAULTS.agent_max_output_tokens,
+        max_cost_usd_per_call=ARENA_DEFAULTS.agent_max_cost_usd_per_call,
+        max_cost_usd_per_match=ARENA_DEFAULTS.agent_max_cost_usd_per_match,
+        max_cost_usd_per_day=ARENA_DEFAULTS.agent_max_cost_usd_per_day,
+        timeout_seconds=ARENA_DEFAULTS.agent_timeout_seconds,
+        max_retries=ARENA_DEFAULTS.agent_max_retries,
+    )
+    gateway = ModelGateway(
+        adapters,
+        primary_provider=primary,
+        fallback_provider=fallback,
+        max_retries=policy.max_retries,
+    )
+    return AgentPlanningService(
+        BudgetedModelGateway(gateway, BUDGET_LEDGER),
+        num_teams=ARENA_DEFAULTS.team_count,
+        model_id=(ARENA_DEFAULTS.agent_model if primary is not ModelProvider.FAKE else "fake-v1"),
+        budget=policy,
+    )
+
+
+PLANNING_SERVICE = _build_planning_service()
 
 
 def _deployment_events(row: sqlite3.Row) -> list[dict[str, Any]]:
@@ -337,6 +420,30 @@ def _deployment_logs(row: sqlite3.Row, lines: int = 300) -> list[str]:
             or raw
         )
     return raw.splitlines()[-lines:]
+
+
+def _planning_identity(token: str) -> PlanningIdentity | None:
+    credential = PLAN_CREDENTIALS.validate(token)
+    if credential is None:
+        return None
+    row = STORE.get(credential.deployment_id)
+    if row is None or row["status"] not in ACTIVE_STATUSES:
+        return None
+    config = json.loads(row["config_json"])
+    configured_actions = frozenset(str(item) for item in config.get("actions", []))
+    known_actions = frozenset(str(item["id"]) for item in action_catalog())
+    allowed_actions = configured_actions & known_actions
+    if config.get("target_policy") == "selected":
+        candidates = {int(team) for team in config.get("target_teams", [])}
+    else:
+        candidates = set(range(1, ARENA_DEFAULTS.team_count + 1))
+    candidates.discard(credential.team_id)
+    return PlanningIdentity(
+        deployment_id=credential.deployment_id,
+        team_id=credential.team_id,
+        allowed_targets=frozenset(candidates),
+        allowed_actions=allowed_actions,
+    )
 
 
 def _archive(row: sqlite3.Row) -> None:
@@ -456,6 +563,7 @@ def _stop_deployment(row: sqlite3.Row, final_status: str = "STOPPED") -> tuple[b
         pid=None,
         error=None if rc == 0 else output,
     )
+    PLAN_CREDENTIALS.deactivate(str(row["id"]))
     return rc == 0, output
 
 
@@ -473,6 +581,9 @@ def _deploy_one(team_id: int, public_config: dict[str, Any]) -> tuple[dict[str, 
     }
     runtime_config.pop("loop_interval", None)
     runtime_config.pop("watchdog", None)
+    plan_token = ""
+    if public_config["planner"] == "model":
+        plan_token = PLAN_CREDENTIALS.issue(deployment_id, team_id)
 
     temp_path = ""
     try:
@@ -484,6 +595,9 @@ def _deploy_one(team_id: int, public_config: dict[str, Any]) -> tuple[dict[str, 
         env = os.environ.copy()
         env["LOOP_INTERVAL"] = str(public_config["loop_interval"])
         env["WATCHDOG"] = "true" if public_config["watchdog"] else "false"
+        if plan_token:
+            env["PLAN_ENDPOINT"] = _planning_url()
+            env["PLAN_TOKEN"] = plan_token
         rc, output = _run(
             [
                 "bash",
@@ -505,6 +619,8 @@ def _deploy_one(team_id: int, public_config: dict[str, Any]) -> tuple[dict[str, 
             pid=pid,
             error=None if status == "RUNNING" else output,
         )
+        if status != "RUNNING":
+            PLAN_CREDENTIALS.deactivate(deployment_id)
     finally:
         if temp_path:
             Path(temp_path).unlink(missing_ok=True)
@@ -527,7 +643,7 @@ class BotAPIHandler(BaseHTTPRequestHandler):
             origin if ALLOWED_ORIGINS.match(origin) else "http://localhost:5173",
         )
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.send_header("Vary", "Origin")
 
     def _json(self, code: int, body: Any) -> None:
@@ -546,6 +662,46 @@ class BotAPIHandler(BaseHTTPRequestHandler):
         except (ValueError, json.JSONDecodeError):
             return {}
         return body if isinstance(body, dict) else {}
+
+    def _plan(self) -> None:
+        authorization = self.headers.get("Authorization", "")
+        scheme, separator, token = authorization.partition(" ")
+        if not separator or not hmac.compare_digest(scheme.lower(), "bearer"):
+            self._json(401, {"error": "missing planning bearer token"})
+            return
+        identity = _planning_identity(token)
+        if identity is None:
+            self._json(401, {"error": "invalid or expired planning token"})
+            return
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self._json(400, {"error": "invalid content length"})
+            return
+        if length <= 0 or length > MAX_PLAN_REQUEST_BYTES:
+            self._json(413, {"error": "planning request size is invalid"})
+            return
+        try:
+            payload = json.loads(self.rfile.read(length))
+            if not isinstance(payload, dict):
+                raise PlanningRequestError("planning request must be an object")
+            response = PLANNING_SERVICE.plan(identity, payload)
+        except (json.JSONDecodeError, PlanningRequestError, TypeError, ValueError) as exc:
+            self._json(400, {"error": str(exc)})
+            return
+        except ModelBudgetExceeded as exc:
+            self._json(
+                429,
+                {
+                    "error": "agent budget exhausted",
+                    "budget": exc.rejection.as_dict(),
+                },
+            )
+            return
+        except ModelGatewayError as exc:
+            self._json(503, {"error": str(exc)})
+            return
+        self._json(200, response)
 
     def do_OPTIONS(self) -> None:
         self.send_response(204)
@@ -643,6 +799,9 @@ class BotAPIHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path.rstrip("/")
+        if path == "/plan":
+            self._plan()
+            return
         body = self._body()
         if path in {"/deployments", "/deploy"}:
             try:

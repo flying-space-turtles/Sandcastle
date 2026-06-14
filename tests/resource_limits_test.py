@@ -60,8 +60,11 @@ class ContainerStatusHealthLabelTests(unittest.TestCase):
 
     def test_oom_killed_takes_priority_over_restart_loop(self) -> None:
         # A container that OOMed AND has many restarts is labelled oom_killed, not restart_loop.
-        s = _status(running=False, oom_killed=True,
-                    restart_count=resource_monitor.RESTART_LOOP_THRESHOLD + 5)
+        s = _status(
+            running=False,
+            oom_killed=True,
+            restart_count=resource_monitor.RESTART_LOOP_THRESHOLD + 5,
+        )
         self.assertEqual(s.health_label, "oom_killed")
 
     def test_restart_loop_at_exact_threshold(self) -> None:
@@ -92,11 +95,13 @@ class ParseInspectTests(unittest.TestCase):
         self.assertEqual(s.name, "team2-ssh")
 
     def test_parses_oom_killed_container(self) -> None:
-        data = _inspect_data(**{
-            "State.Running": False,
-            "State.OOMKilled": True,
-            "State.ExitCode": 137,
-        })
+        data = _inspect_data(
+            **{
+                "State.Running": False,
+                "State.OOMKilled": True,
+                "State.ExitCode": 137,
+            }
+        )
         s = resource_monitor.parse_inspect(data)
         self.assertTrue(s.oom_killed)
         self.assertFalse(s.running)
@@ -170,8 +175,14 @@ class TeamContainerNamesTests(unittest.TestCase):
     def test_two_teams_yields_six_names(self) -> None:
         names = resource_monitor.team_container_names(2)
         self.assertEqual(len(names), 6)
-        for n in ("team1-vuln", "team1-ssh", "team1-vuln-app",
-                  "team2-vuln", "team2-ssh", "team2-vuln-app"):
+        for n in (
+            "team1-vuln",
+            "team1-ssh",
+            "team1-vuln-app",
+            "team2-vuln",
+            "team2-ssh",
+            "team2-vuln-app",
+        ):
             self.assertIn(n, names)
 
     def test_zero_teams_returns_empty(self) -> None:

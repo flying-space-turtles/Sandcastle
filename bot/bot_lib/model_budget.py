@@ -12,13 +12,20 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .agent_contracts import BudgetRejection, ModelProvider, ModelRequest, ModelUsage
-from .model_gateway import GatewayResult, ModelGateway
+from .model_gateway import (
+    GatewayResult,
+    ModelGateway,
+    ModelGatewayError,
+    ModelProviderAdapter,
+)
 
 ACTIVE_COST_STATUSES = ("RESERVED", "COMPLETED", "FAILED")
 COUNTED_CALL_STATUSES = ("RESERVED", "COMPLETED", "FAILED")
 
 
-class ModelBudgetExceeded(RuntimeError):
+class ModelBudgetExceeded(ModelGatewayError):
+    retryable = False
+
     def __init__(self, rejection: BudgetRejection) -> None:
         super().__init__(
             f"{rejection.code}: {rejection.scope} budget would exceed "
@@ -394,11 +401,20 @@ class ModelBudgetLedger:
 
 
 class BudgetedModelGateway:
-    """Reserve cost before issuing a gateway request, then reconcile usage."""
+    """Apply a persistent reservation around every provider attempt."""
 
     def __init__(self, gateway: ModelGateway, ledger: ModelBudgetLedger) -> None:
-        self.gateway = gateway
         self.ledger = ledger
+        budgeted_adapters = {
+            provider: _BudgetedProviderAdapter(adapter, ledger)
+            for provider, adapter in gateway.adapters.items()
+        }
+        self.gateway = ModelGateway(
+            budgeted_adapters,
+            primary_provider=gateway.primary_provider,
+            fallback_provider=gateway.fallback_provider,
+            max_retries=gateway.max_retries,
+        )
 
     def call(
         self,
@@ -407,16 +423,45 @@ class BudgetedModelGateway:
         model_id: str,
         estimated_cost_usd: float | None = None,
     ) -> GatewayResult:
+        del model_id, estimated_cost_usd
+        return self.gateway.call(request)
+
+
+class _BudgetedProviderAdapter:
+    def __init__(
+        self,
+        adapter: ModelProviderAdapter,
+        ledger: ModelBudgetLedger,
+    ) -> None:
+        self.adapter = adapter
+        self.ledger = ledger
+        self.provider = adapter.provider
+
+    @property
+    def call_count(self) -> int:
+        return int(getattr(self.adapter, "call_count", 0))
+
+    def complete(self, request: ModelRequest, timeout: float):
+        model_id = str(getattr(self.adapter, "model_id", f"{self.provider.value}-unknown"))
+        estimated_cost = (
+            0.0
+            if self.provider is ModelProvider.FAKE
+            or getattr(self.adapter, "charges_budget", True) is False
+            else request.budget.max_cost_usd_per_call
+        )
         reservation = self.ledger.reserve(
             request,
-            provider=self.gateway.primary_provider,
+            provider=self.provider,
             model_id=model_id,
-            estimated_cost_usd=estimated_cost_usd,
+            estimated_cost_usd=estimated_cost,
         )
         try:
-            result = self.gateway.call(request)
+            response = self.adapter.complete(request, timeout)
         except Exception:
-            self.ledger.fail(reservation.reservation_id)
+            self.ledger.fail(
+                reservation.reservation_id,
+                charge_reserved=estimated_cost > 0,
+            )
             raise
-        self.ledger.reconcile(reservation.reservation_id, result.response.usage)
-        return result
+        self.ledger.reconcile(reservation.reservation_id, response.usage)
+        return response

@@ -264,6 +264,9 @@ services:
     image: sandcastle/bot-controller:latest
     container_name: sandcastle-bot-controller
     hostname: sandcastle-bot-controller
+    networks:
+      ctf-network:
+        ipv4_address: 10.10.0.4
     ports:
       - "127.0.0.1:7878:7878"
     volumes:

@@ -379,9 +379,10 @@ def build_observation(
 def build_action_schemas(ctx: BotContext) -> list[ActionSchema]:
     """Return schemas for actions whose capability requirements are all satisfied."""
     schemas = []
+    configured_actions = set(ctx.config.actions)
     for action in ACTION_REGISTRY.values():
         required = frozenset(getattr(action, "required_capabilities", frozenset()))
-        if required <= ctx.capabilities:
+        if action.id in configured_actions and required <= ctx.capabilities:
             schemas.append(
                 ActionSchema(
                     id=action.id,
@@ -472,8 +473,8 @@ class ModelBackedPlanner:
         self._round_number += 1
 
         valid_targets = set(self.targets(ctx, override_target))
-        valid_action_ids = frozenset(ACTION_REGISTRY.keys())
         schemas = build_action_schemas(ctx)
+        valid_action_ids = frozenset(schema.id for schema in schemas)
 
         planner_input = PlannerInput(
             observation=build_observation(

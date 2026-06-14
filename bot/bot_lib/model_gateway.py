@@ -221,6 +221,8 @@ class ModelGateway:
                 response = primary.complete(request, request.budget.timeout_seconds)
                 return GatewayResult(response=response, provider_attempts=tuple(attempts))
             except ModelGatewayError as exc:
+                if getattr(exc, "retryable", True) is False:
+                    raise
                 last_error = exc
             except Exception as exc:
                 last_error = ModelGatewayError(
