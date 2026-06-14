@@ -58,6 +58,7 @@ ALLOWED_ORIGINS = re.compile(r"^https?://localhost(:\d+)?$")
 
 def _emit_submission(result: Any, team_id: int) -> None:
     from submissions import SubmissionCode
+
     event = (
         telemetry.SUBMISSION_ACCEPTED
         if result.code is SubmissionCode.ACCEPTED
@@ -332,16 +333,21 @@ class GameserverAPIHandler(BaseHTTPRequestHandler):
             try:
                 conn = db.get_db_connection()
                 cursor = conn.cursor()
-                cursor.execute("SELECT id, status, created_at, updated_at FROM matches WHERE id = 1;")
+                cursor.execute(
+                    "SELECT id, status, created_at, updated_at FROM matches WHERE id = 1;"
+                )
                 row = cursor.fetchone()
                 if row:
                     match_obj = Match.from_row(row)
-                    self._json(200, {
-                        "match_id": match_obj.id,
-                        "status": match_obj.status.value,
-                        "created_at": match_obj.created_at,
-                        "updated_at": match_obj.updated_at
-                    })
+                    self._json(
+                        200,
+                        {
+                            "match_id": match_obj.id,
+                            "status": match_obj.status.value,
+                            "created_at": match_obj.created_at,
+                            "updated_at": match_obj.updated_at,
+                        },
+                    )
                 else:
                     self._json(404, {"error": "match not found"})
             except Exception as e:
@@ -359,10 +365,7 @@ class GameserverAPIHandler(BaseHTTPRequestHandler):
                 cursor = conn.cursor()
                 cursor.execute("SELECT id, name, ip_address FROM teams ORDER BY id ASC;")
                 rows = cursor.fetchall()
-                teams_list = [
-                    {"id": row[0], "name": row[1], "ip_address": row[2]}
-                    for row in rows
-                ]
+                teams_list = [{"id": row[0], "name": row[1], "ip_address": row[2]} for row in rows]
                 self._json(200, {"teams": teams_list})
             except Exception as e:
                 self._json(500, {"error": f"Database error: {str(e)}"})
@@ -404,17 +407,20 @@ class GameserverAPIHandler(BaseHTTPRequestHandler):
                 if row is None:
                     self._json(404, {"error": "no rounds have started"})
                 else:
-                    self._json(200, {
-                        "id": row[0],
-                        "match_id": row[1],
-                        "round_number": row[2],
-                        "status": row[3],
-                        "started_at": row[4],
-                        "deadline_at": row[5],
-                        "completed_at": row[6],
-                        "duration_seconds": row[7],
-                        "error": row[8],
-                    })
+                    self._json(
+                        200,
+                        {
+                            "id": row[0],
+                            "match_id": row[1],
+                            "round_number": row[2],
+                            "status": row[3],
+                            "started_at": row[4],
+                            "deadline_at": row[5],
+                            "completed_at": row[6],
+                            "duration_seconds": row[7],
+                            "error": row[8],
+                        },
+                    )
             except Exception as exc:
                 self._json(500, {"error": f"Database error: {str(exc)}"})
             finally:
@@ -443,6 +449,7 @@ class GameserverAPIHandler(BaseHTTPRequestHandler):
             if not self._require_operator():
                 return
             from urllib.parse import parse_qs
+
             qs = parse_qs(parsed.query)
             match_id_strs = qs.get("match_id", [])
             if not match_id_strs or not match_id_strs[0].isdigit():
@@ -453,7 +460,9 @@ class GameserverAPIHandler(BaseHTTPRequestHandler):
             try:
                 conn = db.get_db_connection()
                 events = telemetry.export_match(conn, match_id)
-                self._json(200, {"match_id": match_id, "event_count": len(events), "events": events})
+                self._json(
+                    200, {"match_id": match_id, "event_count": len(events), "events": events}
+                )
             except Exception:
                 self._json(500, {"error": "export failed"})
             finally:
@@ -466,6 +475,7 @@ class GameserverAPIHandler(BaseHTTPRequestHandler):
             if not self._require_operator():
                 return
             from urllib.parse import parse_qs
+
             qs = parse_qs(parsed.query)
             match_id_strs = qs.get("match_id", [])
             if not match_id_strs or not match_id_strs[0].isdigit():
@@ -625,8 +635,7 @@ class GameserverAPIHandler(BaseHTTPRequestHandler):
                 # If transition is valid and not a no-op, update db
                 if current_status != new_state.value:
                     cursor.execute(
-                        "UPDATE matches SET status = ? WHERE id = 1;",
-                        (new_state.value,)
+                        "UPDATE matches SET status = ? WHERE id = 1;", (new_state.value,)
                     )
                     conn.commit()
                     telemetry.emit_safe(
@@ -638,15 +647,20 @@ class GameserverAPIHandler(BaseHTTPRequestHandler):
                     )
 
                 # Return fresh status
-                cursor.execute("SELECT id, status, created_at, updated_at FROM matches WHERE id = 1;")
+                cursor.execute(
+                    "SELECT id, status, created_at, updated_at FROM matches WHERE id = 1;"
+                )
                 match_row = cursor.fetchone()
                 match_obj = Match.from_row(match_row)
-                self._json(200, {
-                    "match_id": match_obj.id,
-                    "status": match_obj.status.value,
-                    "created_at": match_obj.created_at,
-                    "updated_at": match_obj.updated_at
-                })
+                self._json(
+                    200,
+                    {
+                        "match_id": match_obj.id,
+                        "status": match_obj.status.value,
+                        "created_at": match_obj.created_at,
+                        "updated_at": match_obj.updated_at,
+                    },
+                )
 
             except Exception as e:
                 self._json(500, {"error": f"Database error: {str(e)}"})
@@ -699,7 +713,9 @@ class GameserverAPIHandler(BaseHTTPRequestHandler):
                     payload = ev.get("payload") if isinstance(ev.get("payload"), dict) else {}
                     correlation_id = ev.get("correlation_id")
                     telemetry.emit(
-                        conn, event_type, source,
+                        conn,
+                        event_type,
+                        source,
                         match_id=match_id if isinstance(match_id, int) else None,
                         round_number=round_number if isinstance(round_number, int) else None,
                         team_id=team_id if isinstance(team_id, int) else None,
@@ -721,17 +737,9 @@ class GameserverAPIHandler(BaseHTTPRequestHandler):
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Sandcastle Gameserver API")
+    parser.add_argument("--port", type=int, default=8000, help="Port to listen on (default: 8000)")
     parser.add_argument(
-        "--port",
-        type=int,
-        default=8000,
-        help="Port to listen on (default: 8000)"
-    )
-    parser.add_argument(
-        "--host",
-        type=str,
-        default="0.0.0.0",
-        help="Interface to bind to (default: 0.0.0.0)"
+        "--host", type=str, default="0.0.0.0", help="Interface to bind to (default: 0.0.0.0)"
     )
     args = parser.parse_args()
 
@@ -762,9 +770,8 @@ def main() -> None:
         limit=int(config.get("ARENA_SUBMISSION_RATE_LIMIT", "60")),
         window_seconds=int(config.get("ARENA_SUBMISSION_RATE_WINDOW_SECONDS", "60")),
     )
-    GameserverAPIHandler.operator_token = (
-        os.environ.get("GAMESERVER_OPERATOR_TOKEN")
-        or config.get("ARENA_OPERATOR_TOKEN", "")
+    GameserverAPIHandler.operator_token = os.environ.get("GAMESERVER_OPERATOR_TOKEN") or config.get(
+        "ARENA_OPERATOR_TOKEN", ""
     )
     if len(GameserverAPIHandler.operator_token) < 24:
         print(

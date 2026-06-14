@@ -32,20 +32,26 @@ SUBMISSION_REJECTED = "submission.rejected"
 MATCH_STATE_CHANGED = "match.state_changed"
 
 _FLAG_RE = re.compile(r"FLAG\{[a-f0-9]{32}\}", re.IGNORECASE)
-_REDACT_KEYS = frozenset({
-    "flag", "token", "password", "secret", "credential",
-    "team_token", "submission_token", "operator_token",
-    "master_secret", "checker_master_secret",
-})
+_REDACT_KEYS = frozenset(
+    {
+        "flag",
+        "token",
+        "password",
+        "secret",
+        "credential",
+        "team_token",
+        "submission_token",
+        "operator_token",
+        "master_secret",
+        "checker_master_secret",
+    }
+)
 
 
 def redact(obj: Any) -> Any:
     """Recursively scrub sensitive values before persistence."""
     if isinstance(obj, dict):
-        return {
-            k: "<redacted>" if k in _REDACT_KEYS else redact(v)
-            for k, v in obj.items()
-        }
+        return {k: "<redacted>" if k in _REDACT_KEYS else redact(v) for k, v in obj.items()}
     if isinstance(obj, list):
         return [redact(v) for v in obj]
     if isinstance(obj, str):
@@ -65,9 +71,7 @@ def emit(
     correlation_id: str | None = None,
 ) -> int:
     """Insert one telemetry event; caller is responsible for commit."""
-    payload_json = json.dumps(
-        redact(payload or {}), sort_keys=True, separators=(",", ":")
-    )
+    payload_json = json.dumps(redact(payload or {}), sort_keys=True, separators=(",", ":"))
     cursor = conn.execute(
         """
         INSERT INTO telemetry_events (
@@ -99,6 +103,7 @@ def emit_safe(
     """Fire-and-forget telemetry emit. Opens its own connection; never raises."""
     try:
         import db as _db
+
         conn = _db.get_db_connection(db_path)
         try:
             emit(conn, event_type, source, **kwargs)
@@ -141,9 +146,7 @@ def export_match(conn: sqlite3.Connection, match_id: int) -> list[dict[str, Any]
 
 def compute_metrics(conn: sqlite3.Connection, match_id: int) -> dict[str, Any]:
     """Per-team match metrics derived from game tables and telemetry events."""
-    teams = conn.execute(
-        "SELECT id, name FROM teams ORDER BY id"
-    ).fetchall()
+    teams = conn.execute("SELECT id, name FROM teams ORDER BY id").fetchall()
 
     teams_out: dict[str, Any] = {}
     for team_id, team_name in teams:

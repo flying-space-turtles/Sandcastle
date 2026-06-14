@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import concurrent.futures
 import importlib.util
 import os
 import sqlite3
 import sys
 import tempfile
-import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "gameserver"))
@@ -44,15 +45,11 @@ class StubChecker:
         self,
         outcome: CheckerOutcome | None = None,
         error: Exception | None = None,
-        delay: float = 0,
     ) -> None:
         self.outcome = outcome or CheckerOutcome(CheckerStatus.UP, "ok")
         self.error = error
-        self.delay = delay
 
     def _run(self) -> CheckerOutcome:
-        if self.delay:
-            time.sleep(self.delay)
         if self.error is not None:
             raise self.error
         return self.outcome
@@ -79,9 +76,7 @@ class FlaskSession:
         return self._response(self.client.get(path, follow_redirects=True))
 
     def post_form(self, path: str, values: dict[str, str]) -> tuple[int, str]:
-        return self._response(
-            self.client.post(path, data=values, follow_redirects=True)
-        )
+        return self._response(self.client.post(path, data=values, follow_redirects=True))
 
     def post_json(
         self,
@@ -101,9 +96,7 @@ class CheckerRunnerTest(unittest.TestCase):
         self.conn.execute(
             "INSERT INTO teams (id, name, token, ip_address) VALUES (1, 'Team 1', 't1', '127.0.0.1')"
         )
-        self.conn.execute(
-            "INSERT INTO services (id, name, port) VALUES (1, 'example-vuln', 8080)"
-        )
+        self.conn.execute("INSERT INTO services (id, name, port) VALUES (1, 'example-vuln', 8080)")
         self.conn.commit()
         self.target = ServiceTarget(1, 1, "example-vuln", "127.0.0.1", 8080)
         self.credentials = derive_checker_credentials("test-master-secret", 1, "example-vuln")
@@ -144,14 +137,18 @@ class CheckerRunnerTest(unittest.TestCase):
                 self.assertEqual(self._persisted_status(round_number), expected.value)
 
     def test_timeout_maps_to_down(self) -> None:
-        result = self.runner.run(
-            self.conn,
-            StubChecker(delay=0.2),
-            CheckRequest(self.context),
-            5,
-        )
+        with patch("checkers.runner.concurrent.futures.ThreadPoolExecutor") as executor:
+            future = executor.return_value.submit.return_value
+            future.result.side_effect = concurrent.futures.TimeoutError
+            result = self.runner.run(
+                self.conn,
+                StubChecker(),
+                CheckRequest(self.context),
+                5,
+            )
         self.assertEqual(result.status, CheckerStatus.DOWN)
         self.assertEqual(result.data["failure"], "timeout")
+        future.result.assert_called_once_with(timeout=0.05)
 
     def test_put_get_and_check_are_persisted_independently(self) -> None:
         plugin = StubChecker()
@@ -217,9 +214,7 @@ class CheckerRunnerTest(unittest.TestCase):
             "VALUES (1, 1, 1, 'UP', 'legacy result')"
         )
         db.initialize_schema(conn)
-        row = conn.execute(
-            "SELECT operation, plugin_name, message FROM checker_results"
-        ).fetchone()
+        row = conn.execute("SELECT operation, plugin_name, message FROM checker_results").fetchone()
         self.assertEqual(row, ("CHECK", "legacy", "legacy result"))
         conn.close()
 

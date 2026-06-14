@@ -23,7 +23,9 @@ from bot_lib import ARENA_DEFAULTS, action_catalog, planner_catalog
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEPLOY_SH = REPO_ROOT / "bot" / "deploy.sh"
 ARENA_CONFIG = Path(os.environ.get("ARENA_CONFIG_FILE", REPO_ROOT / "config" / "arena.env"))
-DATABASE = Path(os.environ.get("BOT_CONTROLLER_DB", REPO_ROOT / ".sandcastle" / "bot-controller.db"))
+DATABASE = Path(
+    os.environ.get("BOT_CONTROLLER_DB", REPO_ROOT / ".sandcastle" / "bot-controller.db")
+)
 ALLOWED_ORIGINS = re.compile(r"^https?://(?:localhost|127\.0\.0\.1)(?::\d+)?$")
 ACTIVE_STATUSES = ("DEPLOYING", "RUNNING")
 
@@ -293,9 +295,7 @@ class DeploymentStore:
 
     def list(self) -> list[sqlite3.Row]:
         with self.connect() as conn:
-            return conn.execute(
-                "SELECT * FROM deployments ORDER BY created_at DESC"
-            ).fetchall()
+            return conn.execute("SELECT * FROM deployments ORDER BY created_at DESC").fetchall()
 
     def active_for_team(self, team_id: int) -> list[sqlite3.Row]:
         with self.connect() as conn:
@@ -315,28 +315,26 @@ STORE = DeploymentStore(DATABASE)
 def _deployment_events(row: sqlite3.Row) -> list[dict[str, Any]]:
     raw = str(row["archived_events"] or "")
     if row["status"] in ACTIVE_STATUSES:
-        raw = _container_file(
-            int(row["team_id"]), f"{_deployment_dir(row['id'])}/events.jsonl"
-        ) or raw
+        raw = (
+            _container_file(int(row["team_id"]), f"{_deployment_dir(row['id'])}/events.jsonl")
+            or raw
+        )
     return _parse_events(raw)
 
 
 def _deployment_logs(row: sqlite3.Row, lines: int = 300) -> list[str]:
     raw = str(row["archived_log"] or "")
     if row["status"] in ACTIVE_STATUSES:
-        raw = _container_file(
-            int(row["team_id"]), f"{_deployment_dir(row['id'])}/bot.log", lines
-        ) or raw
+        raw = (
+            _container_file(int(row["team_id"]), f"{_deployment_dir(row['id'])}/bot.log", lines)
+            or raw
+        )
     return raw.splitlines()[-lines:]
 
 
 def _archive(row: sqlite3.Row) -> None:
-    events = _container_file(
-        int(row["team_id"]), f"{_deployment_dir(row['id'])}/events.jsonl"
-    )
-    log = _container_file(
-        int(row["team_id"]), f"{_deployment_dir(row['id'])}/bot.log"
-    )
+    events = _container_file(int(row["team_id"]), f"{_deployment_dir(row['id'])}/events.jsonl")
+    log = _container_file(int(row["team_id"]), f"{_deployment_dir(row['id'])}/bot.log")
     STORE.update(
         str(row["id"]),
         archived_events=events or str(row["archived_events"] or ""),
@@ -346,13 +344,9 @@ def _archive(row: sqlite3.Row) -> None:
 
 def _event_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
     captures = sum(event.get("type") == "flag.captured" for event in events)
-    submissions = [
-        event for event in events if event.get("type") == "submission.completed"
-    ]
+    submissions = [event for event in events if event.get("type") == "submission.completed"]
     accepted = sum(bool(event.get("accepted")) for event in submissions)
-    failures = sum(
-        event.get("type") in {"round.failed", "deployment.failed"} for event in events
-    )
+    failures = sum(event.get("type") in {"round.failed", "deployment.failed"} for event in events)
     current = next(
         (
             event
@@ -376,7 +370,9 @@ def _deployment_payload(row: sqlite3.Row, include_config: bool = False) -> dict[
     pid = row["pid"]
     if status in ACTIVE_STATUSES:
         running, live_pid = _runtime_status(int(row["team_id"]), str(row["id"]))
-        next_status = "RUNNING" if running else ("DEPLOYING" if status == "DEPLOYING" else "STOPPED")
+        next_status = (
+            "RUNNING" if running else ("DEPLOYING" if status == "DEPLOYING" else "STOPPED")
+        )
         if next_status != status or live_pid != pid:
             STORE.update(str(row["id"]), status=next_status, pid=live_pid)
             status, pid = next_status, live_pid
@@ -433,10 +429,7 @@ def _public_config(body: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("unsupported target policy")
     if config["target_policy"] == "selected" and not config["target_teams"]:
         raise ValueError("select at least one target team")
-    if any(
-        team < 1 or team > ARENA_DEFAULTS.team_count
-        for team in config["target_teams"]
-    ):
+    if any(team < 1 or team > ARENA_DEFAULTS.team_count for team in config["target_teams"]):
         raise ValueError("target team is outside the configured arena")
     action_ids = {action["id"] for action in action_catalog()}
     if any(action not in action_ids for action in config["actions"]):

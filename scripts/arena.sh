@@ -293,7 +293,7 @@ recreate_apps() {
         app="team${id}-vuln-app"
         compose_file="$(team_compose_file "${id}")"
         [[ -s "${compose_file}" ]] ||
-            die "missing generated app Compose file: ${compose_file#${ROOT}/}"
+            die "missing generated app Compose file: ${compose_file#"${ROOT}"/}"
 
         if [[ "${ARENA_ISOLATION_MODE}" == "dind" ]]; then
             username="$(team_username "${id}")"

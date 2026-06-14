@@ -145,7 +145,11 @@ class BotContext:
             return outcome
 
         self._submitted_flags.add(flag)
-        if not self.config.gameserver_url or not self.config.submission_token or self.my_team is None:
+        if (
+            not self.config.gameserver_url
+            or not self.config.submission_token
+            or self.my_team is None
+        ):
             outcome = {"code": "NOT_CONFIGURED", "accepted": False}
             self.emit(
                 "submission.completed",

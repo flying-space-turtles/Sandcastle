@@ -48,6 +48,7 @@ from .runtime import BotContext, info, warn
 
 # ── Exceptions ──────────────────────────────────────────────────────────────
 
+
 class PlannerError(RuntimeError):
     """Base class for model planner errors."""
 
@@ -62,9 +63,11 @@ class PlannerBudgetError(PlannerError):
 
 # ── Input types ─────────────────────────────────────────────────────────────
 
+
 @dataclass(frozen=True)
 class ActionSchema:
     """Schema for one registered action, sent to the model as context."""
+
     id: str
     label: str
     category: str
@@ -86,6 +89,7 @@ class ActionSchema:
 @dataclass(frozen=True)
 class PlannerObservation:
     """Structured game-state snapshot passed to the model each round."""
+
     my_team: int | None
     num_teams: int
     opponent_teams: list[int]
@@ -109,6 +113,7 @@ class PlannerObservation:
 @dataclass(frozen=True)
 class BudgetConfig:
     """Hard limits enforced before and after each model call."""
+
     max_actions_per_round: int = 20
     max_plan_seconds: float = 10.0
     max_tokens: int | None = None
@@ -132,6 +137,7 @@ class BudgetConfig:
 @dataclass(frozen=True)
 class PlannerInput:
     """Complete structured input to the planning adapter."""
+
     observation: PlannerObservation
     action_schemas: list[ActionSchema]
     budget: BudgetConfig
@@ -146,9 +152,11 @@ class PlannerInput:
 
 # ── Output type ─────────────────────────────────────────────────────────────
 
+
 @dataclass(frozen=True)
 class RawTask:
     """Unvalidated task from the adapter. Validated before becoming a BotTask."""
+
     target_team: int
     action_id: str
 
@@ -156,6 +164,7 @@ class RawTask:
 @dataclass(frozen=True)
 class PlannerOutput:
     """Raw output from an adapter, before registry validation."""
+
     tasks: list[RawTask]
     tokens_used: int | None = None
     cost_usd: float | None = None
@@ -173,6 +182,7 @@ class PlannerOutput:
 
 # ── Validation ───────────────────────────────────────────────────────────────
 
+
 def validate_plan(
     output: PlannerOutput,
     valid_action_ids: frozenset[str],
@@ -189,9 +199,7 @@ def validate_plan(
 
     if output.tokens_used is not None and budget.max_tokens is not None:
         if output.tokens_used > budget.max_tokens:
-            errors.append(
-                f"token budget exceeded: {output.tokens_used} > {budget.max_tokens}"
-            )
+            errors.append(f"token budget exceeded: {output.tokens_used} > {budget.max_tokens}")
 
     if output.cost_usd is not None and budget.max_cost_usd is not None:
         if output.cost_usd > budget.max_cost_usd:
@@ -215,9 +223,7 @@ def validate_plan(
         action = ACTION_REGISTRY.get(task.action_id)
         if action is not None and action.scope == "target":
             if task.target_team not in valid_target_teams:
-                errors.append(
-                    f"invalid target team {task.target_team} for {task.action_id!r}"
-                )
+                errors.append(f"invalid target team {task.target_team} for {task.action_id!r}")
                 continue
 
         accepted.append(task)
@@ -226,6 +232,7 @@ def validate_plan(
 
 
 # ── Adapter protocol ─────────────────────────────────────────────────────────
+
 
 class ModelPlannerAdapter(Protocol):
     """Provider-neutral interface. Implement to support any LLM backend."""
@@ -236,6 +243,7 @@ class ModelPlannerAdapter(Protocol):
 
 
 # ── Fake adapter (deterministic, no network) ─────────────────────────────────
+
 
 class FakePlannerAdapter:
     """Scripted deterministic adapter for tests. No network, no API key.
@@ -298,6 +306,7 @@ class FakePlannerAdapter:
 
 # ── Remote adapter (credentials stay on host) ────────────────────────────────
 
+
 class RemoteModelPlannerAdapter:
     """Posts the planning request to the bot-controller's /plan endpoint.
 
@@ -348,6 +357,7 @@ class RemoteModelPlannerAdapter:
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
+
 def build_observation(
     ctx: BotContext,
     previous_results: list[dict[str, object]],
@@ -372,14 +382,16 @@ def build_action_schemas(ctx: BotContext) -> list[ActionSchema]:
     for action in ACTION_REGISTRY.values():
         required = frozenset(getattr(action, "required_capabilities", frozenset()))
         if required <= ctx.capabilities:
-            schemas.append(ActionSchema(
-                id=action.id,
-                label=action.label,
-                category=action.category,
-                scope=action.scope,
-                description=action.description,
-                required_capabilities=sorted(required),
-            ))
+            schemas.append(
+                ActionSchema(
+                    id=action.id,
+                    label=action.label,
+                    category=action.category,
+                    scope=action.scope,
+                    description=action.description,
+                    required_capabilities=sorted(required),
+                )
+            )
     return schemas
 
 
@@ -397,6 +409,7 @@ def make_model_planner() -> "ModelBackedPlanner":
       PLAN_MAX_COST_USD     cost budget per call in USD (default: unlimited)
     """
     import os
+
     endpoint = os.environ.get("PLAN_ENDPOINT", "")
     token = os.environ.get("PLAN_TOKEN", "")
     adapter = RemoteModelPlannerAdapter(endpoint, token)
@@ -413,6 +426,7 @@ def make_model_planner() -> "ModelBackedPlanner":
 
 
 # ── ModelBackedPlanner ───────────────────────────────────────────────────────
+
 
 class ModelBackedPlanner:
     """Planner that delegates to a ModelPlannerAdapter.
@@ -511,8 +525,7 @@ class ModelBackedPlanner:
         )
 
         self._previous_results = [
-            {"target_team": t.target_team, "action_id": t.action_id,
-             "round": self._round_number}
+            {"target_team": t.target_team, "action_id": t.action_id, "round": self._round_number}
             for t in accepted
         ]
 

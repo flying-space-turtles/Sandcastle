@@ -131,17 +131,14 @@ def init_db(app: Flask) -> None:
         db.commit()
 
         flag = ensure_flag()
-        admin_id = db.execute(
-            "SELECT id FROM users WHERE username = 'admin'"
-        ).fetchone()["id"]
+        admin_id = db.execute("SELECT id FROM users WHERE username = 'admin'").fetchone()["id"]
         cur = db.execute(
             "SELECT id FROM notes WHERE owner_id = ? AND is_secret = 1",
             (admin_id,),
         )
         if cur.fetchone() is None:
             db.execute(
-                "INSERT INTO notes (owner_id, title, body, is_secret) "
-                "VALUES (?, ?, ?, 1)",
+                "INSERT INTO notes (owner_id, title, body, is_secret) VALUES (?, ?, ?, 1)",
                 (
                     admin_id,
                     "Round 0 flag",
@@ -159,8 +156,7 @@ def init_db(app: Flask) -> None:
         )
         if cur.fetchone() is None:
             db.execute(
-                "INSERT INTO notes (owner_id, title, body, is_secret) "
-                "VALUES (?, ?, ?, 1)",
+                "INSERT INTO notes (owner_id, title, body, is_secret) VALUES (?, ?, ?, 1)",
                 (
                     checker_id,
                     "Checker flag storage",
@@ -170,12 +166,7 @@ def init_db(app: Flask) -> None:
             db.commit()
 
         # A few public notes so the homepage is not empty.
-        if (
-            db.execute(
-                "SELECT COUNT(*) AS c FROM notes WHERE is_secret = 0"
-            ).fetchone()["c"]
-            == 0
-        ):
+        if db.execute("SELECT COUNT(*) AS c FROM notes WHERE is_secret = 0").fetchone()["c"] == 0:
             seed_public_notes(db, admin_id)
 
         # Route teardown hooks are registered after bootstrap initialization.
@@ -187,18 +178,15 @@ def seed_public_notes(db: sqlite3.Connection, admin_id: int) -> None:
     samples: Iterable[tuple[str, str]] = (
         (
             "Welcome to TurtleNotes",
-            "Tiny notes service for the Sandcastle CTF. Register an account "
-            "and start writing!",
+            "Tiny notes service for the Sandcastle CTF. Register an account and start writing!",
         ),
         (
             "Operations",
-            "Operators: use /admin/diagnostics to ping a host from inside the "
-            "container.",
+            "Operators: use /admin/diagnostics to ping a host from inside the container.",
         ),
         (
             "Backups",
-            "Note exports are stored under /app/data/notes and can be fetched "
-            "via /export.",
+            "Note exports are stored under /app/data/notes and can be fetched via /export.",
         ),
     )
     for title, body in samples:
@@ -343,8 +331,7 @@ def register_routes(app: Flask) -> None:
             body = request.form.get("body") or ""
             db = get_db()
             cur = db.execute(
-                "INSERT INTO notes (owner_id, title, body, is_secret) "
-                "VALUES (?, ?, ?, 0)",
+                "INSERT INTO notes (owner_id, title, body, is_secret) VALUES (?, ?, ?, 0)",
                 (session["user_id"], title, body),
             )
             db.commit()
@@ -390,17 +377,11 @@ def register_routes(app: Flask) -> None:
             with open(target, "rb") as fh:
                 payload = fh.read()
         except FileNotFoundError:
-            return render_template(
-                "export.html", body=None, error=f"not found: {name}"
-            ), 404
+            return render_template("export.html", body=None, error=f"not found: {name}"), 404
         except IsADirectoryError:
-            return render_template(
-                "export.html", body=None, error=f"is a directory: {name}"
-            ), 400
+            return render_template("export.html", body=None, error=f"is a directory: {name}"), 400
         except OSError as exc:
-            return render_template(
-                "export.html", body=None, error=f"read error: {exc}"
-            ), 400
+            return render_template("export.html", body=None, error=f"read error: {exc}"), 400
         try:
             text = payload.decode("utf-8", errors="replace")
         except Exception:  # noqa: BLE001 - defensive

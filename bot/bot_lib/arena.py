@@ -55,7 +55,9 @@ def _required_int(values: dict[str, str], key: str, minimum: int, maximum: int) 
 def load_arena_defaults(path: Path | None = None) -> ArenaDefaults:
     config_path = path
     if config_path is None:
-        config_path = next((candidate for candidate in _candidate_paths() if candidate.is_file()), None)
+        config_path = next(
+            (candidate for candidate in _candidate_paths() if candidate.is_file()), None
+        )
     if config_path is None:
         raise RuntimeError("arena configuration not found")
 

@@ -15,7 +15,6 @@ PASS_COUNT=0
 WARN_COUNT=0
 FAIL_COUNT=0
 
-DOCKER_CLI=0
 DOCKER_DAEMON=0
 DOCKER_COMPOSE=0
 RUNTIME_ACTIVE=0
@@ -186,7 +185,7 @@ check_arena_configuration() {
         CONFIG_LOADED=1
         DESIRED_SUBNET="${ARENA_CTF_SUBNET}"
         report PASS arena.config \
-            "Loaded canonical configuration from ${ARENA_CONFIG_FILE#${ROOT}/}."
+            "Loaded canonical configuration from ${ARENA_CONFIG_FILE#"${ROOT}"/}."
     else
         report FAIL arena.config \
             "Canonical arena configuration is invalid: ${ARENA_CONFIG_ERROR:-unknown error}." \
@@ -203,11 +202,11 @@ load_compose_metadata() {
 
     if [[ ! -f "${COMPOSE_FILE}" ]]; then
         report FAIL compose.file \
-            "Missing ${COMPOSE_FILE#${ROOT}/}." \
+            "Missing ${COMPOSE_FILE#"${ROOT}"/}." \
             "Run ./scripts/setup.sh --teams <N>."
         return
     fi
-    report PASS compose.file "Found ${COMPOSE_FILE#${ROOT}/}."
+    report PASS compose.file "Found ${COMPOSE_FILE#"${ROOT}"/}."
 
     while IFS= read -r line; do
         if [[ "${line}" =~ ^[[:space:]]{2}team([0-9]+)-ssh: ]]; then
@@ -310,7 +309,6 @@ check_host_and_docker() {
             "Install Docker Engine and the Compose plugin; see README.md#requirements."
         return
     fi
-    DOCKER_CLI=1
     report PASS docker.cli "$(docker --version 2>/dev/null || printf 'Docker CLI found')."
 
     if docker compose version >/dev/null 2>&1; then
@@ -357,7 +355,7 @@ check_host_and_docker() {
             report PASS compose.syntax "Docker Compose configuration is valid."
         else
             report FAIL compose.syntax \
-                "Docker Compose rejected ${COMPOSE_FILE#${ROOT}/}." \
+                "Docker Compose rejected ${COMPOSE_FILE#"${ROOT}"/}." \
                 "Run docker compose -f docker-compose.yml config and fix scripts/setup.sh before regenerating."
         fi
     fi

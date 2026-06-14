@@ -19,11 +19,9 @@ class Planner(Protocol):
     label: str
     description: str
 
-    def targets(self, ctx: BotContext, override_target: int | None = None) -> list[int]:
-        ...
+    def targets(self, ctx: BotContext, override_target: int | None = None) -> list[int]: ...
 
-    def plan(self, ctx: BotContext, override_target: int | None = None) -> Iterable[BotTask]:
-        ...
+    def plan(self, ctx: BotContext, override_target: int | None = None) -> Iterable[BotTask]: ...
 
 
 class ScriptedPlanner:
@@ -65,7 +63,9 @@ class ReconFirstPlanner(ScriptedPlanner):
             for action_id in ctx.config.actions
             if ACTION_REGISTRY.get(action_id) and ACTION_REGISTRY[action_id].scope == "target"
         ]
-        recon = [action_id for action_id in action_ids if ACTION_REGISTRY[action_id].category == "Recon"]
+        recon = [
+            action_id for action_id in action_ids if ACTION_REGISTRY[action_id].category == "Recon"
+        ]
         other = [action_id for action_id in action_ids if action_id not in recon]
 
         for action_id in recon:
@@ -111,6 +111,7 @@ def planner_catalog() -> list[dict[str, str]]:
 def load_planner(planner_id: str) -> Planner:
     if planner_id == "model":
         from .model_planner import make_model_planner  # lazy: avoids circular import
+
         return make_model_planner()
 
     if planner_id in PLANNER_REGISTRY:

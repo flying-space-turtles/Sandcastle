@@ -40,20 +40,36 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="N",
         help="total number of teams from arena configuration",
     )
-    parser.add_argument("--my-team", type=int, default=None, metavar="N", help="override own team ID")
-    parser.add_argument("--loop", type=int, default=0, metavar="SEC", help="repeat every SEC seconds")
-    parser.add_argument("--watchdog", action="store_true", help="run self watchdog before each round")
+    parser.add_argument(
+        "--my-team", type=int, default=None, metavar="N", help="override own team ID"
+    )
+    parser.add_argument(
+        "--loop", type=int, default=0, metavar="SEC", help="repeat every SEC seconds"
+    )
+    parser.add_argument(
+        "--watchdog", action="store_true", help="run self watchdog before each round"
+    )
 
     parser.add_argument("--ping", action="store_true", help="ping sweep and exit")
-    parser.add_argument("--attack-team", type=int, default=None, metavar="TEAM", help="attack one team and exit")
-    parser.add_argument("--fake-flag", type=int, default=None, metavar="TEAM", help="probe /internal/plant and exit")
-    parser.add_argument("--catalog", action="store_true", help="print action/planner catalog as JSON and exit")
+    parser.add_argument(
+        "--attack-team", type=int, default=None, metavar="TEAM", help="attack one team and exit"
+    )
+    parser.add_argument(
+        "--fake-flag", type=int, default=None, metavar="TEAM", help="probe /internal/plant and exit"
+    )
+    parser.add_argument(
+        "--catalog", action="store_true", help="print action/planner catalog as JSON and exit"
+    )
 
     parser.add_argument("--bot-name", type=str, default=None, metavar="NAME")
     parser.add_argument("--planner", type=str, default=None, metavar="ID")
-    parser.add_argument("--target-policy", type=str, default=None, choices=["all_opponents", "selected"])
+    parser.add_argument(
+        "--target-policy", type=str, default=None, choices=["all_opponents", "selected"]
+    )
     parser.add_argument("--target-teams", type=str, default=None, metavar="LIST")
-    parser.add_argument("--actions", type=str, default=None, metavar="LIST", help="comma-separated action ids")
+    parser.add_argument(
+        "--actions", type=str, default=None, metavar="LIST", help="comma-separated action ids"
+    )
 
     # Backward compatible flags from the original exploit runner.
     parser.add_argument("--exploits", type=str, default=None, metavar="LIST")
@@ -107,8 +123,13 @@ def run_watchdog(ctx: BotContext) -> None:
     if missing:
         msg = f"missing capabilities: {', '.join(sorted(missing))}"
         warn(f"watchdog skipped: {msg}")
-        ctx.emit("action.completed", action_id="maintain.watchdog",
-                 target_team=ctx.my_team, status="skipped", message=msg)
+        ctx.emit(
+            "action.completed",
+            action_id="maintain.watchdog",
+            target_team=ctx.my_team,
+            status="skipped",
+            message=msg,
+        )
         return
     ctx.emit("action.started", action_id="maintain.watchdog", target_team=ctx.my_team)
     result = action.run(ctx)
@@ -140,11 +161,19 @@ def execute_tasks(ctx: BotContext, tasks: list[BotTask]) -> dict[int, list[str]]
         if missing:
             msg = f"missing capabilities: {', '.join(sorted(missing))}"
             warn(f"{action.id} skipped: {msg}")
-            ctx.emit("action.completed", action_id=action.id,
-                     target_team=task.target_team, status="skipped", message=msg)
+            ctx.emit(
+                "action.completed",
+                action_id=action.id,
+                target_team=task.target_team,
+                status="skipped",
+                message=msg,
+            )
             continue
 
-        if ctx.config.stop_on_success and (task.target_team, action.category) in completed_after_success:
+        if (
+            ctx.config.stop_on_success
+            and (task.target_team, action.category) in completed_after_success
+        ):
             continue
 
         if task.target_team == ctx.my_team:
@@ -184,9 +213,13 @@ def execute_tasks(ctx: BotContext, tasks: list[BotTask]) -> dict[int, list[str]]
                 outcome = ctx.submit_flag(flag, task.target_team, result.action_id)
                 code = str(outcome.get("code", "UNKNOWN"))
                 if outcome.get("accepted"):
-                    ok(f"team{task.target_team} [{result.action_id}] submitted {fingerprint}: {code}")
+                    ok(
+                        f"team{task.target_team} [{result.action_id}] submitted {fingerprint}: {code}"
+                    )
                 else:
-                    warn(f"team{task.target_team} [{result.action_id}] submission {fingerprint}: {code}")
+                    warn(
+                        f"team{task.target_team} [{result.action_id}] submission {fingerprint}: {code}"
+                    )
             if ctx.config.stop_on_success:
                 completed_after_success.add((task.target_team, action.category))
 
@@ -254,7 +287,9 @@ def main() -> int:
         flags = run_round(ctx, args.attack_team)
         return 0 if flags else 1
 
-    info(f"Bot started - interval={args.loop}s watchdog={should_run_watchdog(config, args.watchdog)}")
+    info(
+        f"Bot started - interval={args.loop}s watchdog={should_run_watchdog(config, args.watchdog)}"
+    )
     first = True
     while True:
         if not first:

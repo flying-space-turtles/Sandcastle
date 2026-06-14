@@ -35,8 +35,7 @@ class BotAction(Protocol):
     description: str
     required_capabilities: frozenset
 
-    def run(self, ctx: BotContext, target_team: int | None = None) -> ActionResult:
-        ...
+    def run(self, ctx: BotContext, target_team: int | None = None) -> ActionResult: ...
 
 
 class HealthCheckAction:
@@ -157,7 +156,10 @@ class WatchdogAction:
         missing = self.required_capabilities - ctx.capabilities
         if missing:
             return ActionResult(
-                self.id, ctx.my_team, "skipped", [],
+                self.id,
+                ctx.my_team,
+                "skipped",
+                [],
                 f"missing capabilities: {', '.join(sorted(missing))}",
             )
 
@@ -165,8 +167,9 @@ class WatchdogAction:
         try:
             data = call_service_control(host, "GET", "/service/health")
         except Exception as exc:
-            return ActionResult(self.id, ctx.my_team, "error", [],
-                                f"service-control unreachable: {exc}")
+            return ActionResult(
+                self.id, ctx.my_team, "error", [], f"service-control unreachable: {exc}"
+            )
 
         if data.get("running", False):
             return ActionResult(self.id, ctx.my_team, "ok", [], "service app is running")

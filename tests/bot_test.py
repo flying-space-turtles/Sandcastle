@@ -45,6 +45,7 @@ class BotSubmissionTests(unittest.TestCase):
                 num_teams=2,
                 my_team=1,
                 event_file=str(event_file),
+                capabilities=frozenset(),
             )
 
             with patch("urllib.request.urlopen", return_value=StubResponse()) as urlopen:
@@ -63,7 +64,12 @@ class BotSubmissionTests(unittest.TestCase):
             self.assertEqual(len(events[-1]["flag_fingerprint"]), 12)
 
     def test_missing_submission_credentials_is_reported_without_network_call(self) -> None:
-        context = BotContext(config=BotConfig(), num_teams=2, my_team=1)
+        context = BotContext(
+            config=BotConfig(),
+            num_teams=2,
+            my_team=1,
+            capabilities=frozenset(),
+        )
         with patch("urllib.request.urlopen") as urlopen:
             result = context.submit_flag(
                 "FLAG{bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb}",

@@ -25,7 +25,9 @@ class BotConfig:
     target_teams: list[int] = field(default_factory=list)
     actions: list[str] = field(default_factory=lambda: ["recon.health"])
     service_port: int = field(
-        default_factory=lambda: int(os.environ.get("SERVICE_PORT", str(ARENA_DEFAULTS.service_port)))
+        default_factory=lambda: int(
+            os.environ.get("SERVICE_PORT", str(ARENA_DEFAULTS.service_port))
+        )
     )
     flag_re: str = field(default_factory=lambda: os.environ.get("FLAG_RE", r"FLAG\{[a-f0-9]{32}\}"))
     ip_pattern: str = field(

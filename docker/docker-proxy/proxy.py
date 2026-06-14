@@ -29,7 +29,7 @@ from pathlib import Path
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-TEAM_ID   = int(os.environ["TEAM_ID"])
+TEAM_ID = int(os.environ["TEAM_ID"])
 TEAM_NAME = f"team{TEAM_ID}"
 HOST_SOCK = os.environ.get("HOST_SOCKET", "/var/run/docker.sock")
 BIND_SOCK = os.environ["PROXY_SOCKET"]
@@ -45,7 +45,7 @@ log = logging.getLogger("proxy")
 # ── Container classification ──────────────────────────────────────────────────
 
 # Containers this team fully controls (build, start/stop/restart, exec, remove)
-_RE_OWN_APP   = re.compile(rf"^{re.escape(TEAM_NAME)}-vuln-app$")
+_RE_OWN_APP = re.compile(rf"^{re.escape(TEAM_NAME)}-vuln-app$")
 # Containers this team may inspect read-only (needed for network_mode: container:)
 _RE_OWN_INFRA = re.compile(rf"^{re.escape(TEAM_NAME)}-(vuln|ssh)$")
 # Container name must not start with another team's prefix
@@ -71,13 +71,9 @@ _RE_CONTAINER_PATH = re.compile(
     rf"^{_API_PREFIX}/containers/(?P<name>[^/?]+)(?:/(?P<op>[^/?]*))?(?:\?.*)?$"
 )
 # Matches /vX.Y/containers/json  (the list endpoint)
-_RE_CONTAINER_LIST = re.compile(
-    rf"^{_API_PREFIX}/containers/json(?:\?.*)?$"
-)
+_RE_CONTAINER_LIST = re.compile(rf"^{_API_PREFIX}/containers/json(?:\?.*)?$")
 # Matches /vX.Y/containers/create
-_RE_CONTAINER_CREATE = re.compile(
-    rf"^{_API_PREFIX}/containers/create(?:\?.*)?$"
-)
+_RE_CONTAINER_CREATE = re.compile(rf"^{_API_PREFIX}/containers/create(?:\?.*)?$")
 
 # Paths always allowed without further checks
 _RE_ALWAYS_ALLOW = re.compile(
@@ -88,13 +84,13 @@ _RE_ALWAYS_ALLOW = re.compile(
     rf"|{_API_PREFIX}/build(?:\?.*)?$"
     rf"|{_API_PREFIX}/networks(?:/.*)?$"
     rf"|{_API_PREFIX}/volumes(?:/.*)?$"
-    rf"|{_API_PREFIX}/exec(?:/.*)?$"       # exec session ops (create is checked separately)
+    rf"|{_API_PREFIX}/exec(?:/.*)?$"  # exec session ops (create is checked separately)
     rf")$"
 )
 
 # Paths always denied
 _RE_ALWAYS_DENY = re.compile(
-    rf"^{_API_PREFIX}/events(?:\?.*)?$"    # would reveal other containers' IDs
+    rf"^{_API_PREFIX}/events(?:\?.*)?$"  # would reveal other containers' IDs
 )
 
 # Read-only operations allowed on own-infra containers
@@ -128,7 +124,7 @@ def _decide(method: str, path: str, body: bytes) -> tuple[bool, bool, str]:
     m = _RE_CONTAINER_PATH.match(path)
     if m:
         name = m.group("name")
-        op   = (m.group("op") or "").lower()
+        op = (m.group("op") or "").lower()
         return _decide_container_op(m_upper, name, op)
 
     # Default: deny unknown routes
@@ -159,9 +155,7 @@ def _decide_create(body: bytes) -> tuple[bool, bool, str]:
     return True, False, f"container create: non-team name {proposed!r}"
 
 
-def _decide_container_op(
-    method: str, name: str, op: str
-) -> tuple[bool, bool, str]:
+def _decide_container_op(method: str, name: str, op: str) -> tuple[bool, bool, str]:
     """Access-control decision for /containers/{name}/{op}."""
     role = _classify(name)
 
@@ -227,14 +221,14 @@ async def _read_request_head(
         if len(raw) > 131_072:
             raise ValueError("request headers too large")
 
-    text  = raw.decode("utf-8", errors="replace")
+    text = raw.decode("utf-8", errors="replace")
     lines = text.split("\r\n")
     start = lines[0].split(" ", 2)
     if len(start) < 2:
         return None
 
     method = start[0].upper()
-    path   = start[1]
+    path = start[1]
 
     headers: dict[str, str] = {}
     for h in lines[1:]:
@@ -281,9 +275,7 @@ async def _read_response_head(
     return raw, headers
 
 
-async def _pipe(
-    src: asyncio.StreamReader, dst: asyncio.StreamWriter
-) -> None:
+async def _pipe(src: asyncio.StreamReader, dst: asyncio.StreamWriter) -> None:
     try:
         while True:
             data = await src.read(65_536)
@@ -338,9 +330,7 @@ async def handle_client(
             except ValueError:
                 cl = 0
             if cl > 0:
-                body = await asyncio.wait_for(
-                    reader.readexactly(cl), timeout=60.0
-                )
+                body = await asyncio.wait_for(reader.readexactly(cl), timeout=60.0)
 
             # Strip query for routing decisions; preserve original in forwarded bytes
             path_noq = path.split("?")[0]
@@ -359,10 +349,7 @@ async def handle_client(
                 h_reader, h_writer = await asyncio.open_unix_connection(HOST_SOCK)
             except OSError as exc:
                 log.error("Cannot reach host Docker socket: %s", exc)
-                writer.write(
-                    b"HTTP/1.1 503 Service Unavailable\r\n"
-                    b"Content-Length: 0\r\n\r\n"
-                )
+                writer.write(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n")
                 with contextlib.suppress(Exception):
                     await writer.drain()
                 return
@@ -377,7 +364,7 @@ async def handle_client(
                 resp_raw, resp_headers = await _read_response_head(h_reader)
 
                 is_chunked = "chunked" in resp_headers.get("transfer-encoding", "")
-                resp_cl_s  = resp_headers.get("content-length", "-1")
+                resp_cl_s = resp_headers.get("content-length", "-1")
                 try:
                     resp_cl = int(resp_cl_s)
                 except ValueError:
@@ -451,7 +438,9 @@ async def main() -> None:
 
     log.info(
         "Listening on %s  host=%s  team=%s",
-        BIND_SOCK, HOST_SOCK, TEAM_NAME,
+        BIND_SOCK,
+        HOST_SOCK,
+        TEAM_NAME,
     )
     async with server:
         await stop.wait()

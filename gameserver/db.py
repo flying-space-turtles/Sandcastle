@@ -184,8 +184,7 @@ def initialize_schema(conn: sqlite3.Connection) -> None:
     cursor.execute("SELECT COUNT(*) FROM matches WHERE id = 1;")
     if cursor.fetchone()[0] == 0:
         cursor.execute(
-            "INSERT INTO matches (id, status) VALUES (1, ?);",
-            (MatchState.CREATED.value,)
+            "INSERT INTO matches (id, status) VALUES (1, ?);", (MatchState.CREATED.value,)
         )
 
     conn.commit()
@@ -237,9 +236,7 @@ def _initialize_checker_results_schema(conn: sqlite3.Connection) -> None:
         _create_checker_results_table(conn)
         return
 
-    columns = {
-        row[1] for row in conn.execute("PRAGMA table_info(checker_results)").fetchall()
-    }
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(checker_results)").fetchall()}
     if "operation" in columns and "match_id" in columns:
         return
 
@@ -288,7 +285,8 @@ def _initialize_rounds_schema(conn: sqlite3.Connection) -> None:
 
     conn.execute("ALTER TABLE rounds RENAME TO rounds_legacy")
     _create_rounds_table(conn)
-    conn.execute("""
+    conn.execute(
+        """
         INSERT INTO rounds (
             id, match_id, round_number, status, started_at, deadline_at,
             completed_at, duration_seconds, error
@@ -298,7 +296,9 @@ def _initialize_rounds_schema(conn: sqlite3.Connection) -> None:
             datetime(started_at, '+' || duration_seconds || ' seconds'),
             started_at, duration_seconds, NULL
         FROM rounds_legacy
-    """, (RoundState.COMPLETED.value,))
+    """,
+        (RoundState.COMPLETED.value,),
+    )
     conn.execute("DROP TABLE rounds_legacy")
 
 
@@ -329,16 +329,13 @@ def _initialize_flags_schema(conn: sqlite3.Connection) -> None:
         return
 
     columns = {row[1] for row in conn.execute("PRAGMA table_info(flags)").fetchall()}
-    if (
-        "match_id" in columns
-        and "expires_after_round" in columns
-        and "target_host" in columns
-    ):
+    if "match_id" in columns and "expires_after_round" in columns and "target_host" in columns:
         return
 
     conn.execute("ALTER TABLE flags RENAME TO flags_legacy")
     _create_flags_table(conn)
-    conn.execute("""
+    conn.execute(
+        """
         INSERT INTO flags (
             id, flag, match_id, team_id, service_id, round_number,
             target_host, service_name, service_port,
@@ -351,7 +348,9 @@ def _initialize_flags_schema(conn: sqlite3.Connection) -> None:
             COALESCE((SELECT port FROM services WHERE id = flags_legacy.service_id), 1),
             ?, 2147483647, created_at, NULL
         FROM flags_legacy
-    """, (FlagState.ACTIVE.value,))
+    """,
+        (FlagState.ACTIVE.value,),
+    )
     conn.execute("DROP TABLE flags_legacy")
 
 
@@ -384,17 +383,13 @@ def _initialize_score_events_schema(conn: sqlite3.Connection) -> None:
     if existing is None:
         _create_score_events_table(conn)
     else:
-        columns = {
-            row[1] for row in conn.execute("PRAGMA table_info(score_events)").fetchall()
-        }
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(score_events)").fetchall()}
         if "match_id" not in columns or "checker_result_id" not in columns:
             conn.execute("ALTER TABLE score_events RENAME TO score_events_legacy")
             _create_score_events_table(conn)
             match_id = "match_id" if "match_id" in columns else "1"
             submission_id = "submission_id" if "submission_id" in columns else "NULL"
-            checker_result_id = (
-                "checker_result_id" if "checker_result_id" in columns else "NULL"
-            )
+            checker_result_id = "checker_result_id" if "checker_result_id" in columns else "NULL"
             conn.execute(
                 f"""
                 INSERT INTO score_events (
@@ -630,7 +625,7 @@ def sync_registry(conn: sqlite3.Connection, config_path: str) -> None:
                     token=excluded.token,
                     ip_address=excluded.ip_address;
                 """,
-                (team_id, team_name, team_token_hash, team_ip)
+                (team_id, team_name, team_token_hash, team_ip),
             )
 
         # Remove extra teams not in configuration
@@ -639,18 +634,18 @@ def sync_registry(conn: sqlite3.Connection, config_path: str) -> None:
         for db_id in all_db_ids:
             if db_id not in active_team_ids:
                 cursor.execute("DELETE FROM teams WHERE id = ?;", (db_id,))
-    
+
     # Synchronize default service (example-vuln)
     service_template = config.get("ARENA_SERVICE_TEMPLATE", "services/example-vuln")
     service_name = os.path.basename(service_template) if service_template else "example-vuln"
-    
+
     cursor.execute(
         """
         INSERT INTO services (name, port)
         VALUES (?, ?)
         ON CONFLICT(name) DO UPDATE SET port=excluded.port;
         """,
-        (service_name, service_port)
+        (service_name, service_port),
     )
 
     scoring_values = (

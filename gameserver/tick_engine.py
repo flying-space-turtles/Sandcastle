@@ -40,11 +40,9 @@ UTC = timezone.utc
 
 
 class Clock(Protocol):
-    def now(self) -> datetime:
-        ...
+    def now(self) -> datetime: ...
 
-    def sleep(self, seconds: float) -> None:
-        ...
+    def sleep(self, seconds: float) -> None: ...
 
 
 class SystemClock:
@@ -56,8 +54,7 @@ class SystemClock:
 
 
 class FlagGenerator(Protocol):
-    def generate(self) -> str:
-        ...
+    def generate(self) -> str: ...
 
 
 class SecureFlagGenerator:
@@ -233,9 +230,7 @@ class TickEngine:
     def _start_round(self) -> RoundRecord:
         now = self.clock.now().astimezone(UTC)
         started_at = _format_timestamp(now)
-        deadline_at = _format_timestamp(
-            now + timedelta(seconds=self.config.duration_seconds)
-        )
+        deadline_at = _format_timestamp(now + timedelta(seconds=self.config.duration_seconds))
         conn = self._connection()
         try:
             conn.execute("BEGIN IMMEDIATE")
