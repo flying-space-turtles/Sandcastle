@@ -8,6 +8,9 @@ const MODES = [
   { id: 'bot' as Mode, label: 'Bots', icon: Bot },
 ];
 
+const countLabel = (count: number, singular: string, plural = `${singular}s`) =>
+  `${count} ${count === 1 ? singular : plural}`;
+
 type TopologyNavProps = {
   mode: Mode;
   onModeChange: (mode: Mode) => void;
@@ -64,7 +67,12 @@ const TopologyNav = ({
           <strong>{active.label}</strong>
         </div>
         <div className="ops-header__context">
-          {mode === 'topology' && <span>{networkCount} networks · {serviceCount} services · {edgeCount} routes</span>}
+          {mode === 'topology' && (
+            <span>
+              {countLabel(networkCount, 'network')} · {countLabel(serviceCount, 'service')} ·{' '}
+              {countLabel(edgeCount, 'route')}
+            </span>
+          )}
           {mode === 'firewall' && (
             <span className={firewallConnected ? 'is-live' : ''}>
               {firewallConnected ? `${firewallEventCount} observed events` : 'Firewall feed offline'}

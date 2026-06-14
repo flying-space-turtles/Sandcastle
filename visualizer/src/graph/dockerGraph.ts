@@ -32,6 +32,13 @@ const FIREWALL_MIN_NETWORK_HEIGHT = 780;
 
 const networkNodeId = (name: string) => `network:${name}`;
 const edgeKey = (source: string, target: string, kind: string) => `${source}->${target}:${kind}`;
+const DIND_NETWORK_RE = /^team\d+-dind-network$/;
+
+const isDindAuxNetwork = (networkName?: string) => Boolean(networkName && DIND_NETWORK_RE.test(networkName));
+
+const isDindAuxService = (service: ServiceDefinition) =>
+  service.labels['sandcastle.role'] === 'dind-daemon' ||
+  (service.networks.length > 0 && service.networks.every((network) => isDindAuxNetwork(network.name)));
 
 const teamSortValue = (service: ServiceDefinition) => {
   const numeric = Number.parseInt(service.teamId || '', 10);
@@ -357,10 +364,18 @@ export const buildDockerFlow = (parsed: ParsedCompose) => {
   const edges: Array<Edge<TopologyEdgeData>> = [];
   const seenEdges = new Set<string>();
   const nodeDetailsById: Record<string, MachineNodeData> = {};
-  const firewallNetworkName = parsed.networks.find((network) => network.name !== 'external')?.name || parsed.networks[0]?.name || 'external';
-  const servicesByNetwork = groupServicesByNetwork(parsed.services, firewallNetworkName);
-  const networks = buildNetworkCatalog(parsed, firewallNetworkName);
-  const firewallService = parsed.services.find((service) => getServiceRole(service) === 'firewall');
+  const visibleNetworks = parsed.networks.filter((network) => !isDindAuxNetwork(network.name));
+  const visibleServices = parsed.services.filter((service) => !isDindAuxService(service));
+  const visibleParsed = {
+    ...parsed,
+    networks: visibleNetworks,
+    services: visibleServices,
+  };
+  const firewallNetworkName =
+    visibleNetworks.find((network) => network.name !== 'external')?.name || visibleNetworks[0]?.name || 'external';
+  const servicesByNetwork = groupServicesByNetwork(visibleServices, firewallNetworkName);
+  const networks = buildNetworkCatalog(visibleParsed, firewallNetworkName);
+  const firewallService = visibleServices.find((service) => getServiceRole(service) === 'firewall');
   const firewallNodeId = firewallService?.serviceName;
 
   let cursorX = 0;
@@ -499,9 +514,9 @@ export const buildDockerFlow = (parsed: ParsedCompose) => {
     currentRowHeight = Math.max(currentRowHeight, size.height);
   });
 
-  const serviceByName = new Map(parsed.services.map((service) => [service.serviceName, service]));
+  const serviceByName = new Map(visibleServices.map((service) => [service.serviceName, service]));
 
-  parsed.services.forEach((service) => {
+  visibleServices.forEach((service) => {
     service.dependsOn.forEach((dependency) => {
       if (!serviceByName.has(dependency)) {
         return;
@@ -549,8 +564,8 @@ export const buildDockerFlow = (parsed: ParsedCompose) => {
     });
   });
 
-  const sshServices = parsed.services.filter((service) => getServiceRole(service) === 'ssh');
-  const vulnServices = parsed.services.filter((service) => getServiceRole(service) === 'vuln');
+  const sshServices = visibleServices.filter((service) => getServiceRole(service) === 'ssh');
+  const vulnServices = visibleServices.filter((service) => getServiceRole(service) === 'vuln');
 
   sshServices.forEach((ssh) => {
     vulnServices.forEach((vuln) => {
@@ -611,6 +626,7 @@ export const buildDockerFlow = (parsed: ParsedCompose) => {
   });
 
   return {
+    parsed: visibleParsed,
     nodes,
     edges,
     nodeDetailsById,
