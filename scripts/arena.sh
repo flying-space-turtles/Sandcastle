@@ -5,7 +5,6 @@ set -euo pipefail
 
 ROOT="${SANDCASTLE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 COMPOSE_FILE="${ROOT}/docker-compose.yml"
-FIREWALL_PREFLIGHT="${SANDCASTLE_FIREWALL_PREFLIGHT:-${ROOT}/scripts/firewall-preflight.sh}"
 NETWORK_SMOKE="${SANDCASTLE_NETWORK_SMOKE:-${ROOT}/scripts/smoke-network.sh}"
 
 # shellcheck source=scripts/lib/arena_config.sh
@@ -136,13 +135,6 @@ require_docker() {
         die "Docker daemon is not reachable"
     docker compose version >/dev/null 2>&1 ||
         die "Docker Compose plugin is not available"
-}
-
-verify_firewall_host() {
-    [[ -x "${FIREWALL_PREFLIGHT}" ]] ||
-        die "missing executable firewall preflight: ${FIREWALL_PREFLIGHT}"
-    "${FIREWALL_PREFLIGHT}" --check ||
-        die "firewall host preflight failed"
 }
 
 verify_firewall_runtime() {
@@ -523,12 +515,6 @@ main() {
     fi
     validate_options
     require_docker
-    case "${COMMAND}" in
-        up|restart|reset)
-            verify_firewall_host
-            ;;
-    esac
-
     case "${COMMAND}" in
         up)
             up_arena

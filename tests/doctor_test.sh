@@ -72,6 +72,10 @@ case "${1:-}" in
     exec)
         container="${2:-}"
         shift 2
+        if [[ "${container}" == "sandcastle-firewall" && "$*" == *"bridge-nf-call-iptables"* ]]; then
+            echo 1
+            exit 0
+        fi
         if [[ "${container}" == "sandcastle-firewall" && "$*" == *"-S PREROUTING"* ]]; then
             echo "-A PREROUTING -s 10.10.0.0/16 -d 10.10.0.0/16 -p tcp -m comment --comment sandcastle-firewall-transparent-proxy -j REDIRECT --to-ports 15000"
             exit 0
