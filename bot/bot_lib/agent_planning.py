@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from .agent_contracts import (
+    AgentMemoryEntry,
     AgentType,
     BudgetPolicy,
     ModelProvider,
@@ -43,6 +44,10 @@ class PlanningIdentity:
     team_id: int
     allowed_targets: frozenset[int]
     allowed_actions: frozenset[str]
+    # Stable agent identity fields (AI-006)
+    agent_id: str = ""
+    run_id: str = ""
+    agent_type: AgentType = AgentType.ATTACK_DEFENSE
 
 
 class PlanningCredentialStore:
@@ -176,11 +181,14 @@ class AgentPlanningService:
         num_teams: int,
         model_id: str,
         budget: BudgetPolicy,
+        memory: "Any | None" = None,
     ) -> None:
         self.gateway = gateway
         self.num_teams = num_teams
         self.model_id = model_id
         self.budget = budget
+        # AgentMemoryStore instance (optional; injected by bot_api)
+        self._memory = memory
 
     @staticmethod
     def _object(value: object, name: str) -> dict[str, Any]:
@@ -231,19 +239,35 @@ class AgentPlanningService:
         if round_number is not None and (not isinstance(round_number, int) or round_number <= 0):
             raise PlanningRequestError("round_number must be positive")
 
+        # Use stable agent_id / run_id when provided; fall back for backward compat.
+        agent_id = identity.agent_id or f"team{identity.team_id}-attack-defense"
+        run_id = identity.run_id or identity.deployment_id
+        agent_type = identity.agent_type
+
+        # Enrich observation with recent memory when available.
+        enriched_observation: dict[str, Any] = {
+            **observation,
+            "opponent_teams": sorted(identity.allowed_targets),
+        }
+        if self._memory is not None:
+            try:
+                prior = self._memory.recent_as_dicts(run_id, limit=10)
+                if prior:
+                    enriched_observation["prior_results"] = prior
+            except Exception:  # noqa: BLE001
+                pass
+
+        correlation_id = f"{run_id}-round-{round_number or 0}"
         model_request = ModelRequest(
-            agent_id=f"team{identity.team_id}-attack-defense",
-            agent_type=AgentType.ATTACK_DEFENSE,
-            run_id=identity.deployment_id,
-            correlation_id=f"{identity.deployment_id}-round-{round_number or 0}",
+            agent_id=agent_id,
+            agent_type=agent_type,
+            run_id=run_id,
+            correlation_id=correlation_id,
             system_prompt=(
                 "You are Sandcastle's AttackDefenseAgent. Select only registered "
                 "actions and only allowed opponent teams. Do not target your own team."
             ),
-            observation={
-                **observation,
-                "opponent_teams": sorted(identity.allowed_targets),
-            },
+            observation=enriched_observation,
             tool_schemas=schemas,
             budget=self.budget,
             round_number=round_number,
@@ -263,6 +287,31 @@ class AgentPlanningService:
             if not isinstance(target_team, int) or target_team not in identity.allowed_targets:
                 raise PlanningRequestError("provider selected a disallowed target")
             tasks.append({"target_team": target_team, "action_id": call.tool_id})
+
+        # Persist tool-call memory entries so future plans observe real outcomes.
+        if self._memory is not None:
+            try:
+                from datetime import datetime, timezone
+
+                for call in result.response.tool_calls:
+                    entry = AgentMemoryEntry(
+                        agent_id=agent_id,
+                        run_id=run_id,
+                        kind="tool_call",
+                        summary=f"tool_call {call.tool_id} call_id={call.call_id}",
+                        data={
+                            "tool_id": call.tool_id,
+                            "call_id": call.call_id,
+                            "arguments": call.arguments,
+                            "round_number": round_number,
+                            "correlation_id": correlation_id,
+                        },
+                        created_at=datetime.now(timezone.utc).isoformat(),
+                    )
+                    self._memory.append(entry)
+            except Exception:  # noqa: BLE001 — memory must not crash planning
+                pass
+
         return {
             "tasks": tasks,
             "tokens_used": result.response.usage.total_tokens,
@@ -270,6 +319,9 @@ class AgentPlanningService:
             "model_id": result.response.model_id,
             "provider": result.response.provider.value,
             "used_fallback": result.used_fallback,
+            "agent_id": agent_id,
+            "run_id": run_id,
+            "correlation_id": correlation_id,
         }
 
 

@@ -120,6 +120,14 @@ step "Authenticated agent planning API tests"
 python3 -B "${ROOT}/tests/agent_plan_api_test.py"
 
 # ---------------------------------------------------------------------------
+step "Agent runs and identity tests (AI-006)"
+python3 -B "${ROOT}/tests/agent_runs_test.py"
+
+# ---------------------------------------------------------------------------
+step "Agent memory and telemetry tests (AI-007)"
+python3 -B "${ROOT}/tests/agent_memory_test.py"
+
+# ---------------------------------------------------------------------------
 step "Firewall unit tests"
 python3 -B "${ROOT}/tests/firewall_test.py"
 

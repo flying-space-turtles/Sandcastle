@@ -11,6 +11,8 @@ from .agent_contracts import (
     ToolCall,
     ToolResult,
 )
+from .agent_memory import AgentMemoryStore
+from .agent_telemetry import AgentTelemetry
 from .arena import ARENA_DEFAULTS, ArenaDefaults, load_arena_defaults
 from .config import BotConfig, CONFIG_FILE, load_config_file, merge_config
 from .planners import PLANNER_REGISTRY, planner_catalog
@@ -18,6 +20,8 @@ from .runtime import BotContext
 
 __all__ = [
     "ACTION_REGISTRY",
+    "AgentMemoryStore",
+    "AgentTelemetry",
     "AgentType",
     "ARENA_DEFAULTS",
     "ArenaDefaults",

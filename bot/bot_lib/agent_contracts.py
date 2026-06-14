@@ -294,6 +294,7 @@ class AgentMemoryEntry:
     data: dict[str, Any] = field(default_factory=dict)
     created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     schema_version: int = SCHEMA_VERSION
+    agent_type: str = AgentType.ATTACK_DEFENSE
 
     def __post_init__(self) -> None:
         for name in ("agent_id", "run_id", "kind"):
@@ -306,6 +307,7 @@ class AgentMemoryEntry:
         return {
             "schema_version": self.schema_version,
             "agent_id": self.agent_id,
+            "agent_type": self.agent_type,
             "run_id": self.run_id,
             "kind": self.kind,
             "summary": self.summary,

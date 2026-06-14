@@ -20,7 +20,8 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from bot_lib import ARENA_DEFAULTS, action_catalog, planner_catalog
-from bot_lib.agent_contracts import BudgetPolicy, ModelProvider
+from bot_lib.agent_contracts import AgentType, BudgetPolicy, ModelProvider
+from bot_lib.agent_memory import AgentMemoryStore
 from bot_lib.agent_planning import (
     AgentPlanningService,
     DeterministicPlanningFakeProvider,
@@ -265,7 +266,12 @@ class DeploymentStore:
                     pid INTEGER,
                     error TEXT,
                     archived_log TEXT NOT NULL DEFAULT '',
-                    archived_events TEXT NOT NULL DEFAULT ''
+                    archived_events TEXT NOT NULL DEFAULT '',
+                    agent_type TEXT NOT NULL DEFAULT 'scripted',
+                    agent_id TEXT NOT NULL DEFAULT '',
+                    run_id TEXT NOT NULL DEFAULT '',
+                    provider TEXT NOT NULL DEFAULT 'scripted',
+                    model_id TEXT NOT NULL DEFAULT ''
                 )
                 """
             )
@@ -273,20 +279,64 @@ class DeploymentStore:
                 "CREATE INDEX IF NOT EXISTS deployments_team_created "
                 "ON deployments(team_id, created_at DESC)"
             )
+            # Migrate: add identity columns if missing (safe on existing DBs)
+            # NOTE: the agent_type index is created inside _migrate after the column exists.
+            self._migrate(conn)
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        """Add AI-006 identity columns to existing databases without data loss."""
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(deployments)").fetchall()}
+        migrations = [
+            ("agent_type", "TEXT NOT NULL DEFAULT 'scripted'"),
+            ("agent_id", "TEXT NOT NULL DEFAULT ''"),
+            ("run_id", "TEXT NOT NULL DEFAULT ''"),
+            ("provider", "TEXT NOT NULL DEFAULT 'scripted'"),
+            ("model_id", "TEXT NOT NULL DEFAULT ''"),
+        ]
+        for col_name, col_def in migrations:
+            if col_name not in columns:
+                conn.execute(f"ALTER TABLE deployments ADD COLUMN {col_name} {col_def}")
+        # Back-fill agent_id and run_id from id for legacy rows
+        conn.execute(
+            """
+            UPDATE deployments SET agent_id = id, run_id = id
+            WHERE agent_id = '' OR agent_id IS NULL
+            """
+        )
+        # Create the agent_type index now that the column is guaranteed to exist
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS deployments_agent_type ON deployments(agent_type, status)"
+        )
 
     def connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.path, timeout=10)
         conn.row_factory = sqlite3.Row
         return conn
 
-    def insert(self, deployment_id: str, team_id: int, config: dict[str, Any]) -> None:
+    def insert(
+        self,
+        deployment_id: str,
+        team_id: int,
+        config: dict[str, Any],
+        *,
+        agent_type: str = "scripted",
+        agent_id: str = "",
+        run_id: str = "",
+        provider: str = "scripted",
+        model_id: str = "",
+    ) -> None:
         timestamp = _now()
+        # Default agent_id and run_id to deployment_id for backward compat
+        effective_agent_id = agent_id or deployment_id
+        effective_run_id = run_id or deployment_id
         with self.connect() as conn:
             conn.execute(
                 """
                 INSERT INTO deployments (
-                    id, team_id, bot_name, status, config_json, created_at, updated_at
-                ) VALUES (?, ?, ?, 'DEPLOYING', ?, ?, ?)
+                    id, team_id, bot_name, status, config_json, created_at, updated_at,
+                    agent_type, agent_id, run_id, provider, model_id
+                ) VALUES (?, ?, ?, 'DEPLOYING', ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     deployment_id,
@@ -295,6 +345,11 @@ class DeploymentStore:
                     json.dumps(config, sort_keys=True),
                     timestamp,
                     timestamp,
+                    agent_type,
+                    effective_agent_id,
+                    effective_run_id,
+                    provider,
+                    model_id,
                 ),
             )
 
@@ -319,7 +374,15 @@ class DeploymentStore:
         with self.connect() as conn:
             return conn.execute("SELECT * FROM deployments ORDER BY created_at DESC").fetchall()
 
+    def list_by_agent_type(self, agent_type: str) -> list[sqlite3.Row]:
+        with self.connect() as conn:
+            return conn.execute(
+                "SELECT * FROM deployments WHERE agent_type = ? ORDER BY created_at DESC",
+                (agent_type,),
+            ).fetchall()
+
     def active_for_team(self, team_id: int) -> list[sqlite3.Row]:
+        """Return active deployments for a team (any agent type)."""
         with self.connect() as conn:
             return conn.execute(
                 """
@@ -330,10 +393,26 @@ class DeploymentStore:
                 (team_id,),
             ).fetchall()
 
+    def active_by_scope(
+        self,
+        agent_type: str,
+        team_id: int,
+    ) -> list[sqlite3.Row]:
+        """Return active deployments matching the given agent_type and team scope.
 
-STORE = DeploymentStore(DATABASE)
-BUDGET_LEDGER = ModelBudgetLedger(DATABASE)
-PLAN_CREDENTIALS = PlanningCredentialStore(DATABASE)
+        challenge_generator uses team_id=0 (organizer scope) and is unique globally.
+        attack_defense is unique per team.
+        scripted bots are unique per team.
+        """
+        with self.connect() as conn:
+            return conn.execute(
+                """
+                SELECT * FROM deployments
+                WHERE agent_type = ? AND team_id = ? AND status IN ('DEPLOYING', 'RUNNING')
+                ORDER BY created_at DESC
+                """,
+                (agent_type, team_id),
+            ).fetchall()
 
 
 class _UnavailableProvider:
@@ -348,7 +427,7 @@ class _UnavailableProvider:
         raise ModelGatewayError(self.message)
 
 
-def _build_planning_service() -> AgentPlanningService:
+def _build_planning_service(memory: "AgentMemoryStore | None" = None) -> AgentPlanningService:
     primary = ModelProvider(ARENA_DEFAULTS.agent_provider)
     fallback = ModelProvider(ARENA_DEFAULTS.agent_fallback_provider)
     adapters: dict[ModelProvider, ModelProviderAdapter] = {
@@ -396,10 +475,15 @@ def _build_planning_service() -> AgentPlanningService:
         num_teams=ARENA_DEFAULTS.team_count,
         model_id=(ARENA_DEFAULTS.agent_model if primary is not ModelProvider.FAKE else "fake-v1"),
         budget=policy,
+        memory=memory,
     )
 
 
-PLANNING_SERVICE = _build_planning_service()
+STORE = DeploymentStore(DATABASE)
+BUDGET_LEDGER = ModelBudgetLedger(DATABASE)
+PLAN_CREDENTIALS = PlanningCredentialStore(DATABASE)
+AGENT_MEMORY = AgentMemoryStore(DATABASE)
+PLANNING_SERVICE = _build_planning_service(memory=AGENT_MEMORY)
 
 
 def _deployment_events(row: sqlite3.Row) -> list[dict[str, Any]]:
@@ -438,11 +522,22 @@ def _planning_identity(token: str) -> PlanningIdentity | None:
     else:
         candidates = set(range(1, ARENA_DEFAULTS.team_count + 1))
     candidates.discard(credential.team_id)
+    # Resolve stable agent identity from the deployment record (AI-006)
+    agent_id = str(row["agent_id"] or credential.deployment_id)
+    run_id = str(row["run_id"] or credential.deployment_id)
+    raw_agent_type = str(row["agent_type"] or "attack_defense")
+    try:
+        agent_type = AgentType(raw_agent_type)
+    except ValueError:
+        agent_type = AgentType.ATTACK_DEFENSE
     return PlanningIdentity(
         deployment_id=credential.deployment_id,
         team_id=credential.team_id,
         allowed_targets=frozenset(candidates),
         allowed_actions=allowed_actions,
+        agent_id=agent_id,
+        run_id=run_id,
+        agent_type=agent_type,
     )
 
 
@@ -504,6 +599,12 @@ def _deployment_payload(row: sqlite3.Row, include_config: bool = False) -> dict[
         "error": row["error"],
         "container_up": bool((_docker_state(int(row["team_id"])) or {}).get("Running")),
         "summary": _event_summary(events),
+        # AI-006: stable agent identity fields (no credentials)
+        "agent_type": str(row["agent_type"] if row["agent_type"] else "scripted"),
+        "agent_id": str(row["agent_id"] if row["agent_id"] else row["id"]),
+        "run_id": str(row["run_id"] if row["run_id"] else row["id"]),
+        "provider": str(row["provider"] if row["provider"] else "scripted"),
+        "model_id": str(row["model_id"] if row["model_id"] else ""),
     }
     if include_config:
         payload["config"] = json.loads(row["config_json"])
@@ -564,15 +665,59 @@ def _stop_deployment(row: sqlite3.Row, final_status: str = "STOPPED") -> tuple[b
         error=None if rc == 0 else output,
     )
     PLAN_CREDENTIALS.deactivate(str(row["id"]))
+    # Emit agent run_stopped telemetry (AI-007)
+    try:
+        from bot_lib.agent_contracts import AgentType
+        from bot_lib.agent_telemetry import AgentTelemetry
+
+        raw_type = str(row["agent_type"] or "scripted")
+        try:
+            atype = AgentType(raw_type)
+        except ValueError:
+            atype = AgentType.ATTACK_DEFENSE
+        telem = AgentTelemetry(
+            memory=AGENT_MEMORY,
+            agent_id=str(row["agent_id"] or row["id"]),
+            agent_type=atype,
+            run_id=str(row["run_id"] or row["id"]),
+        )
+        telem.run_stopped(reason="stopped", final_status=final_status)
+    except Exception:  # noqa: BLE001 — telemetry must not block stop
+        pass
     return rc == 0, output
 
 
 def _deploy_one(team_id: int, public_config: dict[str, Any]) -> tuple[dict[str, Any], str]:
-    for active in STORE.active_for_team(team_id):
+    # AI-006: enforce scoped uniqueness — stop conflicting active runs of the same type.
+    planner = public_config.get("planner", "scripted")
+    is_model_agent = planner == "model"
+    agent_type_str = "attack_defense" if is_model_agent else "scripted"
+    agent_id = f"team{team_id}-attack-defense" if is_model_agent else ""
+    provider_str = str(ARENA_DEFAULTS.agent_provider) if is_model_agent else "scripted"
+    model_id_str = str(ARENA_DEFAULTS.agent_model or "fake-v1") if is_model_agent else ""
+
+    # Stop same-scope conflicting active runs (does NOT stop other agent types)
+    conflict_scope = STORE.active_by_scope(agent_type_str, team_id)
+    for active in conflict_scope:
         _stop_deployment(active, "SUPERSEDED")
+    # Also stop any legacy scripted bots on this team (all-opponents compat)
+    if not is_model_agent:
+        for active in STORE.active_for_team(team_id):
+            _stop_deployment(active, "SUPERSEDED")
 
     deployment_id = uuid.uuid4().hex[:12]
-    STORE.insert(deployment_id, team_id, public_config)
+    run_id = deployment_id  # run_id == deployment_id for backward compat
+    effective_agent_id = agent_id or deployment_id
+    STORE.insert(
+        deployment_id,
+        team_id,
+        public_config,
+        agent_type=agent_type_str,
+        agent_id=effective_agent_id,
+        run_id=run_id,
+        provider=provider_str,
+        model_id=model_id_str,
+    )
     runtime_config = {
         **public_config,
         "deployment_id": deployment_id,
@@ -582,8 +727,27 @@ def _deploy_one(team_id: int, public_config: dict[str, Any]) -> tuple[dict[str, 
     runtime_config.pop("loop_interval", None)
     runtime_config.pop("watchdog", None)
     plan_token = ""
-    if public_config["planner"] == "model":
+    if is_model_agent:
         plan_token = PLAN_CREDENTIALS.issue(deployment_id, team_id)
+
+    # Emit agent.run_started telemetry (AI-007)
+    try:
+        from bot_lib.agent_contracts import AgentType
+        from bot_lib.agent_telemetry import AgentTelemetry
+
+        try:
+            atype = AgentType(agent_type_str)
+        except ValueError:
+            atype = AgentType.ATTACK_DEFENSE
+        telem = AgentTelemetry(
+            memory=AGENT_MEMORY,
+            agent_id=effective_agent_id,
+            agent_type=atype,
+            run_id=run_id,
+        )
+        telem.run_started(team_id=team_id, provider=provider_str, model_id=model_id_str)
+    except Exception:  # noqa: BLE001 — telemetry must not block deploy
+        pass
 
     temp_path = ""
     try:
@@ -759,17 +923,29 @@ class BotAPIHandler(BaseHTTPRequestHandler):
             run_id = query.get("run_id", [None])[0]
             match_raw = query.get("match_id", [None])[0]
             day = query.get("utc_day", [None])[0]
+            agent_type_filter = query.get("agent_type", [None])[0]
             if match_raw is not None and not str(match_raw).isdigit():
                 self._json(400, {"error": "match_id must be an integer"})
                 return
-            self._json(
-                200,
-                BUDGET_LEDGER.summary(
-                    run_id=run_id,
-                    match_id=int(match_raw) if match_raw is not None else None,
-                    utc_day=day,
-                ),
+            usage_summary = BUDGET_LEDGER.summary(
+                run_id=run_id,
+                match_id=int(match_raw) if match_raw is not None else None,
+                utc_day=day,
             )
+            # AI-007: per-agent-type aggregate if requested
+            if agent_type_filter:
+                rows = STORE.list_by_agent_type(agent_type_filter)
+                run_ids = [str(r["run_id"] or r["id"]) for r in rows]
+                type_cost = 0.0
+                type_calls = 0
+                for rid in run_ids:
+                    s = BUDGET_LEDGER.summary(run_id=rid)
+                    type_cost += s.get("total_cost_usd", 0.0)
+                    type_calls += s.get("total_calls", 0)
+                usage_summary["agent_type_filter"] = agent_type_filter
+                usage_summary["agent_type_total_cost_usd"] = round(type_cost, 8)
+                usage_summary["agent_type_total_calls"] = type_calls
+            self._json(200, usage_summary)
             return
 
         match = re.fullmatch(r"/deployments/([a-zA-Z0-9._-]+)(?:/(events|logs))?", path)
@@ -795,6 +971,42 @@ class BotAPIHandler(BaseHTTPRequestHandler):
             lines = _deployment_logs(active[0]) if active else []
             self._json(200, {"team_id": team_id, "lines": lines})
             return
+
+        # AI-006: /agent-runs endpoints
+        if path == "/agent-runs":
+            query = parse_qs(parsed.query)
+            agent_type_filter = query.get("agent_type", [None])[0]
+            if agent_type_filter:
+                rows = STORE.list_by_agent_type(agent_type_filter)
+            else:
+                rows = STORE.list()
+            self._json(200, {"agent_runs": [_deployment_payload(row) for row in rows]})
+            return
+
+        agent_run_match = re.fullmatch(r"/agent-runs/([a-zA-Z0-9._-]+)(?:/(memory))?", path)
+        if agent_run_match:
+            row = STORE.get(agent_run_match.group(1))
+            if row is None:
+                self._json(404, {"error": "agent run not found"})
+                return
+            resource = agent_run_match.group(2)
+            if resource == "memory":
+                # AI-007: bounded, redacted memory entries
+                query = parse_qs(parsed.query)
+                try:
+                    limit = min(200, max(1, int(query.get("limit", ["50"])[0])))
+                except (ValueError, TypeError):
+                    limit = 50
+                run_id_key = str(row["run_id"] or row["id"])
+                entries = AGENT_MEMORY.recent_as_dicts(run_id_key, limit=limit)
+                self._json(200, {"run_id": run_id_key, "entries": entries})
+            else:
+                self._json(
+                    200,
+                    {"agent_run": _deployment_payload(row, include_config=False)},
+                )
+            return
+
         self._json(404, {"error": "not found"})
 
     def do_POST(self) -> None:
