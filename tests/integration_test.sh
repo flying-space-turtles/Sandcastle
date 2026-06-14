@@ -84,6 +84,22 @@ collect_failure_logs() {
 
 trap 'rc=$?; if ((rc != 0)); then collect_failure_logs; fi' EXIT
 
+checker_plant_token() {
+    local team="$1"
+    local service_name plant_token
+
+    service_name="$(basename "${ARENA_SERVICE_TEMPLATE_PATH%/}")"
+    IFS=$'\t' read -r _ _ plant_token < <(
+        python3 "${ROOT}/gameserver/checker_credentials.py" \
+            --secret "${ARENA_CHECKER_SECRET}" \
+            --team "${team}" \
+            --service "${service_name}"
+    )
+    [[ -n "${plant_token}" ]] ||
+        die "failed to derive checker plant token for team${team}/${service_name}"
+    printf '%s\n' "${plant_token}"
+}
+
 # ---------------------------------------------------------------------------
 # ═══════════════════════════════════════════════════════════════════════════
 #  LOCAL FIXTURE MODE
@@ -485,7 +501,8 @@ run_docker_tests() {
     # STEP 4: Plant a known flag via /internal/plant
     # -----------------------------------------------------------------------
     log_info "[docker] 4/7  flag plant via /internal/plant"
-    TEST_FLAG="FLAG{$(tr -dc a-f0-9 </dev/urandom | head -c 32)}"
+    TEST_FLAG="FLAG{$(python3 -c 'import secrets; print(secrets.token_hex(16))')}"
+    TEAM2_PLANT_TOKEN="$(checker_plant_token 2)"
     # team2 app is at 10.10.2.3:ARENA_SERVICE_PORT inside the ctf network;
     # we use docker exec on team1-vuln so we're inside the correct network.
     plant_response="$(
@@ -493,7 +510,7 @@ run_docker_tests() {
             curl -fsS \
                 --max-time 10 \
                 -X POST \
-                -H "X-Plant-Token: ${SECRET_KEY:-sandcastle-default-secret-change-me}" \
+                -H "X-Plant-Token: ${TEAM2_PLANT_TOKEN}" \
                 -H "Content-Type: application/json" \
                 -d "{\"flag\":\"${TEST_FLAG}\"}" \
                 "http://${ARENA_NETWORK_PREFIX}.2.3:${ARENA_SERVICE_PORT}/internal/plant"
