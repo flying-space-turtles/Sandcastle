@@ -335,6 +335,8 @@ write_team_service_compose() {
     local team_dir="$2"
     local service_dir="${team_dir}/example-vuln"
     local service_name checker_values checker_username checker_password plant_token
+    local dns_server
+    local -a dind_dns_servers
 
     service_name="$(basename "${ARENA_SERVICE_TEMPLATE_PATH%/}")"
     checker_values="$(
@@ -358,10 +360,21 @@ services:
   team${team_num}-vuln-app:
     build:
       context: .
+      network: host
     image: sandcastle/team${team_num}-vuln-app:latest
     container_name: team${team_num}-vuln-app
     ports:
       - "${ARENA_SERVICE_PORT}:${ARENA_SERVICE_PORT}"
+EOF
+        IFS=',' read -r -a dind_dns_servers <<< "${ARENA_DIND_DNS_SERVERS}"
+        if ((${#dind_dns_servers[@]} > 0)); then
+            printf '    dns:\n' >> "${service_dir}/docker-compose.yml"
+            for dns_server in "${dind_dns_servers[@]}"; do
+                [[ -n "${dns_server}" ]] || continue
+                printf '      - %s\n' "${dns_server}" >> "${service_dir}/docker-compose.yml"
+            done
+        fi
+        cat >> "${service_dir}/docker-compose.yml" <<EOF
     environment:
       TEAM_ID: "${team_num}"
       TEAM_NAME: "Team ${team_num}"

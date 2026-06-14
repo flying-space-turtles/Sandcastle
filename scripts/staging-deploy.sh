@@ -85,8 +85,8 @@ failure_report() {
     docker ps -a \
         --filter "label=sandcastle.role" \
         --filter "label=com.docker.compose.project=sandcastle" || true
+    docker compose -f "${ROOT}/docker-compose.yml" logs --no-color --tail=30 || true
     nested_dind_report
-    docker compose -f "${ROOT}/docker-compose.yml" logs --no-color --tail=80 || true
     echo "::endgroup::"
 }
 
