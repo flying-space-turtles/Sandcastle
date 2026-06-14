@@ -201,10 +201,6 @@ button {
   cursor: grabbing;
 }
 
-.react-flow__edge-path {
-  filter: drop-shadow(0 0 5px rgba(56, 189, 248, 0.2));
-}
-
 .react-flow__controls {
   overflow: hidden;
   border: 1px solid rgba(148, 163, 184, 0.2);

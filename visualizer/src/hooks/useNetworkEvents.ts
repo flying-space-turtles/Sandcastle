@@ -3,7 +3,8 @@ import { firewallWsUrl } from '../data/arenaConfig';
 import type { LiveEvent } from '../types';
 
 const MAX_EVENTS = 200;
-const LIVE_WINDOW_SEC = 30;
+const MAX_LIVE_ROUTES = 24;
+const LIVE_WINDOW_MS = 8000;
 
 // Higher number = more severe (determines which event type wins for a src->dst pair)
 const SEVERITY: Record<string, number> = { ssh: 8, telnet: 7, ftp: 6, smtp: 5, mysql: 4, postgres: 4, redis: 4, dns: 3, http: 3, udp: 2, icmp: 2, tcp: 0 };
@@ -35,7 +36,7 @@ const buildEvent = (raw: Record<string, unknown>): LiveEvent => {
 export function useNetworkEvents() {
   const [events, setEvents] = useState<LiveEvent[]>([]);
   const [connected, setConnected] = useState(false);
-  // Increment every 5s so liveEdges ages out stale entries even without new events
+  // Increment so liveEdges ages out stale entries even without new events.
   const [tick, setTick] = useState(0);
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -71,7 +72,7 @@ export function useNetworkEvents() {
 
   useEffect(() => {
     connect();
-    const ticker = setInterval(() => setTick((n) => n + 1), 5000);
+    const ticker = setInterval(() => setTick((n) => n + 1), 2000);
     return () => {
       clearInterval(ticker);
       if (reconnectRef.current) {
@@ -83,23 +84,29 @@ export function useNetworkEvents() {
     };
   }, [connect]);
 
-  // Derive unique src->dst live edges: keep the highest-severity event per pair
-  // within the last LIVE_WINDOW_SEC seconds. Re-evaluated on new events and on
-  // each 5-second tick so stale edges disappear automatically.
+  // Derive unique src->dst live edges: keep the newest high-severity event per
+  // pair within the short browser receive-time window, then cap canvas routes.
   const liveEdges = useMemo<LiveEvent[]>(() => {
-    const now = Date.now() / 1000;
+    const now = Date.now();
     const pairs = new Map<string, LiveEvent>();
     for (const event of events) {
-      if (now - event.ts > LIVE_WINDOW_SEC) {
+      const receivedAt = event._received ?? event.ts * 1000;
+      if (now - receivedAt > LIVE_WINDOW_MS) {
         continue;
       }
       const key = `${event.src}||${event.dst}`;
       const existing = pairs.get(key);
-      if (!existing || severityOf(event.type) > severityOf(existing.type)) {
+      if (
+        !existing ||
+        severityOf(event.type) > severityOf(existing.type) ||
+        (severityOf(event.type) === severityOf(existing.type) && receivedAt > (existing._received ?? existing.ts * 1000))
+      ) {
         pairs.set(key, event);
       }
     }
-    return [...pairs.values()];
+    return [...pairs.values()]
+      .sort((a, b) => (b._received ?? b.ts * 1000) - (a._received ?? a.ts * 1000))
+      .slice(0, MAX_LIVE_ROUTES);
   }, [events, tick]);
 
   return { events, connected, liveEdges };

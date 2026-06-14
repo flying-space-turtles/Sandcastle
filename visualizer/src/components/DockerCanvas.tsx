@@ -154,6 +154,43 @@ const getNodeColor = (node: Node<TopologyNodeData>) => {
   return '#38bdf8';
 };
 
+const buildLiveFlowEdges = (liveEdges: LiveEvent[], firewallNodeId?: string) =>
+  (liveEdges || []).flatMap((event) => {
+    const routeId = `${event.src}||${event.dst}`;
+    if (!firewallNodeId || event.src === firewallNodeId || event.dst === firewallNodeId) {
+      return [
+        makeLiveEdge({
+          id: `live:${routeId}`,
+          source: event.src,
+          target: event.dst,
+          event,
+          label: (event.type || 'tcp').toUpperCase(),
+        }),
+      ];
+    }
+
+    return [
+      makeLiveEdge({
+        id: `live:${routeId}:to-firewall`,
+        source: event.src,
+        target: firewallNodeId,
+        event,
+        label: (event.type || 'tcp').toUpperCase(),
+        sourceHandle: 'right',
+        targetHandle: 'left',
+      }),
+      makeLiveEdge({
+        id: `live:${routeId}:from-firewall`,
+        source: firewallNodeId,
+        target: event.dst,
+        event,
+        label: event.maskedSrcIp ? `MASK ${event.maskedSrcIp}` : 'MASKED',
+        sourceHandle: 'right',
+        targetHandle: 'left',
+      }),
+    ];
+  });
+
 const CanvasInner = ({ topology, onSelectNode, liveEdges }: DockerCanvasProps) => {
   const [hoveredNode, setHoveredNode] = useState<Node<MachineNodeData> | null>(null);
   const nodeTypes = useMemo<NodeTypes>(
@@ -165,47 +202,10 @@ const CanvasInner = ({ topology, onSelectNode, liveEdges }: DockerCanvasProps) =
   );
   const [nodes, setNodes, onNodesChange] = useNodesState(topology.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(topology.edges);
-  const [liveFlowEdges, setLiveFlowEdges] = useState<Array<Edge<TopologyEdgeData>>>([]);
-
-  useEffect(() => {
-    const firewallNodeId = topology.firewallNodeId;
-    setLiveFlowEdges(
-      (liveEdges || []).flatMap((event) => {
-        if (!firewallNodeId || event.src === firewallNodeId || event.dst === firewallNodeId) {
-          return [
-            makeLiveEdge({
-              id: `live:${event.src}||${event.dst}`,
-              source: event.src,
-              target: event.dst,
-              event,
-              label: (event.type || 'tcp').toUpperCase(),
-            }),
-          ];
-        }
-
-        return [
-          makeLiveEdge({
-            id: `live:${event.src}||${firewallNodeId}`,
-            source: event.src,
-            target: firewallNodeId,
-            event,
-            label: (event.type || 'tcp').toUpperCase(),
-            sourceHandle: 'right',
-            targetHandle: 'left',
-          }),
-          makeLiveEdge({
-            id: `live:${firewallNodeId}||${event.dst}`,
-            source: firewallNodeId,
-            target: event.dst,
-            event,
-            label: event.maskedSrcIp ? `MASK ${event.maskedSrcIp}` : 'MASKED',
-            sourceHandle: 'right',
-            targetHandle: 'left',
-          }),
-        ];
-      })
-    );
-  }, [liveEdges, topology.firewallNodeId]);
+  const liveFlowEdges = useMemo(
+    () => buildLiveFlowEdges(liveEdges, topology.firewallNodeId),
+    [liveEdges, topology.firewallNodeId],
+  );
 
   useEffect(() => {
     setNodes(topology.nodes);
