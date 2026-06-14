@@ -6,6 +6,14 @@ set -euo pipefail
 ROOT="${SANDCASTLE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 TEAMS="${SANDCASTLE_STAGING_TEAMS:-2}"
 TIMEOUT="${SANDCASTLE_STAGING_TIMEOUT:-240}"
+PHASE="initializing"
+
+report_failure_phase() {
+    local rc=$?
+    ((rc == 0)) && return
+    echo "[!] [staging-smoke] FAILED during: ${PHASE}" >&2
+}
+trap report_failure_phase EXIT
 
 usage() {
     cat <<'EOF'
@@ -58,15 +66,21 @@ while (($#)); do
     esac
 done
 
+PHASE="generating DinD topology"
 echo "[*] [staging-smoke] Generating DinD topology..."
 "${ROOT}/scripts/setup.sh" --teams "${TEAMS}" --dind --remove-orphan-containers
+PHASE="checking firewall preflight"
 echo "[*] [staging-smoke] Checking firewall preflight..."
 "${ROOT}/scripts/firewall-preflight.sh" --check
+PHASE="running doctor before startup"
 echo "[*] [staging-smoke] Running doctor before startup..."
 "${ROOT}/scripts/doctor.sh"
+PHASE="starting disposable DinD arena"
 echo "[*] [staging-smoke] Starting disposable DinD arena..."
 "${ROOT}/scripts/arena.sh" reset --timeout "${TIMEOUT}"
+PHASE="running DinD isolation test"
 echo "[*] [staging-smoke] Running DinD isolation test..."
 "${ROOT}/tests/dind_isolation_test.sh"
+PHASE="running full integration test"
 echo "[*] [staging-smoke] Running full integration test..."
 "${ROOT}/tests/integration_test.sh"

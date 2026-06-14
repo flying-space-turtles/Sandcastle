@@ -24,6 +24,19 @@ team_docker() {
     docker exec "team${team}-vuln" docker "$@"
 }
 
+shell_quote() {
+    local value="$1"
+    printf "'%s'" "${value//\'/\'\\\'\'}"
+}
+
+team_service_dir() {
+    local team="$1"
+    local username
+
+    username="$(arena_config_render_team_value "${ARENA_TEAM_USERNAME_PATTERN}" "${team}")"
+    printf '/home/%s/example-vuln\n' "${username}"
+}
+
 expect_running() {
     local name="$1"
     if [[ "$(container_state "${name}")" == "running" ]]; then
@@ -111,8 +124,9 @@ for team in 1 2; do
     fi
 done
 
+team1_service_dir="$(team_service_dir 1)"
 if docker exec team1-vuln sh -lc \
-    'cd "$HOME/example-vuln" && docker compose up -d --build --remove-orphans >/dev/null'; then
+    "cd $(shell_quote "${team1_service_dir}") && docker compose up -d --build --remove-orphans >/dev/null"; then
     pass "team1 can rebuild its own app inside DinD"
 else
     fail "team1 cannot rebuild its own app inside DinD"
