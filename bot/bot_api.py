@@ -31,6 +31,7 @@ from bot_lib.agent_planning import (
 )
 from bot_lib.model_budget import BudgetedModelGateway, ModelBudgetExceeded, ModelBudgetLedger
 from bot_lib.model_gateway import ModelGateway, ModelGatewayError, ModelProviderAdapter
+from bot_lib.gemini_provider import GeminiProvider
 from bot_lib.openai_provider import OpenAIProvider
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -446,11 +447,23 @@ def _build_planning_service(memory: "AgentMemoryStore | None" = None) -> AgentPl
             ModelProvider.OPENAI,
             "OpenAI provider is selected but OPENAI_API_KEY is not configured",
         )
-    for provider in (ModelProvider.OLLAMA, ModelProvider.GEMINI):
-        adapters[provider] = _UnavailableProvider(
-            provider,
-            f"{provider.value} provider is not implemented",
+    gemini_key = os.environ.get("GEMINI_API_KEY", "")
+    if gemini_key:
+        adapters[ModelProvider.GEMINI] = GeminiProvider(
+            api_key=gemini_key,
+            model_id=ARENA_DEFAULTS.agent_model or "gemini-2.0-flash-lite",
+            input_cost_per_million=0.075,
+            output_cost_per_million=0.30,
         )
+    else:
+        adapters[ModelProvider.GEMINI] = _UnavailableProvider(
+            ModelProvider.GEMINI,
+            "Gemini provider is selected but GEMINI_API_KEY is not configured",
+        )
+    adapters[ModelProvider.OLLAMA] = _UnavailableProvider(
+        ModelProvider.OLLAMA,
+        "Ollama provider is not implemented",
+    )
 
     policy = BudgetPolicy(
         max_actions_per_round=ARENA_DEFAULTS.agent_max_calls_per_round,
@@ -794,6 +807,88 @@ def _deploy_one(team_id: int, public_config: dict[str, Any]) -> tuple[dict[str, 
     return _deployment_payload(row, include_config=True), output
 
 
+def _available_providers() -> list[dict[str, Any]]:
+    """Return which providers are configured (no keys exposed)."""
+    providers = [
+        {"id": "fake", "label": "Fake (no cost, offline)", "available": True},
+        {
+            "id": "openai",
+            "label": "OpenAI",
+            "available": bool(os.environ.get("OPENAI_API_KEY")),
+            "models": ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"],
+        },
+        {
+            "id": "gemini",
+            "label": "Google Gemini",
+            "available": bool(os.environ.get("GEMINI_API_KEY")),
+            "models": ["gemini-2.0-flash-lite", "gemini-2.0-flash", "gemini-1.5-pro"],
+        },
+    ]
+    return providers
+
+
+def _agent_log_markdown(run_id: str, limit: int = 100) -> str:
+    """Render agent memory entries as a clean Markdown thinking log."""
+    entries = AGENT_MEMORY.recent_as_dicts(run_id, limit=limit)
+    if not entries:
+        return f"# Agent Log\n\n*No entries yet for run `{run_id}`.*\n"
+
+    lines: list[str] = [f"# Agent Log — `{run_id}`\n"]
+    icon_map = {
+        "tool_call": "⚙️",
+        "tool_result": "✅",
+        "error": "❌",
+        "run_started": "🚀",
+        "run_stopped": "🛑",
+        "observation": "👁️",
+        "plan": "🧠",
+    }
+
+    for e in entries:
+        kind = e.get("kind", "event")
+        icon = icon_map.get(kind, "📝")
+        ts = e.get("created_at", "")[:19].replace("T", " ")
+        summary = e.get("summary", "")
+        data = e.get("data") or {}
+
+        tool_id = data.get("tool_id") or data.get("action_id") or ""
+        title_parts = [icon, kind]
+        if tool_id:
+            title_parts.append(f"`{tool_id}`")
+        title_parts.append(f"• {ts} UTC")
+        lines.append(f"## {' '.join(title_parts)}\n")
+
+        if summary:
+            lines.append(f"**Summary:** {summary}\n")
+
+        status = data.get("status") or e.get("status", "")
+        if status:
+            status_icon = (
+                "✅"
+                if status in ("ok", "committed", "planted")
+                else "❌"
+                if status in ("error", "failed")
+                else "ℹ️"
+            )
+            lines.append(f"**Status:** {status_icon} `{status}`\n")
+
+        display_data = {
+            k: v
+            for k, v in data.items()
+            if k not in ("flag", "password", "token", "secret", "api_key")
+        }
+        if display_data:
+            try:
+                json_str = json.dumps(display_data, indent=2, ensure_ascii=False)
+                lines.append(f"```json\n{json_str[:2000]}\n```\n")
+            except Exception:  # noqa: BLE001
+                pass
+
+        lines.append("---\n")
+
+    return "\n".join(lines)
+
+
 class BotAPIHandler(BaseHTTPRequestHandler):
     server_version = "SandcastleBotController/1.0"
 
@@ -972,6 +1067,11 @@ class BotAPIHandler(BaseHTTPRequestHandler):
             self._json(200, {"team_id": team_id, "lines": lines})
             return
 
+        # AI-015: /providers — available model providers (no keys exposed)
+        if path == "/providers":
+            self._json(200, {"providers": _available_providers()})
+            return
+
         # AI-006: /agent-runs endpoints
         if path == "/agent-runs":
             query = parse_qs(parsed.query)
@@ -983,13 +1083,31 @@ class BotAPIHandler(BaseHTTPRequestHandler):
             self._json(200, {"agent_runs": [_deployment_payload(row) for row in rows]})
             return
 
-        agent_run_match = re.fullmatch(r"/agent-runs/([a-zA-Z0-9._-]+)(?:/(memory))?", path)
+        agent_run_match = re.fullmatch(r"/agent-runs/([a-zA-Z0-9._-]+)(?:/(memory|log))?", path)
         if agent_run_match:
             row = STORE.get(agent_run_match.group(1))
             if row is None:
                 self._json(404, {"error": "agent run not found"})
                 return
             resource = agent_run_match.group(2)
+            if resource == "log":
+                # AI-015: Markdown thinking log
+                query = parse_qs(parsed.query)
+                try:
+                    limit = min(200, max(1, int(query.get("limit", ["100"])[0])))
+                except (ValueError, TypeError):
+                    limit = 100
+                run_id_key = str(row["run_id"] or row["id"])
+                md = _agent_log_markdown(run_id_key, limit=limit)
+                data = md.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/markdown; charset=utf-8")
+                self.send_header("Content-Length", str(len(data)))
+                self._cors()
+                self.end_headers()
+                self.wfile.write(data)
+                return
+
             if resource == "memory":
                 # AI-007: bounded, redacted memory entries
                 query = parse_qs(parsed.query)

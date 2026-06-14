@@ -148,6 +148,10 @@ step "AttackDefenseAgent tests (AI-014)"
 python3 -B "${ROOT}/tests/attack_defense_agent_test.py"
 
 # ---------------------------------------------------------------------------
+step "Two-agent end-to-end deterministic test (AI-016)"
+python3 -B "${ROOT}/tests/two_agent_e2e_test.py"
+
+# ---------------------------------------------------------------------------
 step "Firewall unit tests"
 python3 -B "${ROOT}/tests/firewall_test.py"
 
