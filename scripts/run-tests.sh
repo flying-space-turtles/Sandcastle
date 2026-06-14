@@ -104,6 +104,10 @@ step "Model-backed planner tests"
 python3 -B "${ROOT}/tests/model_planner_test.py"
 
 # ---------------------------------------------------------------------------
+step "Provider-neutral model gateway tests"
+python3 -B "${ROOT}/tests/model_gateway_test.py"
+
+# ---------------------------------------------------------------------------
 step "Firewall unit tests"
 python3 -B "${ROOT}/tests/firewall_test.py"
 
