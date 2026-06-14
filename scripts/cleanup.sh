@@ -42,19 +42,34 @@ remove_containers() {
     local -a containers=()
     local -a matches=()
 
-    mapfile -t matches < <(docker ps -aq --filter "label=sandcastle.role")
+    matches=()
+    while IFS= read -r match; do
+        matches+=("${match}")
+    done < <(docker ps -aq --filter "label=sandcastle.role")
     containers+=("${matches[@]}")
 
-    mapfile -t matches < <(docker ps -aq --filter "label=com.docker.compose.project=sandcastle")
+    matches=()
+    while IFS= read -r match; do
+        matches+=("${match}")
+    done < <(docker ps -aq --filter "label=com.docker.compose.project=sandcastle")
     containers+=("${matches[@]}")
 
-    mapfile -t matches < <(docker ps -aq --filter "label=com.docker.compose.project" --filter "name=^/team[0-9]+-vuln-app$")
+    matches=()
+    while IFS= read -r match; do
+        matches+=("${match}")
+    done < <(docker ps -aq --filter "label=com.docker.compose.project" --filter "name=^/team[0-9]+-vuln-app$")
     containers+=("${matches[@]}")
 
-    mapfile -t matches < <(docker ps -aq --filter "name=^/team[0-9]+-(vuln|ssh|vuln-app)$")
+    matches=()
+    while IFS= read -r match; do
+        matches+=("${match}")
+    done < <(docker ps -aq --filter "name=^/team[0-9]+-(vuln|ssh|vuln-app)$")
     containers+=("${matches[@]}")
 
-    mapfile -t matches < <(docker ps -aq --filter "name=^/sandcastle-(monitor|firewall)$")
+    matches=()
+    while IFS= read -r match; do
+        matches+=("${match}")
+    done < <(docker ps -aq --filter "name=^/sandcastle-(monitor|firewall)$")
     containers+=("${matches[@]}")
 
     if ((${#containers[@]} > 0)); then
@@ -66,13 +81,22 @@ remove_volumes() {
     local -a volumes=()
     local -a matches=()
 
-    mapfile -t matches < <(docker volume ls -q --filter "label=sandcastle.role")
+    matches=()
+    while IFS= read -r match; do
+        matches+=("${match}")
+    done < <(docker volume ls -q --filter "label=sandcastle.role")
     volumes+=("${matches[@]}")
 
-    mapfile -t matches < <(docker volume ls -q --filter "label=com.docker.compose.project=sandcastle")
+    matches=()
+    while IFS= read -r match; do
+        matches+=("${match}")
+    done < <(docker volume ls -q --filter "label=com.docker.compose.project=sandcastle")
     volumes+=("${matches[@]}")
 
-    mapfile -t matches < <(docker volume ls -q --filter "name=^sandcastle_team[0-9]+-data$")
+    matches=()
+    while IFS= read -r match; do
+        matches+=("${match}")
+    done < <(docker volume ls -q --filter "name=^sandcastle_team[0-9]+-data$")
     volumes+=("${matches[@]}")
 
     if ((${#volumes[@]} > 0)); then
@@ -84,10 +108,16 @@ remove_networks() {
     local -a networks=()
     local -a matches=()
 
-    mapfile -t matches < <(docker network ls -q --filter "label=com.docker.compose.project=sandcastle")
+    matches=()
+    while IFS= read -r match; do
+        matches+=("${match}")
+    done < <(docker network ls -q --filter "label=com.docker.compose.project=sandcastle")
     networks+=("${matches[@]}")
 
-    mapfile -t matches < <(docker network ls -q --filter "name=^sandcastle_ctf-network$")
+    matches=()
+    while IFS= read -r match; do
+        matches+=("${match}")
+    done < <(docker network ls -q --filter "name=^sandcastle_ctf-network$")
     networks+=("${matches[@]}")
 
     if ((${#networks[@]} > 0)); then
@@ -98,7 +128,9 @@ remove_networks() {
 remove_images() {
     local -a images=()
 
-    mapfile -t images < <(docker image ls -q --filter "reference=sandcastle/*")
+    while IFS= read -r image; do
+        images+=("${image}")
+    done < <(docker image ls -q --filter "reference=sandcastle/*")
 
     if ((${#images[@]} > 0)); then
         printf '%s\n' "${images[@]}" | sort -u | xargs docker image rm -f

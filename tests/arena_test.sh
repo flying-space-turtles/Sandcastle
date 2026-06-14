@@ -114,6 +114,9 @@ case "${1:-}" in
         if [[ "${scenario}" == "health-fail" && "${machine}" == "team2-vuln" ]]; then
             exit 1
         fi
+        if [[ "${scenario}" == "firewall-runtime-fail" && "${machine}" == "sandcastle-firewall" ]]; then
+            exit 1
+        fi
         echo '{"status":"ok"}'
         exit 0
         ;;
@@ -178,7 +181,6 @@ grep -Fq "Complete arena is healthy" <<< "${up_output}"
 grep -Fq "team1" <<< "${up_output}"
 grep -Fq "healthy" <<< "${up_output}"
 assert_log "setup --remove-orphan-containers --teams 2"
-assert_log "preflight --check"
 assert_log "network-smoke"
 assert_log "docker compose -f ${FIXTURE}/docker-compose.yml up -d --build --remove-orphans"
 assert_log "docker rm -f team1-vuln-app"
@@ -264,20 +266,17 @@ source_after="$(
 
 : > "${LOG_FILE}"
 set +e
-preflight_failure="$(
-    ARENA_TEST_PREFLIGHT_FAIL=1 run_arena healthy up --timeout 1 2>&1
+runtime_failure="$(
+    run_arena firewall-runtime-fail up --timeout 1 2>&1
 )"
-preflight_rc=$?
+runtime_rc=$?
 set -e
-((preflight_rc != 0)) || {
-    echo "Startup should fail when firewall preflight fails" >&2
+((runtime_rc != 0)) || {
+    echo "Startup should fail when firewall runtime checks fail" >&2
     exit 1
 }
-grep -Fq "firewall host preflight failed" <<< "${preflight_failure}"
-if grep -Fq "docker compose -f ${FIXTURE}/docker-compose.yml up" "${LOG_FILE}"; then
-    echo "Infrastructure started after firewall preflight failure" >&2
-    exit 1
-fi
+grep -Fq "firewall enforcement rule or listeners are inactive" <<< "${runtime_failure}"
+grep -Fq "docker compose -f ${FIXTURE}/docker-compose.yml up" "${LOG_FILE}"
 
 : > "${LOG_FILE}"
 set +e

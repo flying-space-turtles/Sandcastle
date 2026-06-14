@@ -38,11 +38,13 @@ Team submission tokens are separate credentials generated from
 
 ### 2. Prepare The Host
 
-Sandcastle requires a native Linux Docker host. Apply the firewall prerequisites
-once, then run the read-only checks:
+Sandcastle is strictest and best supported on native Linux Docker Engine. Docker
+Desktop/macOS is allowed when the Docker runtime can prove the firewall path from
+inside the `sandcastle-firewall` container. Check host-side Docker orchestration,
+then run the read-only doctor:
 
 ```bash
-sudo ./scripts/firewall-preflight.sh --apply
+./scripts/firewall-preflight.sh --check
 ./scripts/doctor.sh
 ```
 
@@ -149,7 +151,8 @@ competition scoring with a live scoreboard and operator console.
 ## Requirements
 
 The current networking implementation targets a native Linux Docker host.
-Docker Desktop on macOS or Windows is not a supported firewall environment.
+Docker Desktop on macOS or Windows is permitted only when the firewall container
+runtime proof and smoke test pass; native Linux remains the strict supported path.
 
 Required:
 
@@ -437,15 +440,14 @@ feed at:
 ws://localhost:6789
 ```
 
-The current implementation depends on team bridge traffic traversing host
-`iptables` PREROUTING. Configure and verify the host once:
+The current implementation depends on team bridge traffic traversing the Docker
+runtime namespace where `sandcastle-firewall` runs. The host script only verifies
+Docker orchestration prerequisites; the firewall container validates bridge
+netfilter visibility, installs the redirect rule, and binds proxy/WebSocket
+ports.
 
-```bash
-sudo ./scripts/firewall-preflight.sh --apply
-./scripts/firewall-preflight.sh --check
-```
-
-`arena.sh up` runs the read-only preflight before startup and then executes:
+`arena.sh up` starts the firewall, verifies the running container, and then
+executes:
 
 ```bash
 ./scripts/smoke-network.sh
@@ -560,7 +562,7 @@ Run the behavioral verifier:
 ```
 
 If preflight fails, run
-`sudo ./scripts/firewall-preflight.sh --apply`. If the smoke test fails, inspect
+`./scripts/firewall-preflight.sh --check`. If the smoke test fails, inspect
 `docker compose logs firewall`; container health alone does not prove bridge
 traffic is being intercepted.
 
@@ -621,6 +623,6 @@ Or run everything with one command:
 For the full Docker integration test (SC-005) on a native Linux host:
 
 ```bash
-sudo ./scripts/firewall-preflight.sh --apply
+./scripts/firewall-preflight.sh --check
 ./tests/integration_test.sh
 ```

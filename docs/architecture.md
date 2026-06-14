@@ -43,11 +43,13 @@ ctf-network (bridge, 10.10.0.0/16)
 Docker Compose creates the shared bridge network and assigns deterministic IP
 addresses so the gameserver, checkers, and teams use stable targets.
 
-The firewall redirects team-to-team TCP traffic through a host transparent
-proxy. This requires a native Linux host with `br_netfilter` and
-`net.bridge.bridge-nf-call-iptables=1`. `scripts/firewall-preflight.sh` verifies
-or configures that requirement, and the firewall process refuses to start when
-the kernel path is inactive.
+The firewall redirects team-to-team TCP traffic through a transparent proxy in
+the Docker runtime namespace used by the `sandcastle-firewall` container. Native
+Linux Docker Engine is the strict supported path, while Docker Desktop/macOS may
+work when the container can see bridge netfilter, install the redirect rule, and
+bind its proxy/WebSocket ports. `scripts/firewall-preflight.sh` only checks
+host-side Docker orchestration; the firewall process refuses to start when the
+runtime kernel path is inactive.
 
 After apps become healthy, `scripts/arena.sh up` runs
 `scripts/smoke-network.sh`. The smoke test proves that a cross-team request

@@ -231,9 +231,18 @@ load_compose_metadata() {
         fi
     done < "${COMPOSE_FILE}"
 
-    mapfile -t SSH_IDS < <(printf '%s\n' "${ssh_raw[@]}" | awk 'NF' | sort -nu)
-    mapfile -t VULN_IDS < <(printf '%s\n' "${vuln_raw[@]}" | awk 'NF' | sort -nu)
-    mapfile -t CONFIGURED_IDS < <(printf '%s\n' "${configured_raw[@]}" | awk 'NF' | sort -nu)
+    SSH_IDS=()
+    while IFS= read -r id; do
+        SSH_IDS+=("${id}")
+    done < <(printf '%s\n' "${ssh_raw[@]}" | awk 'NF' | sort -nu)
+    VULN_IDS=()
+    while IFS= read -r id; do
+        VULN_IDS+=("${id}")
+    done < <(printf '%s\n' "${vuln_raw[@]}" | awk 'NF' | sort -nu)
+    CONFIGURED_IDS=()
+    while IFS= read -r id; do
+        CONFIGURED_IDS+=("${id}")
+    done < <(printf '%s\n' "${configured_raw[@]}" | awk 'NF' | sort -nu)
 
     if ((${#CONFIGURED_IDS[@]} == 0)); then
         report FAIL compose.teams \
@@ -293,13 +302,7 @@ load_compose_metadata() {
 check_host_and_docker() {
     local host_os docker_os current_user socket_type
     host_os="$(uname -s 2>/dev/null || printf 'unknown')"
-    if [[ "${host_os}" == "Linux" ]]; then
-        report PASS host.os "Native Linux host detected."
-    else
-        report FAIL host.os \
-            "Host OS is ${host_os}; the host-network firewall currently requires native Linux." \
-            "Run Sandcastle on a native Linux Docker host; see README.md#requirements."
-    fi
+    report PASS host.os "Host OS is ${host_os}; firewall enforcement is proven in the container runtime."
 
     if ! command -v docker >/dev/null 2>&1; then
         report FAIL docker.cli \
@@ -323,12 +326,8 @@ check_host_and_docker() {
         DOCKER_DAEMON=1
         report PASS docker.daemon "Docker daemon is reachable."
         docker_os="$(docker info --format '{{.OperatingSystem}}' 2>/dev/null || true)"
-        if [[ "${docker_os,,}" == *"docker desktop"* ]]; then
-            report FAIL host.docker-runtime \
-                "Docker reports '${docker_os}', which does not provide the required native host firewall path." \
-                "Use Docker Engine on native Linux; see README.md#requirements."
-        elif [[ -n "${docker_os}" ]]; then
-            report PASS host.docker-runtime "Docker runtime OS: ${docker_os}."
+        if [[ -n "${docker_os}" ]]; then
+            report PASS docker.runtime "Docker runtime OS: ${docker_os}; firewall capability is checked inside sandcastle-firewall."
         fi
     else
         current_user="${USER:-$(id -un 2>/dev/null || printf '<user>')}"
@@ -398,7 +397,10 @@ check_required_ports() {
         REQUIRED_PORT_OWNER["${ARENA_FIREWALL_WS_PORT}"]="sandcastle-firewall"
         REQUIRED_PORT_OWNER["${ARENA_FIREWALL_PROXY_PORT}"]="sandcastle-firewall"
     fi
-    mapfile -t ports < <(printf '%s\n' "${!REQUIRED_PORT_OWNER[@]}" | sort -n)
+    ports=()
+    while IFS= read -r port; do
+        ports+=("${port}")
+    done < <(printf '%s\n' "${!REQUIRED_PORT_OWNER[@]}" | sort -n)
 
     if ((${#missing_config[@]} > 0)); then
         report FAIL host.ports \
@@ -746,13 +748,17 @@ check_firewall() {
     fi
     report PASS firewall.runtime "Firewall container is running."
 
-    bridge_value="$(sysctl -n net.bridge.bridge-nf-call-iptables 2>/dev/null || true)"
+    bridge_value="$(
+        docker exec sandcastle-firewall \
+            sh -ec 'cat /proc/sys/net/bridge/bridge-nf-call-iptables' \
+            2>/dev/null || true
+    )"
     if [[ "${bridge_value}" == "1" ]]; then
-        report PASS firewall.bridge-netfilter "Bridge traffic is configured to traverse iptables."
+        report PASS firewall.bridge-netfilter "Bridge netfilter is visible and enabled inside sandcastle-firewall."
     else
         report FAIL firewall.bridge-netfilter \
-            "net.bridge.bridge-nf-call-iptables is '${bridge_value:-unavailable}', so bridge traffic may bypass the redirect." \
-            "Load br_netfilter and set net.bridge.bridge-nf-call-iptables=1, then rerun ./scripts/doctor.sh; see README.md#firewall-and-activity-feed."
+            "sandcastle-firewall sees net.bridge.bridge-nf-call-iptables as '${bridge_value:-unavailable}', so bridge traffic may bypass the redirect." \
+            "Inspect docker compose logs firewall and the Docker runtime networking environment, then rerun ./scripts/arena.sh restart."
     fi
 
     rules="$(
