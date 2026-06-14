@@ -85,8 +85,48 @@ failure_report() {
     docker ps -a \
         --filter "label=sandcastle.role" \
         --filter "label=com.docker.compose.project=sandcastle" || true
-    docker compose -f "${ROOT}/docker-compose.yml" logs --no-color --tail=120 || true
+    nested_dind_report
+    docker compose -f "${ROOT}/docker-compose.yml" logs --no-color --tail=80 || true
     echo "::endgroup::"
+}
+
+nested_dind_report() {
+    local teams="${SANDCASTLE_STAGING_TEAMS:-2}"
+    local id machine username service_dir service_dir_q
+
+    if [[ -f "${ROOT}/scripts/lib/arena_config.sh" && -f "${ROOT}/config/arena.env" ]]; then
+        # shellcheck source=scripts/lib/arena_config.sh
+        source "${ROOT}/scripts/lib/arena_config.sh"
+        if arena_config_load "${ROOT}" >/dev/null 2>&1; then
+            teams="${ARENA_TEAM_COUNT}"
+        fi
+    fi
+
+    echo "--- nested DinD app diagnostics ---"
+    for ((id = 1; id <= teams; id++)); do
+        machine="team${id}-vuln"
+        if [[ "$(docker inspect --format '{{.State.Status}}' "${machine}" 2>/dev/null || true)" != "running" ]]; then
+            echo "team${id}: ${machine} is not running; nested diagnostics skipped"
+            continue
+        fi
+
+        if command -v arena_config_render_team_value >/dev/null 2>&1; then
+            username="$(arena_config_render_team_value "${ARENA_TEAM_USERNAME_PATTERN:-team{team}}" "${id}")"
+        else
+            username="team${id}"
+        fi
+        service_dir="/home/${username}/example-vuln"
+        service_dir_q="$(shell_quote "${service_dir}")"
+
+        echo "--- team${id}: nested docker ps ---"
+        docker exec "${machine}" docker ps -a || true
+        echo "--- team${id}: nested compose ps ---"
+        docker exec "${machine}" sh -lc "cd ${service_dir_q} && docker compose ps || true" || true
+        echo "--- team${id}: nested app logs ---"
+        docker exec "${machine}" sh -lc "docker logs --tail=160 team${id}-vuln-app || true" || true
+        echo "--- team${id}: nested compose logs ---"
+        docker exec "${machine}" sh -lc "cd ${service_dir_q} && docker compose logs --no-color --tail=160 || true" || true
+    done
 }
 
 remote_run() {
