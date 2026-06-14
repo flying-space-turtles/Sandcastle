@@ -118,6 +118,7 @@ arena_config_load() {
         ARENA_CHECKER_SECRET
     )
 
+    # shellcheck disable=SC2034  # Read by callers after this sourced function returns.
     ARENA_CONFIG_ERROR=""
     if [[ ! -f "${config_file}" ]]; then
         arena_config_error "missing ${config_file}"

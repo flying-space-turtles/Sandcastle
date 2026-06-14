@@ -252,7 +252,7 @@ recreate_apps() {
         app="team${id}-vuln-app"
         compose_file="$(team_compose_file "${id}")"
         [[ -s "${compose_file}" ]] ||
-            die "missing generated app Compose file: ${compose_file#${ROOT}/}"
+            die "missing generated app Compose file: ${compose_file#"${ROOT}"/}"
 
         # network_mode: container:<parent> stores the parent container ID.
         # Removing the old app before Compose up prevents stale namespace reuse.

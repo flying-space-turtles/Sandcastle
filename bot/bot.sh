@@ -197,7 +197,8 @@ probe_plant_endpoint() {
     local team_id=$1
     local url; url=$(service_url "$team_id")
     # generate a random 32-char hex string without /dev/urandom dep on all systems
-    local fake_flag="FLAG{$(cat /proc/sys/kernel/random/uuid 2>/dev/null \
+    local fake_flag
+    fake_flag="FLAG{$(cat /proc/sys/kernel/random/uuid 2>/dev/null \
                     | tr -d '-' | head -c 32 \
                     || openssl rand -hex 16)}"
     log_info "Probing team${team_id} /internal/plant with fake flag: ${fake_flag}"

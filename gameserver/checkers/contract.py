@@ -72,8 +72,7 @@ class CheckerCredentials:
             raise ValueError("checker credential scope must identify a team and service")
         copied_values = dict(self.values)
         if not all(
-            isinstance(key, str) and isinstance(value, str)
-            for key, value in copied_values.items()
+            isinstance(key, str) and isinstance(value, str) for key, value in copied_values.items()
         ):
             raise TypeError("checker credential keys and values must be strings")
         object.__setattr__(self, "values", copied_values)
@@ -178,11 +177,8 @@ class CheckerResult:
 class CheckerPlugin(Protocol):
     metadata: CheckerMetadata
 
-    def put(self, request: PutRequest) -> CheckerOutcome:
-        ...
+    def put(self, request: PutRequest) -> CheckerOutcome: ...
 
-    def get(self, request: GetRequest) -> CheckerOutcome:
-        ...
+    def get(self, request: GetRequest) -> CheckerOutcome: ...
 
-    def check(self, request: CheckRequest) -> CheckerOutcome:
-        ...
+    def check(self, request: CheckRequest) -> CheckerOutcome: ...

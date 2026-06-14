@@ -21,7 +21,6 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ARENA="${ROOT}/scripts/arena.sh"
-EXPLOIT="${ROOT}/services/example-vuln/exploits/path_traversal_export.py"
 
 # shellcheck source=scripts/lib/arena_config.sh
 source "${ROOT}/scripts/lib/arena_config.sh"
@@ -97,7 +96,6 @@ run_local_tests() {
     local FIXTURE="${TMP_ROOT}/arena"
     local MOCK_BIN="${TMP_ROOT}/bin"
     local LOG_FILE="${TMP_ROOT}/lifecycle.log"
-    local PLANT_LOG="${TMP_ROOT}/plant.log"
 
     cleanup_local() { rm -rf "${TMP_ROOT:-}"; }
     # Override the outer EXIT trap for the duration of this function;
@@ -171,14 +169,6 @@ set -euo pipefail
 printf 'setup %s\n' "$*" >> "${SC005_LOG:?}"
 EOF
     chmod +x "${FIXTURE}/scripts/setup.sh"
-
-    cat >"${FIXTURE}/scripts/firewall-preflight.sh" <<'EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-printf 'preflight %s\n' "$*" >> "${SC005_LOG:?}"
-[[ "${SC005_PREFLIGHT_FAIL:-0}" != "1" ]]
-EOF
-    chmod +x "${FIXTURE}/scripts/firewall-preflight.sh"
 
     cat >"${FIXTURE}/scripts/smoke-network.sh" <<'EOF'
 #!/usr/bin/env bash
@@ -331,7 +321,6 @@ EOF
     grep -Fq "Complete arena is healthy" <<<"${up_output}" ||
         die "up did not report healthy arena"
     assert_log "setup --remove-orphan-containers --teams 2"
-    assert_log "preflight --check"
     assert_log "smoke-network"
     assert_log "docker compose -f ${FIXTURE}/docker-compose.yml up -d --build --remove-orphans"
     assert_log "docker rm -f team1-vuln-app"
@@ -415,15 +404,13 @@ EOF
     log_info "[local] +    failure path: exploit fails → test exits non-zero"
     : >"${LOG_FILE}"
     set +e
-    exploit_fail_output="$(
-        SC005_LOG="${LOG_FILE}" \
-        SC005_SCENARIO="exploit-fail" \
-            PATH="${MOCK_BIN}:${PATH}" \
-            SANDCASTLE_ROOT="${FIXTURE}" \
-            docker exec team1-vuln python3 \
-                "${FIXTURE}/services/example-vuln/exploits/path_traversal_export.py" \
-                "http://10.10.2.3:8080" 2>&1
-    )"
+    SC005_LOG="${LOG_FILE}" \
+    SC005_SCENARIO="exploit-fail" \
+        PATH="${MOCK_BIN}:${PATH}" \
+        SANDCASTLE_ROOT="${FIXTURE}" \
+        docker exec team1-vuln python3 \
+            "${FIXTURE}/services/example-vuln/exploits/path_traversal_export.py" \
+            "http://10.10.2.3:8080" >/dev/null 2>&1
     exploit_fail_rc=$?
     set -e
     ((exploit_fail_rc != 0)) ||

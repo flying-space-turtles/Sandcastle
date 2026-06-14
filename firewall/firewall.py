@@ -31,9 +31,7 @@ CTF_NETWORK = ipaddress.ip_network(os.environ["CTF_NETWORK"])
 WS_PORT = int(os.environ["WS_PORT"])
 PROXY_PORT = int(os.environ["PROXY_PORT"])
 EVENT_QUEUE_SIZE = int(os.environ.get("EVENT_QUEUE_SIZE", "2048"))
-CAPTURE_RCVBUF_BYTES = int(
-    os.environ.get("CAPTURE_RCVBUF_BYTES", str(4 * 1024 * 1024))
-)
+CAPTURE_RCVBUF_BYTES = int(os.environ.get("CAPTURE_RCVBUF_BYTES", str(4 * 1024 * 1024)))
 RECENT_ICMP_LIMIT = int(os.environ.get("RECENT_ICMP_LIMIT", "4096"))
 RULE_COMMENT = "sandcastle-firewall-transparent-proxy"
 SO_ORIGINAL_DST = 80
@@ -87,6 +85,7 @@ _UDP_PORT_MAP: dict[int, str] = {
     514: "syslog",
     1194: "openvpn",
 }
+
 
 def _classify_tcp(dport: int, payload: str) -> str:
     if payload.startswith(("GET ", "POST ", "PUT ", "PATCH ", "DELETE ", "HEAD ", "OPTIONS ")):
@@ -168,7 +167,10 @@ def _delete_existing_rules() -> None:
             if proc.returncode == 0:
                 deleted = True
             else:
-                print(f"[firewall] WARNING: could not delete rule {line!r}: {proc.stderr.strip()}", flush=True)
+                print(
+                    f"[firewall] WARNING: could not delete rule {line!r}: {proc.stderr.strip()}",
+                    flush=True,
+                )
 
         if not deleted:
             return
@@ -316,7 +318,11 @@ def _emit_icmp_event(
 
 def _emit_udp_event(src_ip: str, dst_ip: str, src_port: int, dst_port: int, payload: bytes) -> None:
     proto = _UDP_PORT_MAP.get(dst_port) or _UDP_PORT_MAP.get(src_port, "udp")
-    detail = payload[:80].decode("utf-8", errors="replace").split("\n")[0].strip()[:200] if payload else ""
+    detail = (
+        payload[:80].decode("utf-8", errors="replace").split("\n")[0].strip()[:200]
+        if payload
+        else ""
+    )
     event = {
         "id": str(uuid.uuid4()),
         "ts": time.time(),
@@ -331,7 +337,10 @@ def _emit_udp_event(src_ip: str, dst_ip: str, src_port: int, dst_port: int, payl
         "detail": detail,
     }
     _enqueue_event(event)
-    print(f"[event] {proto:<16} {event['src']} ({src_ip}:{src_port}) -> {event['dst']} ({dst_ip}:{dst_port})", flush=True)
+    print(
+        f"[event] {proto:<16} {event['src']} ({src_ip}:{src_port}) -> {event['dst']} ({dst_ip}:{dst_port})",
+        flush=True,
+    )
 
 
 async def _ws_handler(websocket) -> None:
@@ -386,7 +395,9 @@ def _parse_netfilter_attrs(data: bytes) -> dict[int, bytes]:
     return attrs
 
 
-def _parse_conntrack_icmp_event(message: bytes) -> tuple[str, str, int, int | None, int | None] | None:
+def _parse_conntrack_icmp_event(
+    message: bytes,
+) -> tuple[str, str, int, int | None, int | None] | None:
     if len(message) < 4:
         return None
 
@@ -586,7 +597,7 @@ async def _udp_sniff_loop(stop_event: asyncio.Event) -> None:
             dst_ip = socket.inet_ntoa(frame[ip_offset + 16 : ip_offset + 20])
 
             if _in_ctf_network(src_ip) and _in_ctf_network(dst_ip):
-                payload = frame[udp_offset + 8:]
+                payload = frame[udp_offset + 8 :]
                 _emit_udp_event(src_ip, dst_ip, src_port, dst_port, payload)
     finally:
         raw_sock.close()
@@ -636,7 +647,9 @@ async def _handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWri
     try:
         upstream_reader, upstream_writer = await asyncio.open_connection(dst_ip, dst_port)
     except OSError as exc:
-        print(f"[firewall] Upstream connect failed {src_ip} -> {dst_ip}:{dst_port}: {exc}", flush=True)
+        print(
+            f"[firewall] Upstream connect failed {src_ip} -> {dst_ip}:{dst_port}: {exc}", flush=True
+        )
         await _close_writer(writer)
         return
 
@@ -647,7 +660,9 @@ async def _handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWri
 
     first_payload = b""
     try:
-        first_payload = await asyncio.wait_for(reader.read(BUFFER_SIZE), timeout=FIRST_PAYLOAD_TIMEOUT)
+        first_payload = await asyncio.wait_for(
+            reader.read(BUFFER_SIZE), timeout=FIRST_PAYLOAD_TIMEOUT
+        )
     except asyncio.TimeoutError:
         pass
     except OSError as exc:

@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -13,11 +15,9 @@ sys.path.insert(0, str(ROOT / "bot"))
 
 from bot_lib.config import BotConfig
 from bot_lib.model_planner import (
-    ActionSchema,
     BudgetConfig,
     FakePlannerAdapter,
     ModelBackedPlanner,
-    PlannerBudgetError,
     PlannerError,
     PlannerInput,
     PlannerObservation,
@@ -48,6 +48,7 @@ def _raw(*pairs: tuple[int, str]) -> list[RawTask]:
 
 # ── Schema and observation builders ──────────────────────────────────────────
 
+
 class ObservationTests(unittest.TestCase):
     def test_opponents_exclude_own_team(self) -> None:
         ctx = _ctx(num_teams=4, my_team=2)
@@ -69,6 +70,7 @@ class ObservationTests(unittest.TestCase):
 
     def test_observation_as_dict_is_json_serialisable(self) -> None:
         import json
+
         ctx = _ctx()
         obs = build_observation(ctx, [], round_number=1, elapsed_seconds=0.5)
         data = obs.as_dict()
@@ -98,6 +100,7 @@ class ObservationTests(unittest.TestCase):
 
     def test_action_schema_as_dict(self) -> None:
         import json
+
         ctx = _ctx()
         schemas = build_action_schemas(ctx)
         for s in schemas:
@@ -105,6 +108,7 @@ class ObservationTests(unittest.TestCase):
 
 
 # ── Validation ────────────────────────────────────────────────────────────────
+
 
 class ValidationTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -162,10 +166,10 @@ class ValidationTests(unittest.TestCase):
 
     def test_mixed_valid_and_invalid_accepts_only_valid(self) -> None:
         tasks = _raw(
-            (2, "recon.health"),       # valid
-            (2, "nonexistent.action"), # unknown
-            (99, "recon.health"),      # bad target
-            (3, "exploit.sqli"),       # valid
+            (2, "recon.health"),  # valid
+            (2, "nonexistent.action"),  # unknown
+            (99, "recon.health"),  # bad target
+            (3, "exploit.sqli"),  # valid
         )
         output = PlannerOutput(tasks=tasks)
         accepted, errors = validate_plan(output, self.valid_ids, self.valid_targets, self.budget)
@@ -177,14 +181,16 @@ class ValidationTests(unittest.TestCase):
 
 # ── FakePlannerAdapter ────────────────────────────────────────────────────────
 
+
 class FakePlannerAdapterTests(unittest.TestCase):
     def test_scripted_tasks_returned_in_order(self) -> None:
         round1 = _raw((2, "recon.health"))
         round2 = _raw((3, "exploit.sqli"))
         adapter = FakePlannerAdapter(script=[round1, round2])
         dummy_input = PlannerInput(
-            observation=PlannerObservation(my_team=1, num_teams=4, opponent_teams=[2, 3, 4],
-                                           capabilities=[]),
+            observation=PlannerObservation(
+                my_team=1, num_teams=4, opponent_teams=[2, 3, 4], capabilities=[]
+            ),
             action_schemas=[],
             budget=BudgetConfig(),
         )
@@ -197,8 +203,9 @@ class FakePlannerAdapterTests(unittest.TestCase):
     def test_returns_empty_after_script_exhausted(self) -> None:
         adapter = FakePlannerAdapter(script=[_raw((2, "recon.health"))])
         dummy_input = PlannerInput(
-            observation=PlannerObservation(my_team=1, num_teams=3, opponent_teams=[2, 3],
-                                           capabilities=[]),
+            observation=PlannerObservation(
+                my_team=1, num_teams=3, opponent_teams=[2, 3], capabilities=[]
+            ),
             action_schemas=[],
             budget=BudgetConfig(),
         )
@@ -209,8 +216,9 @@ class FakePlannerAdapterTests(unittest.TestCase):
     def test_scripted_exception_is_raised(self) -> None:
         adapter = FakePlannerAdapter(script=[PlannerError("planned failure")])
         dummy_input = PlannerInput(
-            observation=PlannerObservation(my_team=1, num_teams=3, opponent_teams=[2, 3],
-                                           capabilities=[]),
+            observation=PlannerObservation(
+                my_team=1, num_teams=3, opponent_teams=[2, 3], capabilities=[]
+            ),
             action_schemas=[],
             budget=BudgetConfig(),
         )
@@ -220,8 +228,9 @@ class FakePlannerAdapterTests(unittest.TestCase):
     def test_scripted_exception_class_is_instantiated_and_raised(self) -> None:
         adapter = FakePlannerAdapter(script=[PlannerTimeoutError])
         dummy_input = PlannerInput(
-            observation=PlannerObservation(my_team=1, num_teams=3, opponent_teams=[2, 3],
-                                           capabilities=[]),
+            observation=PlannerObservation(
+                my_team=1, num_teams=3, opponent_teams=[2, 3], capabilities=[]
+            ),
             action_schemas=[],
             budget=BudgetConfig(),
         )
@@ -231,8 +240,9 @@ class FakePlannerAdapterTests(unittest.TestCase):
     def test_delay_exceeding_timeout_raises_timeout_error(self) -> None:
         adapter = FakePlannerAdapter(delay_seconds=5.0)
         dummy_input = PlannerInput(
-            observation=PlannerObservation(my_team=1, num_teams=3, opponent_teams=[2, 3],
-                                           capabilities=[]),
+            observation=PlannerObservation(
+                my_team=1, num_teams=3, opponent_teams=[2, 3], capabilities=[]
+            ),
             action_schemas=[],
             budget=BudgetConfig(),
         )
@@ -246,8 +256,9 @@ class FakePlannerAdapterTests(unittest.TestCase):
             model_id="test-model",
         )
         dummy_input = PlannerInput(
-            observation=PlannerObservation(my_team=1, num_teams=3, opponent_teams=[2, 3],
-                                           capabilities=[]),
+            observation=PlannerObservation(
+                my_team=1, num_teams=3, opponent_teams=[2, 3], capabilities=[]
+            ),
             action_schemas=[],
             budget=BudgetConfig(),
         )
@@ -257,6 +268,7 @@ class FakePlannerAdapterTests(unittest.TestCase):
 
 
 # ── ModelBackedPlanner ────────────────────────────────────────────────────────
+
 
 class ModelBackedPlannerTests(unittest.TestCase):
     def test_valid_plan_yields_bot_tasks(self) -> None:
@@ -328,7 +340,7 @@ class ModelBackedPlannerTests(unittest.TestCase):
         adapter = FakePlannerAdapter(script=script)
         planner = ModelBackedPlanner(adapter=adapter)
         ctx = _ctx()
-        first = list(planner.plan(ctx))   # failure → empty
+        first = list(planner.plan(ctx))  # failure → empty
         second = list(planner.plan(ctx))  # success → tasks
         self.assertEqual(first, [])
         self.assertEqual(len(second), 1)
@@ -382,8 +394,6 @@ class ModelBackedPlannerTests(unittest.TestCase):
         self.assertEqual(planner.targets(ctx, override_target=3), [3])
 
     def test_model_usage_event_emitted(self) -> None:
-        import tempfile, json
-        from pathlib import Path
         adapter = FakePlannerAdapter(
             script=[_raw((2, "recon.health"))],
             tokens_per_call=77,
@@ -400,7 +410,7 @@ class ModelBackedPlannerTests(unittest.TestCase):
                 event_file=event_file,
             )
             list(planner.plan(ctx))
-            events = [json.loads(l) for l in Path(event_file).read_text().splitlines()]
+            events = [json.loads(line) for line in Path(event_file).read_text().splitlines()]
         types = [e["type"] for e in events]
         self.assertIn("planner.model_usage", types)
         usage = next(e for e in events if e["type"] == "planner.model_usage")
@@ -409,6 +419,7 @@ class ModelBackedPlannerTests(unittest.TestCase):
 
 
 # ── RemoteModelPlannerAdapter ─────────────────────────────────────────────────
+
 
 class RemoteAdapterTests(unittest.TestCase):
     def test_rejects_empty_endpoint(self) -> None:
@@ -419,12 +430,14 @@ class RemoteAdapterTests(unittest.TestCase):
         import json
         from unittest.mock import MagicMock
 
-        response_body = json.dumps({
-            "tasks": [{"target_team": 2, "action_id": "recon.health"}],
-            "tokens_used": 50,
-            "cost_usd": 0.002,
-            "model_id": "test-model",
-        }).encode()
+        response_body = json.dumps(
+            {
+                "tasks": [{"target_team": 2, "action_id": "recon.health"}],
+                "tokens_used": 50,
+                "cost_usd": 0.002,
+                "model_id": "test-model",
+            }
+        ).encode()
 
         mock_resp = MagicMock()
         mock_resp.read.return_value = response_body
@@ -432,8 +445,9 @@ class RemoteAdapterTests(unittest.TestCase):
         mock_resp.__exit__ = MagicMock(return_value=False)
 
         dummy_input = PlannerInput(
-            observation=PlannerObservation(my_team=1, num_teams=3, opponent_teams=[2, 3],
-                                           capabilities=[]),
+            observation=PlannerObservation(
+                my_team=1, num_teams=3, opponent_teams=[2, 3], capabilities=[]
+            ),
             action_schemas=[],
             budget=BudgetConfig(),
         )
@@ -449,9 +463,11 @@ class RemoteAdapterTests(unittest.TestCase):
 
     def test_network_error_raises_planner_error(self) -> None:
         import urllib.error
+
         dummy_input = PlannerInput(
-            observation=PlannerObservation(my_team=1, num_teams=3, opponent_teams=[2, 3],
-                                           capabilities=[]),
+            observation=PlannerObservation(
+                my_team=1, num_teams=3, opponent_teams=[2, 3], capabilities=[]
+            ),
             action_schemas=[],
             budget=BudgetConfig(),
         )
@@ -462,9 +478,11 @@ class RemoteAdapterTests(unittest.TestCase):
 
     def test_timeout_error_raises_planner_timeout_error(self) -> None:
         import urllib.error
+
         dummy_input = PlannerInput(
-            observation=PlannerObservation(my_team=1, num_teams=3, opponent_teams=[2, 3],
-                                           capabilities=[]),
+            observation=PlannerObservation(
+                my_team=1, num_teams=3, opponent_teams=[2, 3], capabilities=[]
+            ),
             action_schemas=[],
             budget=BudgetConfig(),
         )
@@ -476,9 +494,11 @@ class RemoteAdapterTests(unittest.TestCase):
 
 # ── load_planner integration ──────────────────────────────────────────────────
 
+
 class LoadPlannerIntegrationTests(unittest.TestCase):
     def test_model_planner_loads_via_env(self) -> None:
         import os
+
         env = {
             **os.environ,
             "PLAN_ENDPOINT": "http://bot-controller:8080",

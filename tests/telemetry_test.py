@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import json
-import os
 import sys
 import unittest
 from pathlib import Path
@@ -168,9 +167,18 @@ class ExportTests(unittest.TestCase):
         self.conn.commit()
         events = telemetry.export_match(self.conn, match_id=1)
         ev = events[0]
-        for field in ("id", "schema_version", "event_type", "source",
-                      "match_id", "round_number", "team_id", "payload",
-                      "correlation_id", "created_at"):
+        for field in (
+            "id",
+            "schema_version",
+            "event_type",
+            "source",
+            "match_id",
+            "round_number",
+            "team_id",
+            "payload",
+            "correlation_id",
+            "created_at",
+        ):
             self.assertIn(field, ev, f"missing field: {field}")
         self.assertIsInstance(ev["payload"], dict)
 
@@ -180,8 +188,7 @@ class ExportTests(unittest.TestCase):
 
     def test_export_ordered_by_insertion(self) -> None:
         for i in range(5):
-            telemetry.emit(self.conn, "test.seq", "test", match_id=1,
-                           payload={"seq": i})
+            telemetry.emit(self.conn, "test.seq", "test", match_id=1, payload={"seq": i})
         self.conn.commit()
         events = telemetry.export_match(self.conn, match_id=1)
         seqs = [ev["payload"]["seq"] for ev in events]
@@ -199,10 +206,18 @@ class IngestBatchTests(unittest.TestCase):
 
     def test_bot_events_can_be_stored_with_arbitrary_type(self) -> None:
         bot_events = [
-            {"event_type": "bot.round.completed", "team_id": 1, "round_number": 5,
-             "payload": {"flag_count": 3}},
-            {"event_type": "bot.action.completed", "team_id": 2, "round_number": 5,
-             "payload": {"status": "ok", "action_id": "exploit.cmdi"}},
+            {
+                "event_type": "bot.round.completed",
+                "team_id": 1,
+                "round_number": 5,
+                "payload": {"flag_count": 3},
+            },
+            {
+                "event_type": "bot.action.completed",
+                "team_id": 2,
+                "round_number": 5,
+                "payload": {"status": "ok", "action_id": "exploit.cmdi"},
+            },
         ]
         for ev in bot_events:
             telemetry.emit(
@@ -251,8 +266,12 @@ class SchemaTests(unittest.TestCase):
 
     def test_event_type_constants_defined(self) -> None:
         expected = [
-            "ROUND_STARTED", "ROUND_COMPLETED", "ROUND_FAILED",
-            "SUBMISSION_RECEIVED", "SUBMISSION_ACCEPTED", "SUBMISSION_REJECTED",
+            "ROUND_STARTED",
+            "ROUND_COMPLETED",
+            "ROUND_FAILED",
+            "SUBMISSION_RECEIVED",
+            "SUBMISSION_ACCEPTED",
+            "SUBMISSION_REJECTED",
             "MATCH_STATE_CHANGED",
         ]
         for name in expected:

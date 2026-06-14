@@ -34,7 +34,12 @@ class ScoringTest(unittest.TestCase):
         self.conn.executemany(
             "INSERT INTO teams (id, name, token, ip_address) VALUES (?, ?, ?, ?)",
             [
-                (team_id, f"Team {team_id}", hash_team_token(f"token-{team_id}"), f"10.10.{team_id}.3")
+                (
+                    team_id,
+                    f"Team {team_id}",
+                    hash_team_token(f"token-{team_id}"),
+                    f"10.10.{team_id}.3",
+                )
                 for team_id in range(1, 6)
             ],
         )
@@ -298,9 +303,7 @@ class ScoringMigrationTest(unittest.TestCase):
             )
             """
         )
-        conn.execute(
-            "INSERT INTO teams VALUES (1, 'Team 1', 'legacy-token', '10.10.1.3')"
-        )
+        conn.execute("INSERT INTO teams VALUES (1, 'Team 1', 'legacy-token', '10.10.1.3')")
         conn.execute(
             """
             CREATE TABLE score_events (
@@ -329,9 +332,7 @@ class ScoringMigrationTest(unittest.TestCase):
             {"scoring_policy_version", "attack_points", "defense_points", "sla_points"}
             <= match_columns
         )
-        self.assertTrue(
-            {"match_id", "submission_id", "checker_result_id"} <= event_columns
-        )
+        self.assertTrue({"match_id", "submission_id", "checker_result_id"} <= event_columns)
         self.assertEqual(get_scoring_policy(conn).attack_points, 1.0)
         conn.close()
 

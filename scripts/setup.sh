@@ -576,7 +576,7 @@ print_summary() {
     local i username password submission_token
 
     echo
-    echo "Generated ${teams} team(s) from ${ARENA_CONFIG_FILE#${ROOT}/}."
+    echo "Generated ${teams} team(s) from ${ARENA_CONFIG_FILE#"${ROOT}"/}."
     echo
     printf '%-8s %-15s %-15s %-9s\n' \
         "Team" "SSH IP" "Vuln/App IP" "SSH Port"

@@ -61,7 +61,14 @@ Linear ticket. If you don't have a ticket yet, open one before starting.
 
 ## Running tests locally
 
-**One command runs all fixture-driven checks** (no Docker needed, fast):
+Install the local quality tools first (`shellcheck` from your package manager,
+plus Ruff from the pinned development requirements):
+
+```bash
+python3 -m pip install -r requirements-dev.txt
+```
+
+**One command runs all checks and fixture-driven tests:**
 
 ```bash
 ./scripts/run-tests.sh
@@ -71,19 +78,21 @@ This runs in order:
 
 | Step | What it checks |
 |---|---|
-| `bash -n` | Shell syntax: all `.sh` files under `scripts/`, `bot/`, `tests/` |
-| `py_compile` | Python syntax: bot, firewall, service, exploit modules |
-| `firewall_test.py` | Firewall classification and event unit tests |
+| `bash -n`, ShellCheck | Syntax and static analysis for every tracked shell script |
+| `py_compile`, Ruff | Syntax, formatting, and lint for every tracked Python module |
+| bot component tests | Config, planners, model adapter, actions, API validation, runtime, and submissions |
+| `firewall_test.py` | Firewall parsing, classification, and event unit tests |
 | `gameserver_test.py` | Gameserver schema, registry, state, and API tests |
 | `checker_test.py` | Checker statuses, persistence, scoping, and TurtleNotes workflows |
 | `round_engine_test.py` | Fake-clock scheduling, retries, expiry, concurrency, and recovery |
+| `scoring_test.py`, `telemetry_test.py` | Scoring replay plus telemetry storage and redaction |
 | `firewall_preflight_test.sh` | Host preflight flag handling |
 | `network_smoke_test.sh` | Smoke-network script fixture tests |
 | `doctor_test.sh` | Doctor script fixture tests |
 | `setup_test.sh` | Setup/generation fixture tests |
 | `arena_test.sh` | Arena lifecycle fixture tests |
 | `integration_test.sh --local` | SC-005 integration test (fixture mode) |
-| `docker compose config` | Generated Compose file is syntactically valid |
+| `validate-compose.sh` | Every committed and generated Compose variant is valid |
 | visualizer `npm ci && npm run build` | Visualizer builds |
 
 Skip the visualizer build when iterating quickly:

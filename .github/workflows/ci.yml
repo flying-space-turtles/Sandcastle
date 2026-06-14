@@ -6,28 +6,311 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
-  python-lint:
-    name: Lint Python
+  python-quality:
+    name: Python quality
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
 
-      - name: Install ruff
-        run: pip install ruff
+      - name: Install Python quality tools
+        run: pip install -r requirements-dev.txt
 
-      - name: Check formatting
-        run: ruff format --check scripts/
+      - name: Check Python formatting
+        run: |
+          mkdir -p ci-logs
+          ruff format --check . 2>&1 | tee ci-logs/ruff-format.log
 
-      - name: Lint
-        run: ruff check scripts/
+      - name: Lint all Python source
+        run: ruff check . 2>&1 | tee ci-logs/ruff-check.log
+
+      - name: Upload Python quality logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-quality-logs
+          path: ci-logs/
+          if-no-files-found: ignore
+
+  shell-quality:
+    name: Shell quality
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Check shell syntax
+        run: |
+          mkdir -p ci-logs
+          bash -n scripts/*.sh scripts/lib/*.sh bot/*.sh tests/*.sh \
+            2>&1 | tee ci-logs/bash-syntax.log
+
+      - name: Run ShellCheck
+        run: |
+          shellcheck -x -P scripts/lib $(git ls-files '*.sh') \
+            2>&1 | tee ci-logs/shellcheck.log
+
+      - name: Verify executable scripts
+        run: |
+          result=0
+          while IFS= read -r script; do
+            if [[ ! -x "${script}" ]]; then
+              echo "ERROR: ${script} is not executable"
+              result=1
+            fi
+          done < <(git ls-files '*.sh')
+          exit "${result}"
+
+      - name: Upload shell quality logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shell-quality-logs
+          path: ci-logs/
+          if-no-files-found: ignore
+
+  bot-tests:
+    name: Bot / ${{ matrix.layer }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - layer: config
+            test: tests/bot_config_test.py
+          - layer: planners
+            test: tests/planners_test.py
+          - layer: model-planner
+            test: tests/model_planner_test.py
+          - layer: actions
+            test: tests/actions_test.py
+          - layer: api-validation
+            test: tests/bot_api_test.py
+          - layer: runtime
+            test: tests/bot_test.py
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run ${{ matrix.layer }} tests
+        run: |
+          mkdir -p ci-logs
+          python3 -B "${{ matrix.test }}" 2>&1 | tee "ci-logs/${{ matrix.layer }}.log"
+
+      - name: Upload bot test logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bot-${{ matrix.layer }}-logs
+          path: ci-logs/
+          if-no-files-found: ignore
+
+  firewall-tests:
+    name: Firewall / ${{ matrix.layer }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - layer: parsing-and-events
+            command: python3 -B tests/firewall_test.py
+          - layer: host-preflight
+            command: ./tests/firewall_preflight_test.sh
+          - layer: network-smoke
+            command: ./tests/network_smoke_test.sh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run ${{ matrix.layer }} tests
+        run: |
+          mkdir -p ci-logs
+          ${{ matrix.command }} 2>&1 | tee "ci-logs/${{ matrix.layer }}.log"
+
+      - name: Upload firewall test logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: firewall-${{ matrix.layer }}-logs
+          path: ci-logs/
+          if-no-files-found: ignore
+
+  checker-tests:
+    name: Checker / ${{ matrix.layer }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - layer: runner-contract
+            test_class: CheckerRunnerTest
+          - layer: example-service-plugin
+            test_class: TurtleNotesCheckerTest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/example-vuln/app/requirements.txt
+
+      - name: Install service test dependencies
+        run: pip install -r services/example-vuln/app/requirements.txt
+
+      - name: Run ${{ matrix.layer }} tests
+        run: |
+          mkdir -p ci-logs
+          python3 -B tests/checker_test.py "${{ matrix.test_class }}" \
+            2>&1 | tee "ci-logs/${{ matrix.layer }}.log"
+
+      - name: Upload checker test logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checker-${{ matrix.layer }}-logs
+          path: ci-logs/
+          if-no-files-found: ignore
+
+  gameserver-tests:
+    name: Gameserver / ${{ matrix.layer }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - layer: state
+            command: python3 -B tests/gameserver_test.py GameserverTest
+          - layer: submissions
+            command: python3 -B tests/gameserver_test.py SubmissionServiceTest
+          - layer: api
+            command: python3 -B tests/gameserver_test.py GameserverHTTPTest
+          - layer: round-engine
+            command: python3 -B tests/round_engine_test.py
+          - layer: scoring
+            command: python3 -B tests/scoring_test.py
+          - layer: telemetry
+            command: python3 -B tests/telemetry_test.py
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run ${{ matrix.layer }} tests
+        run: |
+          mkdir -p ci-logs
+          ${{ matrix.command }} 2>&1 | tee "ci-logs/${{ matrix.layer }}.log"
+
+      - name: Upload gameserver test logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gameserver-${{ matrix.layer }}-logs
+          path: ci-logs/
+          if-no-files-found: ignore
+
+  infrastructure-tests:
+    name: Infrastructure / ${{ matrix.layer }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - layer: doctor
+            command: ./tests/doctor_test.sh
+          - layer: generation
+            command: ./tests/setup_test.sh
+          - layer: lifecycle
+            command: ./tests/arena_test.sh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run ${{ matrix.layer }} tests
+        run: |
+          mkdir -p ci-logs
+          ${{ matrix.command }} 2>&1 | tee "ci-logs/${{ matrix.layer }}.log"
+
+      - name: Upload infrastructure test logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: infrastructure-${{ matrix.layer }}-logs
+          path: ci-logs/
+          if-no-files-found: ignore
+
+  compose-validation:
+    name: Compose generation and validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate two-team topology
+        run: |
+          mkdir -p ci-logs
+          ./scripts/setup.sh --teams 2 2>&1 | tee ci-logs/setup.log
+
+      - name: Verify committed generation is current
+        run: git diff --exit-code -- docker-compose.yml config/arena.env
+
+      - name: Validate every Compose variant
+        run: ./scripts/validate-compose.sh 2>&1 | tee ci-logs/compose-validation.log
+
+      - name: Upload Compose validation logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compose-validation-logs
+          path: ci-logs/
+          if-no-files-found: ignore
+
+  dockerfile-validation:
+    name: Dockerfile validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate Dockerfile variants
+        run: ./scripts/setup.sh --teams 2
+
+      - name: Prepare Dockerfile logs
+        run: mkdir -p ci-logs
+
+      - name: Lint every Dockerfile
+        uses: hadolint/hadolint-action@v3.3.0
+        with:
+          dockerfile: Dockerfile
+          recursive: true
+          failure-threshold: error
+          no-color: true
+          output-file: ci-logs/hadolint.log
+
+      - name: Upload Dockerfile validation logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dockerfile-validation-logs
+          path: ci-logs/
+          if-no-files-found: ignore
 
   visualizer-build:
-    name: Build visualizer
+    name: Visualizer build
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -45,124 +328,44 @@ jobs:
         run: npm ci
 
       - name: Build visualizer
-        run: npm run build
+        run: npm run build 2>&1 | tee visualizer-build.log
 
-  gen-compose:
-    name: Validate compose generation
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Generate docker-compose.yml
-        run: ./scripts/setup.sh
-
-      - name: Verify committed generation is current
-        run: git diff --exit-code -- docker-compose.yml config/arena.env
-
-  docker-lint:
-    name: Lint Dockerfile
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Run hadolint
-        uses: hadolint/hadolint-action@v3.1.0
+      - name: Upload visualizer build log
+        if: failure()
+        uses: actions/upload-artifact@v4
         with:
-          dockerfile: docker/ssh/Dockerfile
-          failure-threshold: error
+          name: visualizer-build-log
+          path: visualizer/visualizer-build.log
+          if-no-files-found: ignore
 
-  compose-config:
-    name: Validate docker-compose config
+  reduced-end-to-end:
+    name: Required reduced end-to-end match
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Validate compose syntax
-        run: docker compose -f docker-compose.yml config --quiet
-
-  scripts-executable:
-    name: Verify scripts are executable
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Check executable permissions
+      - name: Run reduced competition lifecycle
         run: |
-          status=0
-          for f in scripts/*.sh tests/*.sh; do
-            if [ ! -x "$f" ]; then
-              echo "ERROR: $f is not executable"
-              status=1
-            fi
-          done
-          exit $status
+          mkdir -p ci-logs
+          ./tests/integration_test.sh --local 2>&1 | tee ci-logs/reduced-end-to-end.log
 
-  doctor-tests:
-    name: Test arena doctor
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Run fixture-driven doctor tests
-        run: ./tests/doctor_test.sh
-
-  setup-tests:
-    name: Test arena generation
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Run fixture-driven setup tests
-        run: ./tests/setup_test.sh
-
-  arena-lifecycle-tests:
-    name: Test arena lifecycle
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Run fixture-driven lifecycle tests
-        run: ./tests/arena_test.sh
-
-  firewall-tests:
-    name: Test firewall enforcement contract
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Run firewall unit tests
-        run: python3 -B tests/firewall_test.py
-
-      - name: Run host preflight tests
-        run: ./tests/firewall_preflight_test.sh
-
-      - name: Run network smoke fixture tests
-        run: ./tests/network_smoke_test.sh
-
-  integration-test-local:
-    name: "Integration test (local fixture mode)"
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Run fixture-driven integration test
-        run: ./tests/integration_test.sh --local
+      - name: Upload reduced match logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: reduced-end-to-end-logs
+          path: ci-logs/
+          if-no-files-found: ignore
 
   integration-test-docker:
-    name: "Integration test (full Docker)"
+    name: Full Docker integration (main)
     runs-on: ubuntu-latest
-    # Full Docker mode requires bridge-nf-call-iptables and a Linux Docker host.
-    # Run only on pushes to main; PRs use the faster fixture mode above.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
 
       - name: Apply firewall bridge-netfilter preflight
         run: sudo ./scripts/firewall-preflight.sh --apply
-        # Some GitHub-hosted runners do not expose the bridge sysctl.
-        # If the preflight cannot be applied the full-Docker test is skipped
-        # rather than failing CI, since the fixture job already covered
-        # control-flow correctness.
         continue-on-error: true
         id: preflight
 
@@ -172,10 +375,10 @@ jobs:
         env:
           SC005_TIMEOUT: "180"
 
-      - name: Upload failure logs
+      - name: Upload full integration logs
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: sc005-failure-logs
+          name: full-integration-logs
           path: sc005-logs/
           if-no-files-found: ignore

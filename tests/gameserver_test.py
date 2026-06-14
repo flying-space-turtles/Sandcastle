@@ -16,7 +16,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "gameserver"))
 
 import db
-import models
 from models import MatchState, validate_state_transition
 from security import hash_team_token, verify_team_token
 from submissions import (
@@ -40,16 +39,21 @@ class GameserverTest(unittest.TestCase):
 
     def test_schema_initialization(self):
         cursor = self.conn.cursor()
-        
+
         # Verify all tables exist
         tables = [
-            "matches", "teams", "services", "rounds", 
-            "flags", "checker_results", "submissions", "score_events"
+            "matches",
+            "teams",
+            "services",
+            "rounds",
+            "flags",
+            "checker_results",
+            "submissions",
+            "score_events",
         ]
         for table in tables:
             cursor.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name=?;", 
-                (table,)
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=?;", (table,)
             )
             self.assertIsNotNone(cursor.fetchone(), f"Table {table} was not created.")
 
@@ -182,16 +186,34 @@ class SubmissionServiceTest(unittest.TestCase):
             """,
             [
                 (
-                    self.flag, 2, 1, "10.10.2.3", "ACTIVE", 3,
-                    "2026-01-01T00:00:00Z", None,
+                    self.flag,
+                    2,
+                    1,
+                    "10.10.2.3",
+                    "ACTIVE",
+                    3,
+                    "2026-01-01T00:00:00Z",
+                    None,
                 ),
                 (
-                    self.self_flag, 1, 1, "10.10.1.3", "ACTIVE", 3,
-                    "2026-01-01T00:00:00Z", None,
+                    self.self_flag,
+                    1,
+                    1,
+                    "10.10.1.3",
+                    "ACTIVE",
+                    3,
+                    "2026-01-01T00:00:00Z",
+                    None,
                 ),
                 (
-                    self.expired_flag, 2, 0, "10.10.2.3", "EXPIRED", 1,
-                    "2025-12-31T23:58:00Z", "2026-01-01T00:00:00Z",
+                    self.expired_flag,
+                    2,
+                    0,
+                    "10.10.2.3",
+                    "EXPIRED",
+                    1,
+                    "2025-12-31T23:58:00Z",
+                    "2026-01-01T00:00:00Z",
                 ),
             ],
         )
@@ -216,7 +238,9 @@ class SubmissionServiceTest(unittest.TestCase):
         conn.close()
 
     def test_submission_outcomes_are_distinct(self):
-        self.assertEqual(record_submission(1, "invalid", self.db_path).code, SubmissionCode.MALFORMED)
+        self.assertEqual(
+            record_submission(1, "invalid", self.db_path).code, SubmissionCode.MALFORMED
+        )
         self.assertEqual(
             record_submission(
                 1,
@@ -293,7 +317,7 @@ class GameserverHTTPTest(unittest.TestCase):
         # Ephemeral local port
         cls.host = "127.0.0.1"
         cls.port = 0  # system assigns free port
-        
+
         # Override DB environment for the handler
         cls.db_file = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
         cls.db_path = cls.db_file.name
@@ -321,6 +345,7 @@ class GameserverHTTPTest(unittest.TestCase):
 
         # Start HTTP server in background thread
         import main
+
         cls.main_module = main
         cls.main_module.GameserverAPIHandler.operator_token = cls.operator_token
         cls.server = ThreadingHTTPServer((cls.host, cls.port), main.GameserverAPIHandler)
@@ -410,16 +435,34 @@ class GameserverHTTPTest(unittest.TestCase):
             """,
             [
                 (
-                    flags["opponent"], 2, 3, "10.10.2.3", "ACTIVE", 5,
-                    "2026-01-01T00:00:00Z", None,
+                    flags["opponent"],
+                    2,
+                    3,
+                    "10.10.2.3",
+                    "ACTIVE",
+                    5,
+                    "2026-01-01T00:00:00Z",
+                    None,
                 ),
                 (
-                    flags["self"], 1, 3, "10.10.1.3", "ACTIVE", 5,
-                    "2026-01-01T00:00:00Z", None,
+                    flags["self"],
+                    1,
+                    3,
+                    "10.10.1.3",
+                    "ACTIVE",
+                    5,
+                    "2026-01-01T00:00:00Z",
+                    None,
                 ),
                 (
-                    flags["expired"], 2, 2, "10.10.2.3", "EXPIRED", 3,
-                    "2025-12-31T23:58:00Z", "2026-01-01T00:00:00Z",
+                    flags["expired"],
+                    2,
+                    2,
+                    "10.10.2.3",
+                    "EXPIRED",
+                    3,
+                    "2025-12-31T23:58:00Z",
+                    "2026-01-01T00:00:00Z",
                 ),
             ],
         )

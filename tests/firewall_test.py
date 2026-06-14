@@ -3,6 +3,8 @@
 import importlib.util
 import os
 import queue
+import socket
+import struct
 import sys
 import types
 import unittest
@@ -71,6 +73,53 @@ class FirewallTest(unittest.TestCase):
         self.assertEqual(event["dstIp"], "10.10.2.3")
         self.assertEqual(event["maskedSrcIp"], "10.10.0.1")
         self.assertEqual(event["type"], "http")
+
+
+class FirewallParsingTest(unittest.TestCase):
+    @staticmethod
+    def _attr(attr_type: int, payload: bytes) -> bytes:
+        length = 4 + len(payload)
+        padding = b"\0" * (firewall._align_netlink(length) - length)
+        return struct.pack("HH", length, attr_type) + payload + padding
+
+    def test_tcp_classification_prefers_http_payload_then_known_port(self):
+        self.assertEqual(firewall._classify_tcp(9999, "GET / HTTP/1.1"), "http")
+        self.assertEqual(firewall._classify_tcp(22, "SSH-2.0-OpenSSH"), "ssh")
+        self.assertEqual(firewall._classify_tcp(9999, "opaque"), "tcp")
+
+    def test_identity_and_network_helpers_handle_known_and_invalid_addresses(self):
+        self.assertEqual(firewall._ip_to_name("10.10.3.2"), "team3-ssh")
+        self.assertEqual(firewall._ip_to_name("10.10.3.3"), "team3-vuln")
+        self.assertEqual(firewall._ip_to_name("192.0.2.1"), "192.0.2.1")
+        self.assertTrue(firewall._in_ctf_network("10.10.4.3"))
+        self.assertFalse(firewall._in_ctf_network("not-an-ip"))
+
+    def test_netlink_message_iterator_honors_alignment_and_truncation(self):
+        first = struct.pack("IHHII", 19, 7, 0, 1, 0) + b"abc" + b"\0"
+        second = struct.pack("IHHII", 18, 8, 0, 2, 0) + b"xy" + b"\0\0"
+        malformed = struct.pack("IHHII", 99, 9, 0, 3, 0)
+
+        self.assertEqual(
+            list(firewall._iter_netlink_messages(first + second + malformed)),
+            [(7, b"abc"), (8, b"xy")],
+        )
+
+    def test_conntrack_icmp_parser_extracts_nested_tuple(self):
+        ip_attrs = self._attr(firewall.CTA_IP_V4_SRC, socket.inet_aton("10.10.1.3"))
+        ip_attrs += self._attr(firewall.CTA_IP_V4_DST, socket.inet_aton("10.10.2.3"))
+        proto_attrs = self._attr(firewall.CTA_PROTO_NUM, bytes([socket.IPPROTO_ICMP]))
+        proto_attrs += self._attr(firewall.CTA_PROTO_ICMP_TYPE, bytes([8]))
+        proto_attrs += self._attr(firewall.CTA_PROTO_ICMP_CODE, bytes([0]))
+        proto_attrs += self._attr(firewall.CTA_PROTO_ICMP_ID, struct.pack("!H", 321))
+        tuple_attrs = self._attr(firewall.CTA_TUPLE_IP, ip_attrs)
+        tuple_attrs += self._attr(firewall.CTA_TUPLE_PROTO, proto_attrs)
+        message = b"\0" * 4 + self._attr(firewall.CTA_TUPLE_ORIG, tuple_attrs)
+
+        self.assertEqual(
+            firewall._parse_conntrack_icmp_event(message),
+            ("10.10.1.3", "10.10.2.3", 8, 0, 321),
+        )
+        self.assertIsNone(firewall._parse_conntrack_icmp_event(b"short"))
 
 
 if __name__ == "__main__":

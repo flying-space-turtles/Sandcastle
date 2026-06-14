@@ -7,7 +7,6 @@ import sqlite3
 import sys
 import tempfile
 import threading
-import time
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -80,15 +79,17 @@ class FakeChecker:
         self,
         put_fail_teams: set[int] | None = None,
         check_fail_teams: set[int] | None = None,
-        delay_seconds: float = 0,
+        synchronize: bool = False,
     ) -> None:
         self.put_fail_teams = put_fail_teams or set()
         self.check_fail_teams = check_fail_teams or set()
-        self.delay_seconds = delay_seconds
+        self.synchronize = synchronize
         self.calls: list[tuple[str, int, str | None]] = []
         self.active = 0
         self.max_active = 0
         self._lock = threading.Lock()
+        self._condition = threading.Condition(self._lock)
+        self._overlap_observed = False
 
     def put(self, request: PutRequest) -> CheckerOutcome:
         return self._call("PUT", request.context.target.team_id, request.flag)
@@ -100,12 +101,16 @@ class FakeChecker:
         return self._call("CHECK", request.context.target.team_id, None)
 
     def _call(self, operation: str, team_id: int, flag: str | None) -> CheckerOutcome:
-        with self._lock:
+        with self._condition:
             self.active += 1
             self.max_active = max(self.max_active, self.active)
+            if self.synchronize and not self._overlap_observed:
+                if self.active >= 2:
+                    self._overlap_observed = True
+                    self._condition.notify_all()
+                else:
+                    self._condition.wait_for(lambda: self._overlap_observed, timeout=1)
         try:
-            if self.delay_seconds:
-                time.sleep(self.delay_seconds)
             with self._lock:
                 self.calls.append((operation, team_id, flag))
             if operation == "PUT" and team_id in self.put_fail_teams:
@@ -140,9 +145,7 @@ class RoundEngineTest(unittest.TestCase):
                 "INSERT INTO teams (id, name, token, ip_address) VALUES (?, ?, ?, ?)",
                 (team_id, f"Team {team_id}", f"token-{team_id}", f"10.10.{team_id}.3"),
             )
-        conn.execute(
-            "INSERT INTO services (id, name, port) VALUES (1, 'example-vuln', 8080)"
-        )
+        conn.execute("INSERT INTO services (id, name, port) VALUES (1, 'example-vuln', 8080)")
         conn.commit()
         conn.close()
 
@@ -186,9 +189,7 @@ class RoundEngineTest(unittest.TestCase):
         rounds = conn.execute(
             "SELECT round_number FROM rounds WHERE match_id = 1 ORDER BY round_number"
         ).fetchall()
-        flags = conn.execute(
-            "SELECT flag FROM flags WHERE match_id = 1 ORDER BY id"
-        ).fetchall()
+        flags = conn.execute("SELECT flag FROM flags WHERE match_id = 1 ORDER BY id").fetchall()
         results = conn.execute("SELECT COUNT(*) FROM checker_results").fetchone()[0]
         conn.close()
         self.assertEqual(rounds, [(1,), (2,)])
@@ -230,7 +231,9 @@ class RoundEngineTest(unittest.TestCase):
         statuses = conn.execute(
             "SELECT team_id, operation, status FROM checker_results ORDER BY team_id, operation"
         ).fetchall()
-        round_status = conn.execute("SELECT status FROM rounds WHERE id = ?", (record.id,)).fetchone()[0]
+        round_status = conn.execute(
+            "SELECT status FROM rounds WHERE id = ?", (record.id,)
+        ).fetchone()[0]
         flag_count = conn.execute("SELECT COUNT(*) FROM flags").fetchone()[0]
         conn.close()
         self.assertIn((1, "PUT", "DOWN"), statuses)
@@ -306,9 +309,7 @@ class RoundEngineTest(unittest.TestCase):
         self.assertEqual(resumed_flags, original_flags)
         self.assertEqual(result_count, 6)
         self.assertEqual(round_count, 1)
-        put_calls_team1 = [
-            call for call in self.checker.calls if call[0] == "PUT" and call[1] == 1
-        ]
+        put_calls_team1 = [call for call in self.checker.calls if call[0] == "PUT" and call[1] == 1]
         self.assertEqual(len(put_calls_team1), 1)
 
     def test_checker_execution_is_bounded(self) -> None:
@@ -317,7 +318,7 @@ class RoundEngineTest(unittest.TestCase):
         self.db_path = handle.name
         handle.close()
         self._initialize_registry(team_count=6)
-        checker = FakeChecker(delay_seconds=0.03)
+        checker = FakeChecker(synchronize=True)
         record = self._engine(checker=checker, max_concurrency=2).tick()
         self.assertEqual(record.status, RoundState.COMPLETED)
         self.assertGreater(checker.max_active, 1)

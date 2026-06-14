@@ -128,8 +128,14 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send_json(200, {"restarted": True, "container": APP_CONTAINER})
             else:
                 log.error("failed to restart %s", APP_CONTAINER)
-                self._send_json(500, {"restarted": False, "container": APP_CONTAINER,
-                                      "error": "docker restart failed"})
+                self._send_json(
+                    500,
+                    {
+                        "restarted": False,
+                        "container": APP_CONTAINER,
+                        "error": "docker restart failed",
+                    },
+                )
             return
 
         self._send_json(404, {"error": "not found"})
@@ -140,8 +146,13 @@ class _Handler(BaseHTTPRequestHandler):
 
 def main() -> None:
     server = HTTPServer(("0.0.0.0", PORT), _Handler)
-    log.info("listening on 0.0.0.0:%d  team=%s  app=%s  allowed_ip=%s",
-             PORT, TEAM_NAME, APP_CONTAINER, _ALLOWED_IP)
+    log.info(
+        "listening on 0.0.0.0:%d  team=%s  app=%s  allowed_ip=%s",
+        PORT,
+        TEAM_NAME,
+        APP_CONTAINER,
+        _ALLOWED_IP,
+    )
 
     def _stop(signum: int, frame: object) -> None:
         log.info("shutting down")
