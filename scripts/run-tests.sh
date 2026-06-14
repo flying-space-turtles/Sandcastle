@@ -80,6 +80,10 @@ step "Bot configuration tests"
 python3 -B "${ROOT}/tests/bot_config_test.py"
 
 # ---------------------------------------------------------------------------
+step "AI agent contract and configuration tests"
+python3 -B "${ROOT}/tests/agent_contracts_test.py"
+
+# ---------------------------------------------------------------------------
 step "Bot planner tests"
 python3 -B "${ROOT}/tests/planners_test.py"
 

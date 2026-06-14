@@ -17,6 +17,18 @@ class ArenaDefaults:
     bot_api_host: str
     bot_api_port: int
     bot_loop_seconds: int
+    agent_provider: str
+    agent_model: str
+    agent_fallback_provider: str
+    agent_max_calls_per_round: int
+    agent_max_calls_per_match: int
+    agent_max_input_chars: int
+    agent_max_output_tokens: int
+    agent_max_cost_usd_per_call: float
+    agent_max_cost_usd_per_match: float
+    agent_max_cost_usd_per_day: float
+    agent_timeout_seconds: float
+    agent_max_retries: int
 
 
 def _candidate_paths() -> list[Path]:
@@ -52,6 +64,29 @@ def _required_int(values: dict[str, str], key: str, minimum: int, maximum: int) 
     return value
 
 
+def _optional_int(
+    values: dict[str, str], key: str, default: int, minimum: int, maximum: int
+) -> int:
+    if not values.get(key):
+        return default
+    return _required_int(values, key, minimum, maximum)
+
+
+def _optional_float(
+    values: dict[str, str], key: str, default: float, minimum: float, maximum: float
+) -> float:
+    raw = values.get(key, "")
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(f"{key} must be a decimal number") from exc
+    if not minimum <= value <= maximum:
+        raise ValueError(f"{key} must be between {minimum} and {maximum}")
+    return value
+
+
 def load_arena_defaults(path: Path | None = None) -> ArenaDefaults:
     config_path = path
     if config_path is None:
@@ -67,6 +102,14 @@ def load_arena_defaults(path: Path | None = None) -> ArenaDefaults:
     service_port = _required_int(values, "ARENA_SERVICE_PORT", 1, 65535)
     bot_api_port = _required_int(values, "ARENA_BOT_API_PORT", 1, 65535)
     bot_loop_seconds = _required_int(values, "ARENA_BOT_LOOP_SECONDS", 0, 86400)
+    agent_provider = values.get("ARENA_AGENT_PROVIDER", "fake")
+    agent_model = values.get("ARENA_AGENT_MODEL", "")
+    agent_fallback_provider = values.get("ARENA_AGENT_FALLBACK_PROVIDER", "fake")
+    supported_providers = {"fake", "openai", "ollama", "gemini"}
+    if agent_provider not in supported_providers:
+        raise ValueError("ARENA_AGENT_PROVIDER is unsupported")
+    if agent_fallback_provider not in supported_providers:
+        raise ValueError("ARENA_AGENT_FALLBACK_PROVIDER is unsupported")
     if ssh_base_port + team_count > 65535:
         raise ValueError("ARENA_SSH_BASE_PORT + ARENA_TEAM_COUNT must not exceed 65535")
 
@@ -90,6 +133,34 @@ def load_arena_defaults(path: Path | None = None) -> ArenaDefaults:
         bot_api_host=bot_api_host,
         bot_api_port=bot_api_port,
         bot_loop_seconds=bot_loop_seconds,
+        agent_provider=agent_provider,
+        agent_model=agent_model,
+        agent_fallback_provider=agent_fallback_provider,
+        agent_max_calls_per_round=_optional_int(
+            values, "ARENA_AGENT_MAX_CALLS_PER_ROUND", 2, 1, 100
+        ),
+        agent_max_calls_per_match=_optional_int(
+            values, "ARENA_AGENT_MAX_CALLS_PER_MATCH", 30, 1, 10000
+        ),
+        agent_max_input_chars=_optional_int(
+            values, "ARENA_AGENT_MAX_INPUT_CHARS", 20000, 1000, 1000000
+        ),
+        agent_max_output_tokens=_optional_int(
+            values, "ARENA_AGENT_MAX_OUTPUT_TOKENS", 500, 1, 100000
+        ),
+        agent_max_cost_usd_per_call=_optional_float(
+            values, "ARENA_AGENT_MAX_COST_USD_PER_CALL", 0.05, 0.000001, 1000.0
+        ),
+        agent_max_cost_usd_per_match=_optional_float(
+            values, "ARENA_AGENT_MAX_COST_USD_PER_MATCH", 0.50, 0.000001, 10000.0
+        ),
+        agent_max_cost_usd_per_day=_optional_float(
+            values, "ARENA_AGENT_MAX_COST_USD_PER_DAY", 1.00, 0.000001, 100000.0
+        ),
+        agent_timeout_seconds=_optional_float(
+            values, "ARENA_AGENT_TIMEOUT_SECONDS", 15.0, 0.1, 300.0
+        ),
+        agent_max_retries=_optional_int(values, "ARENA_AGENT_MAX_RETRIES", 1, 0, 3),
     )
 
 

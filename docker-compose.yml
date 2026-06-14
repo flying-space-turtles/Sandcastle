@@ -29,6 +29,11 @@ x-sandcastle-arena:
   team_max_restarts: 5
   log_max_size: 50m
   log_max_files: 3
+  agent_provider: fake
+  agent_model: disabled
+  agent_max_calls_per_round: 2
+  agent_max_calls_per_match: 30
+  agent_max_cost_usd_per_match: 0.50
 
 networks:
   ctf-network:
@@ -267,6 +272,8 @@ services:
       - bot-controller-data:/data
     environment:
       ARENA_BOT_API_PORT: "7878"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
     labels:
       sandcastle.role: "bot-controller"
       sandcastle.visualizer.hidden: "true"

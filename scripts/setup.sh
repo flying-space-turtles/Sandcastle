@@ -474,6 +474,11 @@ x-sandcastle-arena:
   team_max_restarts: ${ARENA_TEAM_MAX_RESTARTS}
   log_max_size: ${ARENA_LOG_MAX_SIZE}
   log_max_files: ${ARENA_LOG_MAX_FILES}
+  agent_provider: ${ARENA_AGENT_PROVIDER}
+  agent_model: ${ARENA_AGENT_MODEL:-disabled}
+  agent_max_calls_per_round: ${ARENA_AGENT_MAX_CALLS_PER_ROUND}
+  agent_max_calls_per_match: ${ARENA_AGENT_MAX_CALLS_PER_MATCH}
+  agent_max_cost_usd_per_match: ${ARENA_AGENT_MAX_COST_USD_PER_MATCH}
 
 networks:
   ctf-network:
@@ -752,6 +757,8 @@ EOF
       - bot-controller-data:/data
     environment:
       ARENA_BOT_API_PORT: "${ARENA_BOT_API_PORT}"
+      OPENAI_API_KEY: "\${OPENAI_API_KEY:-}"
+      GEMINI_API_KEY: "\${GEMINI_API_KEY:-}"
     labels:
       sandcastle.role: "bot-controller"
       sandcastle.visualizer.hidden: "true"
