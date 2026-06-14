@@ -151,6 +151,8 @@ run_arena() {
     shift
     PATH="${MOCK_BIN}:${PATH}" \
         SANDCASTLE_ROOT="${FIXTURE}" \
+        SANDCASTLE_FIREWALL_PREFLIGHT="${FIXTURE}/scripts/firewall-preflight.sh" \
+        SANDCASTLE_NETWORK_SMOKE="${FIXTURE}/scripts/smoke-network.sh" \
         SANDCASTLE_HEALTH_POLL_SECONDS=1 \
         ARENA_TEST_LOG="${LOG_FILE}" \
         ARENA_TEST_SCENARIO="${scenario}" \
