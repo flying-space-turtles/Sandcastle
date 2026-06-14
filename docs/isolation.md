@@ -6,8 +6,13 @@ By default Sandcastle runs in **trusted-local mode**: every vuln machine is
 given direct access to the host Docker daemon.  That is fine for a closed LAN
 with trusted participants but dangerous for public or external competitions.
 
-`ARENA_ISOLATION_MODE=isolated` switches to a **per-team Docker socket filter
-proxy** that enforces team boundaries at the API level.
+Sandcastle now supports three Docker access modes:
+
+| Mode | Docker access | Intended use |
+|---|---|---|
+| `trusted` | Direct host Docker socket in each vulnerable machine | Fast local development with trusted participants |
+| `isolated` | Per-team filter proxy in front of the host Docker daemon | Lightweight guardrails while preserving the original networking model |
+| `dind` | One `docker:dind` daemon per team | Production-like tests with untrusted participants |
 
 ---
 
@@ -17,13 +22,16 @@ Three isolation mechanisms were considered:
 
 | Approach | Pros | Cons |
 |---|---|---|
-| **Docker-in-Docker (DinD)** | Strong isolation; nested daemon | App containers cannot share the host network namespace (`network_mode: container:teamN-vuln` breaks) |
+| **Docker-in-Docker (DinD)** | Strong daemon isolation; teams cannot query one another's containers | Higher memory/disk use; privileged sidecars; requires service-port forwarding |
 | **Rootless Docker daemon** | Good isolation; uses user namespaces | Complex setup; higher memory overhead per daemon; UID mapping friction |
 | **Unix-socket filter proxy** ✓ | Minimal overhead (~1 ms/request); preserves exact team workflow; surgically scoped | Cannot restrict volume mounts; container-ID side-channel (mitigated) |
 
-The filter proxy was chosen because it is the only option that preserves
-`network_mode: container:teamN-vuln`, which is fundamental to how the
-challenge app shares the vuln machine's IP address.
+The filter proxy remains useful because it preserves
+`network_mode: container:teamN-vuln`, which is the simplest way for the
+challenge app to share the vuln machine's IP address. DinD uses a different
+shape: the app runs inside the team daemon, publishes the service port on the
+DinD sidecar, and `teamN-vuln` forwards `10.10.N.3:SERVICE_PORT` to that
+sidecar.
 
 ---
 
@@ -56,7 +64,7 @@ The vuln machine's own infra containers are read-only because the
 
 ## Enabling isolation
 
-Set in `config/arena.env`:
+For lightweight filtered-host isolation, set in `config/arena.env`:
 
 ```
 ARENA_ISOLATION_MODE=isolated
@@ -71,6 +79,18 @@ Then run `./scripts/arena.sh up` as usual.  `setup.sh` will:
 
 The `/run/sandcastle/` directory is created automatically by `arena.sh up`
 before `docker compose up`.
+
+For Docker-in-Docker production testing, run:
+
+```sh
+./scripts/setup.sh --dind
+./scripts/arena.sh up
+```
+
+`setup.sh --dind` persists `ARENA_ISOLATION_MODE=dind`, generates one
+`teamN-dind` service per team from the official `docker:27-dind` image, and
+mounts that daemon's Unix socket into `teamN-vuln` as the team's only Docker
+API. The host Docker socket is not mounted into the vulnerable machine.
 
 ---
 
@@ -95,7 +115,7 @@ container's `/proc/1/cgroup`), they can pass it as the name in API calls.
 A future improvement would add a name-to-ID lookup step in the proxy so that
 IDs are also checked against the team boundary.
 
-### Volume mounts are not restricted
+### Volume mounts are not restricted in `isolated`
 
 The proxy does not inspect `HostConfig.Binds` on create requests.  A team
 could create a container that bind-mounts host paths.  In isolated mode the
@@ -104,6 +124,14 @@ container running as root could still reach host paths it can read.
 
 Mitigation: enforce `no-new-privileges` and `seccomp` profiles in a future
 hardening pass.
+
+### DinD resource and privilege cost
+
+DinD gives each team its own daemon namespace, which is stronger than API
+filtering but more expensive. Each `teamN-dind` sidecar is privileged and keeps
+its own `/var/lib/docker` volume, so cold builds use more disk, memory, and
+startup time. Use it for production-like staging and untrusted events, not for
+the fastest local edit loop.
 
 ---
 
@@ -142,6 +170,20 @@ SANDCASTLE_ISOLATION_FIXTURE=1 ./tests/isolation_test.sh
 
 The fixture starts two proxy processes on the host and exercises all ACL
 rules.  It exits non-zero if any test fails.
+
+Run the DinD runtime checks against a running DinD arena:
+
+```sh
+./scripts/setup.sh --dind --teams 2
+./scripts/arena.sh up
+./tests/dind_isolation_test.sh
+```
+
+For a disposable cloud VM or self-hosted CI runner, use:
+
+```sh
+./scripts/staging-dind-smoke.sh
+```
 
 ---
 

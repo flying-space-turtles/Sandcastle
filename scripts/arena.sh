@@ -187,13 +187,47 @@ container_exists() {
     docker inspect "$1" >/dev/null 2>&1
 }
 
+team_username() {
+    arena_config_render_team_value "${ARENA_TEAM_USERNAME_PATTERN}" "$1"
+}
+
+dind_daemon_ready() {
+    local team_id="$1"
+    local machine="team${team_id}-vuln"
+
+    [[ "$(container_state "team${team_id}-dind")" == "running" ]] || return 1
+    [[ "$(container_state "${machine}")" == "running" ]] || return 1
+    docker exec "${machine}" sh -lc \
+        'command -v docker >/dev/null && docker info >/dev/null' \
+        >/dev/null 2>&1
+}
+
+app_container_state() {
+    local team_id="$1"
+    local app="team${team_id}-vuln-app"
+    local state=""
+
+    if [[ "${ARENA_ISOLATION_MODE}" == "dind" ]]; then
+        if state="$(
+            docker exec "team${team_id}-vuln" \
+                docker inspect --format '{{.State.Status}}' "${app}" 2>/dev/null
+        )" && [[ -n "${state}" ]]; then
+            printf '%s\n' "${state}"
+        else
+            printf 'absent\n'
+        fi
+        return
+    fi
+
+    container_state "${app}"
+}
+
 app_is_healthy() {
     local team_id="$1"
     local machine="team${team_id}-vuln"
-    local app="team${team_id}-vuln-app"
 
     [[ "$(container_state "${machine}")" == "running" ]] || return 1
-    [[ "$(container_state "${app}")" == "running" ]] || return 1
+    [[ "$(app_container_state "${team_id}")" == "running" ]] || return 1
     docker exec "${machine}" \
         curl -fsS --max-time 1 "http://127.0.0.1:${ARENA_SERVICE_PORT}/health" \
         >/dev/null 2>&1
@@ -225,6 +259,13 @@ wait_for_infrastructure() {
                     pending+=("${name}")
                 fi
             done
+            if [[ "${ARENA_ISOLATION_MODE}" == "dind" ]]; then
+                if [[ "$(container_state "team${id}-dind")" != "running" ]]; then
+                    pending+=("team${id}-dind")
+                elif ! dind_daemon_ready "${id}"; then
+                    pending+=("team${id}-dind-daemon")
+                fi
+            fi
         done
         if [[ "$(container_state sandcastle-firewall)" != "running" ]]; then
             pending+=("sandcastle-firewall")
@@ -245,7 +286,7 @@ wait_for_infrastructure() {
 }
 
 recreate_apps() {
-    local id app compose_file
+    local id app compose_file username service_dir
 
     echo "[*] Recreating vulnerable apps against the current parent containers..."
     for ((id = 1; id <= ARENA_TEAM_COUNT; id++)); do
@@ -254,13 +295,22 @@ recreate_apps() {
         [[ -s "${compose_file}" ]] ||
             die "missing generated app Compose file: ${compose_file#${ROOT}/}"
 
-        # network_mode: container:<parent> stores the parent container ID.
-        # Removing the old app before Compose up prevents stale namespace reuse.
-        if container_exists "${app}"; then
-            docker rm -f "${app}" >/dev/null
+        if [[ "${ARENA_ISOLATION_MODE}" == "dind" ]]; then
+            username="$(team_username "${id}")"
+            service_dir="/home/${username}/example-vuln"
+            docker exec "team${id}-vuln" sh -lc \
+                "cd '${service_dir}' && docker rm -f '${app}' >/dev/null 2>&1 || true"
+            docker exec "team${id}-vuln" sh -lc \
+                "cd '${service_dir}' && docker compose up -d --build --force-recreate --remove-orphans"
+        else
+            # network_mode: container:<parent> stores the parent container ID.
+            # Removing the old app before Compose up prevents stale namespace reuse.
+            if container_exists "${app}"; then
+                docker rm -f "${app}" >/dev/null
+            fi
+            docker compose -f "${compose_file}" \
+                up -d --build --force-recreate --remove-orphans
         fi
-        docker compose -f "${compose_file}" \
-            up -d --build --force-recreate --remove-orphans
     done
 }
 
@@ -319,7 +369,7 @@ print_status() {
         app="team${id}-vuln-app"
         gateway_state="$(container_state "${gateway}")"
         machine_state="$(container_state "${machine}")"
-        app_state="$(container_state "${app}")"
+        app_state="$(app_container_state "${id}")"
         health="not-running"
         if [[ "${app_state}" == "running" ]]; then
             if app_is_healthy "${id}"; then
@@ -332,15 +382,24 @@ print_status() {
         if [[ "${STATUS_FORMAT}" == "text" ]]; then
             printf 'team%-4s %-10s %-12s %-10s\n' "${id}" "gateway" "${gateway_state}" "-"
             printf 'team%-4s %-10s %-12s %-10s\n' "${id}" "machine" "${machine_state}" "-"
+            if [[ "${ARENA_ISOLATION_MODE}" == "dind" ]]; then
+                printf 'team%-4s %-10s %-12s %-10s\n' "${id}" "dind" "$(container_state "team${id}-dind")" "-"
+            fi
             printf 'team%-4s %-10s %-12s %-10s\n' "${id}" "app" "${app_state}" "${health}"
         else
             printf 'team%s\tgateway\t%s\t-\n' "${id}" "${gateway_state}"
             printf 'team%s\tmachine\t%s\t-\n' "${id}" "${machine_state}"
+            if [[ "${ARENA_ISOLATION_MODE}" == "dind" ]]; then
+                printf 'team%s\tdind\t%s\t-\n' "${id}" "$(container_state "team${id}-dind")"
+            fi
             printf 'team%s\tapp\t%s\t%s\n' "${id}" "${app_state}" "${health}"
         fi
 
         component_ready "${gateway_state}" || ready=1
         component_ready "${machine_state}" || ready=1
+        if [[ "${ARENA_ISOLATION_MODE}" == "dind" ]]; then
+            component_ready "$(container_state "team${id}-dind")" || ready=1
+        fi
         component_ready "${app_state}" "${health}" || ready=1
     done
 
@@ -386,6 +445,8 @@ collect_app_containers() {
     local -a containers=()
     local -a matches=()
 
+    [[ "${ARENA_ISOLATION_MODE:-trusted}" != "dind" ]] || return 0
+
     matches=()
     while IFS= read -r match; do
         matches+=("${match}")
@@ -422,12 +483,18 @@ down_arena() {
 remove_app_data() {
     local -a volumes=()
     local -a matches=()
+    local id
 
     matches=()
     while IFS= read -r match; do
         matches+=("${match}")
     done < <(docker volume ls -q --filter "label=sandcastle.role=vuln-data" 2>/dev/null)
     volumes+=("${matches[@]}")
+    if [[ "${ARENA_ISOLATION_MODE:-trusted}" == "dind" ]]; then
+        for ((id = 1; id <= ARENA_TEAM_COUNT; id++)); do
+            volumes+=("sandcastle_team${id}-dind-data" "sandcastle_team${id}-dind-run")
+        done
+    fi
     matches=()
     while IFS= read -r match; do
         matches+=("${match}")
@@ -476,7 +543,7 @@ up_arena() {
     if [[ "${ARENA_ISOLATION_MODE}" == "isolated" ]]; then
         mkdir -p /run/sandcastle
         chmod 755 /run/sandcastle
-    else
+    elif [[ "${ARENA_ISOLATION_MODE}" == "trusted" ]]; then
         print_trusted_mode_banner
     fi
 

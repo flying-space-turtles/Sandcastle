@@ -155,6 +155,28 @@ assert_contains "${access_output}" "Password:     team1pass"
 assert_contains "${access_output}" "API token:    sandcastle-team1-submission-token-change-me"
 assert_contains "${access_output}" "ws://localhost:6789"
 
+dind_fixture="${TMP_ROOT}/dind"
+make_fixture "${dind_fixture}" 2
+dind_output="$(run_setup "${dind_fixture}" --dind)"
+assert_contains "${dind_output}" "Isolation mode: dind"
+grep -Fq 'ARENA_ISOLATION_MODE=dind' "${dind_fixture}/config/arena.env"
+grep -Fq 'team1-dind:' "${dind_fixture}/docker-compose.yml"
+grep -Fq 'image: docker:27-dind' "${dind_fixture}/docker-compose.yml"
+grep -Fq 'team1-dind-run:/var/run/dind' "${dind_fixture}/docker-compose.yml"
+grep -Fq 'DOCKER_HOST: "unix:///var/run/dind/docker.sock"' "${dind_fixture}/docker-compose.yml"
+team1_vuln_block="$(sed -n '/^  team1-vuln:/,/^  team1-ssh:/p' "${dind_fixture}/docker-compose.yml")"
+if grep -Fq '/var/run/docker.sock:/var/run/docker.sock' <<< "${team1_vuln_block}"; then
+    echo "DinD team vulnerable machine mounted the host Docker socket" >&2
+    exit 1
+fi
+dind_service_compose="${dind_fixture}/teams/generated/team1/example-vuln/docker-compose.yml"
+grep -Fq 'ports:' "${dind_service_compose}"
+grep -Fq '"8080:8080"' "${dind_service_compose}"
+if grep -Fq 'network_mode: "container:team1-vuln"' "${dind_service_compose}"; then
+    echo "DinD team app compose should not use host-container network_mode" >&2
+    exit 1
+fi
+
 printf 'print("participant patch")\n' \
     > "${deterministic_fixture}/teams/generated/team1/example-vuln/app/app.py"
 rm -f \
@@ -225,8 +247,9 @@ grep -Fq 'rm -f team3-ssh team3-vuln' "${DOCKER_LOG}"
 
 collision_fixture="${TMP_ROOT}/port-collision"
 make_fixture "${collision_fixture}" 1
-sed -i 's/^ARENA_SSH_BASE_PORT=.*/ARENA_SSH_BASE_PORT=7800/' \
+sed -i.bak 's/^ARENA_SSH_BASE_PORT=.*/ARENA_SSH_BASE_PORT=7800/' \
     "${collision_fixture}/config/arena.env"
+rm -f "${collision_fixture}/config/arena.env.bak"
 set +e
 collision_output="$(run_setup "${collision_fixture}" --teams 100 2>&1)"
 collision_rc=$?

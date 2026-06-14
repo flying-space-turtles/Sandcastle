@@ -185,10 +185,10 @@ arena_config_load() {
     fi
 
     case "${ARENA_ISOLATION_MODE}" in
-        trusted|isolated) ;;
+        trusted|isolated|dind) ;;
         *)
             arena_config_error \
-                "ARENA_ISOLATION_MODE must be 'trusted' or 'isolated', got '${ARENA_ISOLATION_MODE}'"
+                "ARENA_ISOLATION_MODE must be 'trusted', 'isolated' or 'dind', got '${ARENA_ISOLATION_MODE}'"
             return 1
             ;;
     esac
@@ -288,6 +288,22 @@ arena_config_render_team_value() {
     printf '%s' "${pattern//\{team\}/${team_id}}"
 }
 
+arena_config_copy_file_mode() {
+    local source="$1"
+    local target="$2"
+    local mode
+
+    if mode="$(stat -c '%a' "${source}" 2>/dev/null)"; then
+        chmod "${mode}" "${target}"
+        return
+    fi
+    if mode="$(stat -f '%Lp' "${source}" 2>/dev/null)"; then
+        chmod "${mode}" "${target}"
+        return
+    fi
+    chmod 0644 "${target}"
+}
+
 arena_config_set_team_count() {
     local config_file="$1"
     local team_count="$2"
@@ -311,6 +327,33 @@ arena_config_set_team_count() {
         rm -f "${temp_file}"
         return 1
     }
-    chmod --reference="${config_file}" "${temp_file}"
+    arena_config_copy_file_mode "${config_file}" "${temp_file}"
+    mv "${temp_file}" "${config_file}"
+}
+
+arena_config_set_isolation_mode() {
+    local config_file="$1"
+    local mode="$2"
+    local temp_file
+
+    temp_file="$(mktemp "${config_file}.tmp.XXXXXX")" || return 1
+    awk -v value="${mode}" '
+        BEGIN { updated = 0 }
+        /^ARENA_ISOLATION_MODE=/ {
+            print "ARENA_ISOLATION_MODE=" value
+            updated = 1
+            next
+        }
+        { print }
+        END {
+            if (!updated) {
+                print "ARENA_ISOLATION_MODE=" value
+            }
+        }
+    ' "${config_file}" > "${temp_file}" || {
+        rm -f "${temp_file}"
+        return 1
+    }
+    arena_config_copy_file_mode "${config_file}" "${temp_file}"
     mv "${temp_file}" "${config_file}"
 }

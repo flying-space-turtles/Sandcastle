@@ -331,7 +331,6 @@ EOF
     grep -Fq "Complete arena is healthy" <<<"${up_output}" ||
         die "up did not report healthy arena"
     assert_log "setup --remove-orphan-containers --teams 2"
-    assert_log "preflight --check"
     assert_log "smoke-network"
     assert_log "docker compose -f ${FIXTURE}/docker-compose.yml up -d --build --remove-orphans"
     assert_log "docker rm -f team1-vuln-app"

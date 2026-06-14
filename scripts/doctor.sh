@@ -586,7 +586,7 @@ check_runtime_topology() {
     ((DOCKER_DAEMON)) || return
 
     for name in "${!CONTAINER_STATE[@]}"; do
-        if [[ "${name}" =~ ^team([0-9]+)-(ssh|vuln|vuln-app)$ ]]; then
+        if [[ "${name}" =~ ^team([0-9]+)-(ssh|vuln|vuln-app|dind)$ ]]; then
             id="${BASH_REMATCH[1]}"
             if ! array_contains "${id}" "${CONFIGURED_IDS[@]}"; then
                 if [[ "${CONTAINER_STATE[${name}]}" == "running" ]]; then
@@ -616,6 +616,10 @@ check_runtime_topology() {
                 RUNTIME_ACTIVE=1
             fi
         done
+        if [[ "${ARENA_ISOLATION_MODE:-trusted}" == "dind" &&
+              "${CONTAINER_STATE[team${id}-dind]:-absent}" == "running" ]]; then
+            RUNTIME_ACTIVE=1
+        fi
         if [[ "${CONTAINER_STATE[team${id}-vuln-app]:-absent}" == "running" ]]; then
             RUNTIME_ACTIVE=1
         fi
@@ -636,6 +640,12 @@ check_runtime_topology() {
                 missing+=("${expected}:${state}")
             fi
         done
+        if [[ "${ARENA_ISOLATION_MODE:-trusted}" == "dind" ]]; then
+            state="${CONTAINER_STATE[team${id}-dind]:-absent}"
+            if [[ "${state}" != "running" ]]; then
+                missing+=("team${id}-dind:${state}")
+            fi
+        fi
     done
     state="${CONTAINER_STATE[sandcastle-firewall]:-absent}"
     if [[ "${state}" != "running" ]]; then
@@ -652,7 +662,7 @@ check_runtime_topology() {
 }
 
 check_runtime_docker_access() {
-    local id name mount
+    local id name mount host_mount
     local -a broken=()
 
     ((DOCKER_DAEMON && RUNTIME_ACTIVE)) || return
@@ -660,6 +670,23 @@ check_runtime_docker_access() {
     for id in "${CONFIGURED_IDS[@]}"; do
         name="team${id}-vuln"
         [[ "${CONTAINER_STATE[${name}]:-absent}" == "running" ]] || continue
+        if [[ "${ARENA_ISOLATION_MODE:-trusted}" == "dind" ]]; then
+            host_mount="$(
+                docker inspect \
+                    --format '{{range .Mounts}}{{if eq .Destination "/var/run/docker.sock"}}{{.Type}}|{{.RW}}{{end}}{{end}}' \
+                    "${name}" 2>/dev/null || true
+            )"
+            if [[ -n "${host_mount}" ]]; then
+                broken+=("${name}:host-socket-mounted")
+                continue
+            fi
+            if ! docker exec "${name}" sh -lc \
+                'case "${DOCKER_HOST:-}" in unix://*) test -S "${DOCKER_HOST#unix://}" ;; *) exit 1 ;; esac && docker info >/dev/null' \
+                >/dev/null 2>&1; then
+                broken+=("${name}:dind-access")
+            fi
+            continue
+        fi
         mount="$(
             docker inspect \
                 --format '{{range .Mounts}}{{if eq .Destination "/var/run/docker.sock"}}{{.Type}}|{{.RW}}{{end}}{{end}}' \
@@ -680,6 +707,12 @@ check_runtime_docker_access() {
         report FAIL runtime.docker-access \
             "Vulnerable machines lack required Docker access: $(join_csv "${broken[@]}")." \
             "Inspect docker/vuln/Dockerfile and generated socket mounts, then run ./scripts/arena.sh restart."
+    elif [[ "${ARENA_ISOLATION_MODE:-trusted}" == "dind" ]]; then
+        report PASS runtime.docker-access \
+            "Running vulnerable machines use team-local Docker-in-Docker daemons without the host socket."
+    elif [[ "${ARENA_ISOLATION_MODE:-trusted}" == "isolated" ]]; then
+        report PASS runtime.docker-access \
+            "Running vulnerable machines use per-team filtered Docker sockets."
     else
         report WARN runtime.docker-access \
             "Running vulnerable machines have host Docker control as required by trusted-local mode." \
@@ -705,9 +738,18 @@ check_app_health() {
     fi
 
     for id in "${CONFIGURED_IDS[@]}"; do
-        app="team${id}-vuln-app"
         machine="team${id}-vuln"
-        state="${CONTAINER_STATE[${app}]:-absent}"
+        app="team${id}-vuln-app"
+        if [[ "${ARENA_ISOLATION_MODE:-trusted}" == "dind" ]]; then
+            state="$(
+                docker exec "${machine}" \
+                    docker inspect --format '{{.State.Status}}' "${app}" 2>/dev/null ||
+                    printf 'absent'
+            )"
+            state="${state:-absent}"
+        else
+            state="${CONTAINER_STATE[${app}]:-absent}"
+        fi
         if [[ "${state}" != "running" ]]; then
             stopped+=("${app}:${state}")
             continue

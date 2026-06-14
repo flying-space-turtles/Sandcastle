@@ -28,6 +28,7 @@ RUN apt-get update \
         iputils-ping \
         dnsutils \
         nmap \
+        socat \
         python3 \
         python3-pip \
         git \
@@ -88,8 +89,26 @@ RUN cat > /usr/local/bin/sandcastle-vuln-entrypoint <<'EOF' \
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ -S /var/run/docker.sock ]]; then
-    socket_gid="$(stat -c '%g' /var/run/docker.sock)"
+docker_socket="/var/run/docker.sock"
+if [[ "${DOCKER_HOST:-}" == unix://* ]]; then
+    docker_socket="${DOCKER_HOST#unix://}"
+fi
+
+if [[ "${ARENA_ISOLATION_MODE:-}" == "dind" ]]; then
+    for _ in $(seq 1 60); do
+        [[ -S "${docker_socket}" ]] && break
+        sleep 1
+    done
+    if [[ -S "${docker_socket}" ]]; then
+        ln -sfn "${docker_socket}" /var/run/docker.sock
+    fi
+    printf 'export DOCKER_HOST=%q\n' "${DOCKER_HOST:-unix://${docker_socket}}" \
+        > /etc/profile.d/sandcastle-docker.sh
+    chmod 0644 /etc/profile.d/sandcastle-docker.sh
+fi
+
+if [[ -S "${docker_socket}" ]]; then
+    socket_gid="$(stat -c '%g' "${docker_socket}")"
     socket_group="$(getent group "${socket_gid}" | cut -d: -f1 || true)"
 
     if [[ -z "${socket_group}" ]]; then
@@ -102,6 +121,14 @@ if [[ -S /var/run/docker.sock ]]; then
     fi
 
     usermod -aG "${socket_group}" "${TEAM_USER}"
+fi
+
+if [[ "${ARENA_ISOLATION_MODE:-}" == "dind" ]]; then
+    service_port="${ARENA_SERVICE_PORT:-8080}"
+    dind_target="${SANDCASTLE_DIND_TARGET:-team${TEAM_ID}-dind}"
+    socat \
+        "TCP-LISTEN:${service_port},fork,reuseaddr,bind=0.0.0.0" \
+        "TCP:${dind_target}:${service_port}" &
 fi
 
 python3 /usr/local/bin/sandcastle-service-control &
