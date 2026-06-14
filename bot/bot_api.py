@@ -12,6 +12,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
 import uuid
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -29,6 +30,7 @@ from bot_lib.agent_planning import (
     PlanningIdentity,
     PlanningRequestError,
 )
+from bot_lib.challenge_run_store import ChallengeRunStore
 from bot_lib.model_budget import BudgetedModelGateway, ModelBudgetExceeded, ModelBudgetLedger
 from bot_lib.model_gateway import ModelGateway, ModelGatewayError, ModelProviderAdapter
 from bot_lib.gemini_provider import GeminiProvider
@@ -496,7 +498,170 @@ STORE = DeploymentStore(DATABASE)
 BUDGET_LEDGER = ModelBudgetLedger(DATABASE)
 PLAN_CREDENTIALS = PlanningCredentialStore(DATABASE)
 AGENT_MEMORY = AgentMemoryStore(DATABASE)
+CHALLENGE_STORE = ChallengeRunStore(DATABASE)
 PLANNING_SERVICE = _build_planning_service(memory=AGENT_MEMORY)
+
+# ---------------------------------------------------------------------------
+# Challenge options (driven by agent_contracts constants)
+# ---------------------------------------------------------------------------
+
+_CHALLENGE_OPTIONS: dict[str, Any] = {
+    "vulnerabilities": [
+        {
+            "id": "path_traversal",
+            "label": "Path Traversal",
+            "icon": "🗂️",
+            "description": "Reads arbitrary files via /export?file= — classic directory traversal.",
+        },
+        {
+            "id": "sql_injection",
+            "label": "SQL Injection",
+            "icon": "🗄️",
+            "description": "Bypass login via SQLi and access all stored notes.",
+        },
+        {
+            "id": "command_injection",
+            "label": "Command Injection",
+            "icon": "💻",
+            "description": "Execute arbitrary OS commands through the diagnostics endpoint.",
+        },
+    ],
+    "difficulties": [
+        {
+            "id": "easy",
+            "label": "Easy",
+            "description": "Vulnerability is obvious; minimal obfuscation.",
+        },
+        {
+            "id": "medium",
+            "label": "Medium",
+            "description": "Requires inspection of multiple endpoints; some misdirection.",
+        },
+    ],
+    "decoy_range": {"min": 0, "max": 3},
+    "templates": ["flask-notes-v1"],
+}
+
+
+# ---------------------------------------------------------------------------
+# Background challenge generation
+# ---------------------------------------------------------------------------
+
+
+def _generate_challenge_bg(
+    run_id: str,
+    vulnerability: str,
+    difficulty: str,
+    seed: int,
+    decoy_endpoints: int,
+    max_attempts: int,
+) -> None:
+    """Run ChallengeGeneratorAgent in a background thread.
+
+    Updates CHALLENGE_STORE with status=published or status=failed on completion.
+    All thinking steps are persisted to AGENT_MEMORY (same run_id) for the
+    /challenges/<id>/log endpoint.
+    """
+    try:
+        import sys as _sys
+
+        _sys.path.insert(0, str(REPO_ROOT / "bot"))
+        from challenge.agent import ChallengeGeneratorAgent
+        from challenge.registry import ChallengeRegistry
+        from challenge.validator import ChallengeValidator
+        from bot_lib.agent_contracts import ToolCall
+
+        staging = REPO_ROOT / "challenges" / "staging"
+        published_root = REPO_ROOT / "challenges" / "published"
+        staging.mkdir(parents=True, exist_ok=True)
+        published_root.mkdir(parents=True, exist_ok=True)
+
+        validator = ChallengeValidator(docker=False)
+        registry = ChallengeRegistry(published_root)
+        mem = AGENT_MEMORY  # shared store — run_id is the key
+
+        agent = ChallengeGeneratorAgent(
+            memory=mem,
+            staging_root=staging,
+            validator=validator,
+            registry=registry,
+            max_attempts=max_attempts,
+        )
+
+        spec_dict = {
+            "vulnerability": vulnerability,
+            "difficulty": difficulty,
+            "seed": seed,
+            "decoy_endpoints": decoy_endpoints,
+            "max_attempts": max_attempts,
+        }
+        state = agent.start({**spec_dict, "run_id": run_id})
+
+        # Step through the tool loop (spec.create → render → validate → publish)
+        tools_sequence = [
+            ToolCall(
+                f"{run_id}-c1",
+                "challenge.spec.create",
+                {
+                    "vulnerability": vulnerability,
+                    "difficulty": difficulty,
+                    "seed": seed,
+                    "decoy_endpoints": decoy_endpoints,
+                },
+            ),
+            ToolCall(f"{run_id}-c2", "challenge.render", {}),
+            ToolCall(f"{run_id}-c3", "challenge.validate", {}),
+            ToolCall(f"{run_id}-c4", "challenge.publish", {}),
+        ]
+        for tool in tools_sequence:
+            if state.status != "running":
+                break
+            agent.execute_tool(state, tool)
+
+        challenge_id = state.published_challenge_id
+        if challenge_id:
+            import json as _json
+
+            CHALLENGE_STORE.update(
+                run_id,
+                status="published",
+                challenge_id=challenge_id,
+                spec_json=_json.dumps(spec_dict),
+            )
+        else:
+            error = state.error or "generation did not complete"
+            CHALLENGE_STORE.update(run_id, status="failed", error=error)
+
+    except Exception as exc:  # noqa: BLE001
+        CHALLENGE_STORE.update(run_id, status="failed", error=str(exc))
+
+
+def _deploy_challenge_to_arena(challenge_id: str) -> tuple[bool, str]:
+    """Inject a published challenge into all team containers.
+
+    Runs:
+      setup.sh --service-template challenges/published/<id> --overwrite-services
+      arena.sh up
+
+    Returns (ok, output).
+    """
+    challenge_path = REPO_ROOT / "challenges" / "published" / challenge_id
+    if not challenge_path.is_dir():
+        return False, f"challenge directory not found: {challenge_path}"
+
+    setup_sh = REPO_ROOT / "scripts" / "setup.sh"
+    arena_sh = REPO_ROOT / "scripts" / "arena.sh"
+
+    rc1, out1 = _run(
+        ["bash", str(setup_sh), "--service-template", str(challenge_path), "--overwrite-services"],
+        timeout=120,
+    )
+    if rc1 != 0:
+        return False, f"setup.sh failed:\n{out1}"
+
+    rc2, out2 = _run(["bash", str(arena_sh), "up"], timeout=180)
+    combined = f"setup.sh:\n{out1}\n\narena.sh up:\n{out2}"
+    return rc2 == 0, combined
 
 
 def _deployment_events(row: sqlite3.Row) -> list[dict[str, Any]]:
@@ -1067,6 +1232,43 @@ class BotAPIHandler(BaseHTTPRequestHandler):
             self._json(200, {"team_id": team_id, "lines": lines})
             return
 
+        # Challenge Lab: options, list, detail, log
+        if path == "/challenges/options":
+            self._json(200, _CHALLENGE_OPTIONS)
+            return
+
+        if path == "/challenges":
+            rows = CHALLENGE_STORE.list(limit=100)
+            self._json(200, {"challenges": [ChallengeRunStore.payload(r) for r in rows]})
+            return
+
+        challenge_match = re.fullmatch(r"/challenges/([a-zA-Z0-9._-]+)(?:/(log|deploy))?", path)
+        if challenge_match:
+            run_id = challenge_match.group(1)
+            resource = challenge_match.group(2)
+            row = CHALLENGE_STORE.get(run_id)
+            if row is None:
+                self._json(404, {"error": "challenge run not found"})
+                return
+            if resource == "log":
+                query = parse_qs(parsed.query)
+                try:
+                    limit = min(200, max(1, int(query.get("limit", ["100"])[0])))
+                except (ValueError, TypeError):
+                    limit = 100
+                md = _agent_log_markdown(run_id, limit=limit)
+                data = md.encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/markdown; charset=utf-8")
+                self.send_header("Content-Length", str(len(data)))
+                self._cors()
+                self.end_headers()
+                self.wfile.write(data)
+                return
+            # GET /challenges/<id> — detail (no deploy on GET)
+            self._json(200, {"challenge": ChallengeRunStore.payload(row)})
+            return
+
         # AI-015: /providers — available model providers (no keys exposed)
         if path == "/providers":
             self._json(200, {"providers": _available_providers()})
@@ -1180,6 +1382,79 @@ class BotAPIHandler(BaseHTTPRequestHandler):
                     outputs.append(output)
             self._json(200 if ok else 500, {"ok": ok, "output": "\n".join(outputs)})
             return
+
+        # Challenge Lab POST routes
+        if path == "/challenges/generate":
+            vuln = body.get("vulnerability", "path_traversal")
+            diff = body.get("difficulty", "easy")
+            raw_seed = body.get("seed")
+            try:
+                seed = int(raw_seed) if raw_seed is not None else int(uuid.uuid4().int % (2**31))
+                decoy = max(0, min(3, int(body.get("decoy_endpoints", 0))))
+                attempts = max(1, min(5, int(body.get("max_attempts", 3))))
+            except (TypeError, ValueError) as exc:
+                self._json(400, {"error": str(exc)})
+                return
+            import json as _json
+
+            spec_dict = {
+                "vulnerability": vuln,
+                "difficulty": diff,
+                "seed": seed,
+                "decoy_endpoints": decoy,
+            }
+            run_id = CHALLENGE_STORE.insert(
+                vulnerability=vuln,
+                difficulty=diff,
+                seed=seed,
+                decoy_endpoints=decoy,
+                max_attempts=attempts,
+                provider=body.get("provider", "fake"),
+                model_id=body.get("model_id", ""),
+                spec_json=_json.dumps(spec_dict),
+            )
+            t = threading.Thread(
+                target=_generate_challenge_bg,
+                args=(run_id, vuln, diff, seed, decoy, attempts),
+                daemon=True,
+            )
+            t.start()
+            row = CHALLENGE_STORE.get(run_id)
+            assert row is not None
+            self._json(201, {"ok": True, "challenge": ChallengeRunStore.payload(row)})
+            return
+
+        challenge_deploy_match = re.fullmatch(r"/challenges/([a-zA-Z0-9._-]+)/deploy", path)
+        if challenge_deploy_match:
+            run_id = challenge_deploy_match.group(1)
+            row = CHALLENGE_STORE.get(run_id)
+            if row is None:
+                self._json(404, {"error": "challenge run not found"})
+                return
+            if row.get("status") != "published":
+                self._json(
+                    409, {"error": f"challenge is not published (status={row.get('status')})"}
+                )
+                return
+            challenge_id = row.get("challenge_id")
+            if not challenge_id:
+                self._json(409, {"error": "no challenge_id — publish must complete first"})
+                return
+            ok, output = _deploy_challenge_to_arena(challenge_id)
+            if ok:
+                CHALLENGE_STORE.update(run_id, deployed_at=_now())
+                row = CHALLENGE_STORE.get(run_id)
+            self._json(
+                200 if ok else 500,
+                {
+                    "ok": ok,
+                    "challenge_id": challenge_id,
+                    "output": output[-4000:],  # cap to avoid huge responses
+                    "challenge": ChallengeRunStore.payload(row) if row else None,
+                },
+            )
+            return
+
         self._json(404, {"error": "not found"})
 
 
