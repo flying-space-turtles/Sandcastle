@@ -108,6 +108,10 @@ step "Provider-neutral model gateway tests"
 python3 -B "${ROOT}/tests/model_gateway_test.py"
 
 # ---------------------------------------------------------------------------
+step "Persistent model budget tests"
+python3 -B "${ROOT}/tests/model_budget_test.py"
+
+# ---------------------------------------------------------------------------
 step "Firewall unit tests"
 python3 -B "${ROOT}/tests/firewall_test.py"
 

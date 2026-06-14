@@ -19,6 +19,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from bot_lib import ARENA_DEFAULTS, action_catalog, planner_catalog
+from bot_lib.model_budget import ModelBudgetLedger
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DEPLOY_SH = REPO_ROOT / "bot" / "deploy.sh"
@@ -189,26 +190,31 @@ def _resource_status() -> dict[str, Any]:
     flagged: list[dict[str, Any]] = []
     for c in containers:
         if c["oom_killed"]:
-            flagged.append({
-                "container": c["name"],
-                "type": "resource.oom_kill",
-                "restart_count": c["restart_count"],
-                "mem_limit_bytes": c["mem_limit_bytes"],
-            })
+            flagged.append(
+                {
+                    "container": c["name"],
+                    "type": "resource.oom_kill",
+                    "restart_count": c["restart_count"],
+                    "mem_limit_bytes": c["mem_limit_bytes"],
+                }
+            )
         elif c["restart_count"] >= _RESTART_LOOP_THRESHOLD:
-            flagged.append({
-                "container": c["name"],
-                "type": "resource.restart_loop",
-                "restart_count": c["restart_count"],
-            })
-        if (c["disk_used_pct"] is not None
-                and c["disk_used_pct"] >= _DISK_PRESSURE_THRESHOLD_PCT):
-            flagged.append({
-                "container": c["name"],
-                "type": "resource.disk_pressure",
-                "disk_used_pct": c["disk_used_pct"],
-                "disk_available_bytes": c["disk_available_bytes"],
-            })
+            flagged.append(
+                {
+                    "container": c["name"],
+                    "type": "resource.restart_loop",
+                    "restart_count": c["restart_count"],
+                }
+            )
+        if c["disk_used_pct"] is not None and c["disk_used_pct"] >= _DISK_PRESSURE_THRESHOLD_PCT:
+            flagged.append(
+                {
+                    "container": c["name"],
+                    "type": "resource.disk_pressure",
+                    "disk_used_pct": c["disk_used_pct"],
+                    "disk_available_bytes": c["disk_available_bytes"],
+                }
+            )
     return {"containers": containers, "violations": flagged}
 
 
@@ -310,6 +316,7 @@ class DeploymentStore:
 
 
 STORE = DeploymentStore(DATABASE)
+BUDGET_LEDGER = ModelBudgetLedger(DATABASE)
 
 
 def _deployment_events(row: sqlite3.Row) -> list[dict[str, Any]]:
@@ -590,6 +597,23 @@ class BotAPIHandler(BaseHTTPRequestHandler):
             return
         if path == "/resources":
             self._json(200, _resource_status())
+            return
+        if path == "/model/usage":
+            query = parse_qs(parsed.query)
+            run_id = query.get("run_id", [None])[0]
+            match_raw = query.get("match_id", [None])[0]
+            day = query.get("utc_day", [None])[0]
+            if match_raw is not None and not str(match_raw).isdigit():
+                self._json(400, {"error": "match_id must be an integer"})
+                return
+            self._json(
+                200,
+                BUDGET_LEDGER.summary(
+                    run_id=run_id,
+                    match_id=int(match_raw) if match_raw is not None else None,
+                    utc_day=day,
+                ),
+            )
             return
 
         match = re.fullmatch(r"/deployments/([a-zA-Z0-9._-]+)(?:/(events|logs))?", path)

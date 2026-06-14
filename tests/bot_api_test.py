@@ -93,6 +93,11 @@ class BotAPIValidationTest(unittest.TestCase):
         self.assertEqual(summary["accepted"], 1)
         self.assertEqual(summary["failures"], 1)
 
+    def test_model_budget_ledger_uses_controller_database(self) -> None:
+        summary = bot_api.BUDGET_LEDGER.summary()
+        self.assertEqual(summary["total_calls"], 0)
+        self.assertEqual(summary["total_cost_usd"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
