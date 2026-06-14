@@ -155,6 +155,10 @@ verify_firewall_runtime() {
 }
 
 verify_network_path() {
+    if [[ "${ARENA_ISOLATION_MODE:-trusted}" == "dind" ]]; then
+        echo "[*] Skipping legacy firewall network smoke in DinD mode."
+        return 0
+    fi
     [[ -x "${NETWORK_SMOKE}" ]] ||
         die "missing executable network smoke test: ${NETWORK_SMOKE}"
     "${NETWORK_SMOKE}" ||

@@ -112,7 +112,7 @@ nested_dind_report() {
 
         if [[ -n "${ARENA_TEAM_USERNAME_PATTERN:-}" ]] &&
            command -v arena_config_render_team_value >/dev/null 2>&1; then
-            username="$(arena_config_render_team_value "${ARENA_TEAM_USERNAME_PATTERN:-team{team}}" "${id}")"
+            username="$(arena_config_render_team_value "${ARENA_TEAM_USERNAME_PATTERN}" "${id}")"
         else
             username="team${id}"
         fi

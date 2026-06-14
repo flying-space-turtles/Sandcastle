@@ -111,6 +111,10 @@ case "${1:-}" in
         ;;
     exec)
         machine="${2:-}"
+        if [[ "$*" == *"docker inspect --format"* ]]; then
+            echo "running"
+            exit 0
+        fi
         if [[ "$*" == *"docker compose up"* ]]; then
             if [[ "${scenario}" == "dind-compose-fail" ]]; then
                 exit 1
@@ -308,6 +312,14 @@ set -e
 grep -Fq "firewall network smoke test failed" <<< "${smoke_failure}"
 
 printf '\nARENA_ISOLATION_MODE=dind\n' >> "${FIXTURE}/config/arena.env"
+
+: > "${LOG_FILE}"
+ARENA_TEST_SMOKE_FAIL=1 run_arena healthy up --timeout 1 >/dev/null
+if grep -Fq "network-smoke" "${LOG_FILE}"; then
+    echo "DinD startup should skip the legacy firewall network smoke" >&2
+    exit 1
+fi
+
 : > "${LOG_FILE}"
 set +e
 dind_failure="$(
