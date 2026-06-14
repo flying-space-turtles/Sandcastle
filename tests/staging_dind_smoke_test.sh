@@ -6,6 +6,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP_ROOT="$(mktemp -d)"
 FIXTURE="${TMP_ROOT}/fixture"
 LOG_FILE="${TMP_ROOT}/staging-dind-smoke.log"
+PHASE_FILE="${TMP_ROOT}/staging-smoke-phase"
 
 cleanup() {
     rm -rf "${TMP_ROOT}"
@@ -63,6 +64,7 @@ chmod +x \
 
 smoke_output="$(
     SANDCASTLE_ROOT="${FIXTURE}" \
+        SANDCASTLE_STAGING_PHASE_FILE="${PHASE_FILE}" \
         STAGING_DIND_SMOKE_TEST_LOG="${LOG_FILE}" \
         "${FIXTURE}/scripts/staging-dind-smoke.sh" --teams 4 --timeout 321
 )"
@@ -78,6 +80,7 @@ integration
 EOF
 )"
 actual="$(cat "${LOG_FILE}")"
+phase="$(cat "${PHASE_FILE}")"
 
 if [[ "${actual}" != "${expected}" ]]; then
     echo "Unexpected staging DinD smoke order" >&2
@@ -85,6 +88,10 @@ if [[ "${actual}" != "${expected}" ]]; then
     echo "${expected}" >&2
     echo "--- actual ---" >&2
     echo "${actual}" >&2
+    exit 1
+fi
+if [[ "${phase}" != "running full integration test" ]]; then
+    echo "Unexpected final smoke phase: ${phase}" >&2
     exit 1
 fi
 

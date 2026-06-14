@@ -87,7 +87,16 @@ failure_report() {
         --filter "label=com.docker.compose.project=sandcastle" || true
     docker compose -f "${ROOT}/docker-compose.yml" logs --no-color --tail=30 || true
     nested_dind_report
+    staging_phase_report
     echo "::endgroup::"
+}
+
+staging_phase_report() {
+    local phase_file="${SANDCASTLE_STAGING_PHASE_FILE:-}"
+
+    [[ -n "${phase_file}" && -f "${phase_file}" ]] || return 0
+    echo "--- staging smoke phase ---"
+    printf 'staging smoke phase: %s\n' "$(<"${phase_file}")"
 }
 
 nested_dind_report() {
@@ -131,6 +140,8 @@ nested_dind_report() {
 }
 
 remote_run() {
+    local phase_file
+
     validate_common
     if [[ "${STAGING_DEPLOY_READ_STDIN:-0}" == "1" ]]; then
         local env_file
@@ -152,6 +163,11 @@ remote_run() {
     trap failure_report EXIT
 
     cd "${ROOT}"
+    mkdir -p "${ROOT}/tmp"
+    phase_file="${ROOT}/tmp/staging-smoke-phase"
+    rm -f "${phase_file}"
+    export SANDCASTLE_STAGING_PHASE_FILE="${phase_file}"
+
     echo "[*] Removing previous Sandcastle staging deployment..."
     ./scripts/cleanup.sh --remove-generated
 
