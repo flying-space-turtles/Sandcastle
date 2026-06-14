@@ -151,3 +151,113 @@ def plan(ctx, override_target=None):
 
 The `ctx` object exposes team identity, service URL helpers, HTTP helpers, and
 the loaded bot config.
+
+## Model-Backed Agent Planner
+
+Use the `model` planner to delegate action selection to an LLM. The planner
+sends a structured observation to a bot-controller endpoint and receives a list
+of tasks. LLM API keys **never enter team containers**.
+
+### Credential boundary
+
+```
+teamN-ssh (bot.py)                    host (bot-controller)
+  └─ RemoteModelPlannerAdapter            └─ /plan endpoint
+       POST {observation, schemas}  →         └─ LLM_API_KEY (env, host only)
+       ← [{target_team, action_id}]               └─ calls Claude / GPT / etc.
+  PLAN_ENDPOINT  (URL, public)
+  PLAN_TOKEN     (bearer, operator secret — not the LLM key)
+```
+
+The team container only needs two env vars:
+
+| Variable | Description |
+|---|---|
+| `PLAN_ENDPOINT` | URL of the bot-controller `/plan` route |
+| `PLAN_TOKEN` | Bearer token checked by the bot-controller (operator secret) |
+
+Optional budget controls (all have safe defaults):
+
+| Variable | Default | Description |
+|---|---:|---|
+| `PLAN_MAX_ACTIONS` | `20` | Max tasks accepted per round |
+| `PLAN_TIMEOUT_SECONDS` | `10.0` | Wall-clock budget for each `/plan` call |
+| `PLAN_MAX_TOKENS` | _(none)_ | Reject plan if `tokens_used` exceeds this |
+| `PLAN_MAX_COST_USD` | _(none)_ | Reject plan if `cost_usd` exceeds this |
+
+### Full round example
+
+This example runs a bot through one complete round using a deterministic
+`FakePlannerAdapter`. No arena and no API key are needed.
+
+```python
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).parent))  # add bot/ to path
+
+from bot_lib.runtime import BotContext, BotConfig
+from bot_lib.model_planner import (
+    FakePlannerAdapter,
+    ModelBackedPlanner,
+    RawTask,
+    PlannerOutput,
+    BudgetConfig,
+)
+
+# 1. Build a context for team 1 in a 3-team game.
+config = BotConfig(actions=["recon.health", "exploit.sqli"])
+ctx = BotContext(
+    config=config,
+    num_teams=3,
+    my_team=1,
+    capabilities=frozenset({"network.attack", "network.submit"}),
+)
+
+# 2. Wire up a scripted fake adapter.
+#    Each call() pops the next entry from the script.
+#    An entry can be a PlannerOutput (success) or an exception class (failure).
+script = [
+    PlannerOutput(
+        tasks=[
+            RawTask(target_team=2, action_id="recon.health"),
+            RawTask(target_team=3, action_id="exploit.sqli"),
+        ],
+        tokens_used=80,
+        model_id="fake-v1",
+    ),
+]
+adapter = FakePlannerAdapter(script=script)
+
+# 3. Create the planner with a tight budget for demonstration.
+budget = BudgetConfig(max_actions_per_round=5, max_plan_seconds=2.0)
+planner = ModelBackedPlanner(adapter=adapter, budget=budget)
+
+# 4. Run one round: iterate tasks and print them.
+print("Targets:", planner.targets(ctx))
+for task in planner.plan(ctx):
+    print(f"  → team {task.target_team}: {task.action_id}")
+```
+
+Expected output:
+
+```
+Targets: [2, 3]
+  → team 2: recon.health
+  → team 3: exploit.sqli
+```
+
+To use a real LLM in production, replace steps 2-3 with:
+
+```python
+import os
+from bot_lib.model_planner import RemoteModelPlannerAdapter, ModelBackedPlanner, BudgetConfig
+
+adapter = RemoteModelPlannerAdapter(
+    endpoint=os.environ["PLAN_ENDPOINT"],
+    token=os.environ["PLAN_TOKEN"],
+)
+planner = ModelBackedPlanner(adapter=adapter)
+```
+
+Or simply set the env vars and call `load_planner("model")` from `planners.py`,
+which calls `make_model_planner()` and reads all variables automatically.
