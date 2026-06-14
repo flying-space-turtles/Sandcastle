@@ -77,7 +77,10 @@ reported while capture continues.
 
 The generated root Compose defines SSH gateways, vulnerable machines, and the
 firewall. Each `team<N>-vuln-app` remains a nested Compose project so teams can
-rebuild their own patched source.
+rebuild their own patched source. In `trusted` and `isolated` modes the app
+shares the vulnerable machine network namespace. In `dind` mode it runs inside
+the team's nested Docker daemon and the vulnerable machine forwards the service
+port.
 
 `scripts/arena.sh up` is the organizer lifecycle. It starts the root project,
 waits for parent machines, removes any old app containers that reference stale
@@ -90,10 +93,10 @@ Future vulnerable app templates should be safe to copy per team. Setup copies
 the selected template into ignored generated workspaces, so teams can SSH from
 `team<N>-ssh` into `team<N>-vuln`, patch their own source, and run
 `docker compose up -d --build` without changing another team's source. The app
-container is named `team<N>-vuln-app`, shares the `team<N>-vuln` network
-namespace, gets `TEAM_ID`, `TEAM_NAME`, `SERVICE_PORT`, `SECRET_KEY`, and scoped
-checker credentials, uses `sandcastle_team<N>-data` for `/app/data`, and is
-reachable at the configured team service IP and port.
+container is named `team<N>-vuln-app`, gets `TEAM_ID`, `TEAM_NAME`,
+`SERVICE_PORT`, `SECRET_KEY`, and scoped checker credentials, uses
+`sandcastle_team<N>-data` for `/app/data`, and is reachable at the configured
+team service IP and port.
 
 Marked generated workspaces are repairable and preserve existing files.
 Unmarked directories are participant-owned and are rejected unless the

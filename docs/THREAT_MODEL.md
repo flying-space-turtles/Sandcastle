@@ -34,7 +34,7 @@ trusted not to attack the infrastructure.
 teams, cloud-hosted arena, or scenario where a participant could benefit
 from disrupting the infrastructure rather than winning on merit.
 
-### Untrusted-Competition Mode (planned, SC-017)
+### Untrusted-Competition Mode
 
 Each team's containers are isolated by a mechanism — rootless daemon,
 Docker-in-Docker sidecar, or microVM — that prevents one team from
@@ -43,9 +43,12 @@ or any infrastructure container. The Docker socket (or equivalent) is
 scoped per-team and does not reach the host daemon. Resource limits
 (SC-018) prevent one team's abuse from degrading others.
 
-This mode does not yet exist. `docs/PROJECT_AUDIT_AND_BACKLOG.md`
-tracks it as SC-017 and SC-018. Do not run an untrusted event on the
-current codebase.
+`ARENA_ISOLATION_MODE=dind` implements the strongest current Sandcastle
+option: each team uses its own official `docker:dind` daemon. The lighter
+`isolated` mode uses a per-team filter proxy in front of the host daemon and
+is useful for guardrails, but it is not the same boundary as a separate daemon.
+Run `./tests/dind_isolation_test.sh` on the target host before any untrusted
+event.
 
 ---
 
@@ -55,7 +58,9 @@ current codebase.
 
 | Container | Mount | Required for | Risk in trusted mode | Risk if untrusted |
 |---|---|---|---|---|
-| `teamN-vuln` | `/var/run/docker.sock` (rw) | Team rebuilds its app with `docker compose up -d --build` | Full host Docker daemon control = root-equivalent on the host | **CRITICAL** — any team can stop, delete, or exec into any other team's containers and all infrastructure |
+| `teamN-vuln` in `trusted` | `/var/run/docker.sock` (rw) | Team rebuilds its app with `docker compose up -d --build` | Full host Docker daemon control = root-equivalent on the host | **CRITICAL** — any team can stop, delete, or exec into any other team's containers and all infrastructure |
+| `teamN-vuln` in `isolated` | filtered Docker proxy socket | Same team workflow with API ACLs | Team operations are filtered by name but still reach the host daemon through organizer-controlled proxy code | Safer than trusted, but not a separate daemon boundary |
+| `teamN-vuln` in `dind` | team-local DinD Unix socket | Team rebuilds its app in a nested daemon | No host Docker API in the vulnerable machine | Preferred current mode for untrusted participants |
 | `bot-controller` | `/var/run/docker.sock` (rw) | Bot `WatchdogAction` restarts team containers | Organizer-controlled only; still a privileged mount | If participant-controlled, same severity as above |
 
 **Rationale:** The Docker socket in `teamN-vuln` is the simplest way to
@@ -63,10 +68,9 @@ let teams patch and rebuild their vulnerable app from inside the container.
 It is acceptable in trusted-local mode and must be replaced or scoped
 before untrusted use.
 
-**Required control for untrusted mode:** Replace the shared socket with a
-team-scoped API (a narrow HTTP endpoint on the vulnerable machine that
-can only rebuild that team's specific app) or run each team in a rootless
-daemon whose socket cannot reach other teams or infrastructure.
+**Required control for untrusted mode:** Use `ARENA_ISOLATION_MODE=dind` or a
+future equivalent where the team's Docker API cannot reach other teams or
+organizer infrastructure.
 
 ---
 
@@ -293,12 +297,12 @@ unknown volume mounts when starting the app.
 | Startup banner identifies trusted-local mode | Done | `arena.sh up` prints security notice |
 | Participants informed of mode limitations | Required | Share this document and README security section |
 
-### Untrusted-Competition Mode Controls (required before implementation, SC-017, SC-018)
+### Untrusted-Competition Mode Controls
 
 | Control | Status | Blocking? |
 |---|---|---|
-| Replace shared Docker socket with team-scoped API | Not implemented | **Blocking** |
-| Per-team container isolation (rootless/DinD/microVM) | Not implemented | **Blocking** |
+| Replace shared Docker socket with team-scoped API | Implemented with `dind`; proxy available as `isolated` | Verify on target host |
+| Per-team container isolation (rootless/DinD/microVM) | Implemented with DinD | Verify with `./tests/dind_isolation_test.sh` |
 | CPU, memory, process, and disk limits per team | Not implemented | **Blocking** |
 | Unique credentials per event, never committed | Not implemented | **Blocking** |
 | Gameserver bound to operator-only interface | Not implemented | High |

@@ -2,7 +2,7 @@
 """
 Sandcastle team-local service-control API (SC-013).
 
-Runs inside teamN-vuln where the host Docker socket is available.
+Runs inside teamN-vuln where a team-scoped Docker socket is available.
 Accepts requests ONLY from the team's own SSH container (10.10.N.2).
 
 Endpoints:
@@ -25,7 +25,11 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 TEAM_ID = int(os.environ["TEAM_ID"])
 TEAM_NAME = f"team{TEAM_ID}"
 APP_CONTAINER = f"{TEAM_NAME}-vuln-app"
-DOCKER_SOCK = os.environ.get("DOCKER_SOCK", "/var/run/docker.sock")
+DOCKER_HOST = os.environ.get("DOCKER_HOST", "")
+if DOCKER_HOST.startswith("unix://"):
+    DOCKER_SOCK = DOCKER_HOST.removeprefix("unix://")
+else:
+    DOCKER_SOCK = os.environ.get("DOCKER_SOCK", "/var/run/docker.sock")
 
 # IP of own SSH container on ctf-network: 10.10.{TEAM_ID}.2
 _ALLOWED_IP = f"10.10.{TEAM_ID}.2"

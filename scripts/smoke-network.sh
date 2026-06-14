@@ -80,7 +80,12 @@ command -v docker >/dev/null 2>&1 ||
 docker info >/dev/null 2>&1 ||
     die "Docker daemon is not reachable"
 
-for container in team1-vuln team2-vuln team1-vuln-app team2-vuln-app sandcastle-firewall; do
+required_containers=(team1-vuln team2-vuln sandcastle-firewall)
+if [[ "${ARENA_ISOLATION_MODE}" != "dind" ]]; then
+    required_containers+=(team1-vuln-app team2-vuln-app)
+fi
+
+for container in "${required_containers[@]}"; do
     [[ "$(container_state "${container}")" == "running" ]] ||
         die "required container is not running: ${container}"
 done

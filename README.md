@@ -169,9 +169,23 @@ The current trusted-local mode mounts the host Docker socket into every
 `teamN-vuln` container and the localhost-only bot controller. This is not a
 security boundary. Do not expose the arena to untrusted participants.
 
+For production-like tests with untrusted teams, generate Docker-in-Docker mode:
+
+```bash
+./scripts/setup.sh --dind
+./scripts/arena.sh up
+./tests/dind_isolation_test.sh
+```
+
+DinD gives every team its own `docker:dind` daemon, so teams cannot list or
+control other teams' app containers through Docker. It is heavier than trusted
+mode: each team gets a privileged sidecar, separate Docker storage, slower cold
+builds, and more moving parts. Keep trusted mode for the fastest local
+development loop.
+
 **Before running a shared or exposed event, read
 [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md).** It inventories every
-privileged resource, defines the two operating modes and their guarantees,
+privileged resource, defines the operating modes and their guarantees,
 documents known escape paths, and lists the controls required before moving
 to an untrusted competition. The doctor script (`./scripts/doctor.sh`) links
 to this document for every warning it emits.
@@ -226,6 +240,9 @@ and incomplete required fields.
 `./scripts/setup.sh --teams N` is a convenience that persists
 `ARENA_TEAM_COUNT=N` before generation. Other topology changes should be made
 directly in the config file.
+
+`./scripts/setup.sh --dind` persists `ARENA_ISOLATION_MODE=dind` before
+generation.
 
 Routine setup output hides development passwords. To print SSH commands,
 credentials, internal app targets, health commands, and local control URLs:
@@ -618,6 +635,13 @@ Or run everything with one command:
 ```bash
 ./scripts/run-tests.sh        # all checks including visualizer build
 ./scripts/run-tests.sh --fast # skip the visualizer build
+```
+
+For a disposable native Linux VM or self-hosted CI runner that can run
+privileged containers, use the production-like DinD smoke:
+
+```bash
+./scripts/staging-dind-smoke.sh
 ```
 
 For the full Docker integration test (SC-005) on a native Linux host:
