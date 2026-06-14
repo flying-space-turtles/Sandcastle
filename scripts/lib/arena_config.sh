@@ -380,6 +380,58 @@ arena_config_copy_file_mode() {
     chmod 0644 "${target}"
 }
 
+arena_config_validate_simple_value() {
+    local name="$1"
+    local value="$2"
+
+    if [[ -z "${value}" ]]; then
+        arena_config_error "${name} must not be empty"
+        return 1
+    fi
+    if [[ "${value}" == *$'\n'* || "${value}" == *$'\r'* ]]; then
+        arena_config_error "${name} must be a single-line value"
+        return 1
+    fi
+    if [[ ! "${value}" =~ ^[a-zA-Z0-9_.{}:@%+=,/-]+$ ]]; then
+        arena_config_error "${name} contains unsupported characters for arena.env"
+        return 1
+    fi
+}
+
+arena_config_set_key() {
+    local config_file="$1"
+    local key="$2"
+    local value="$3"
+    local temp_file
+
+    [[ "${key}" =~ ^[A-Z][A-Z0-9_]*$ ]] || {
+        arena_config_error "invalid arena config key: ${key}"
+        return 1
+    }
+    arena_config_validate_simple_value "${key}" "${value}" || return 1
+
+    temp_file="$(mktemp "${config_file}.tmp.XXXXXX")" || return 1
+    awk -v key="${key}" -v value="${value}" '
+        BEGIN { updated = 0 }
+        $0 ~ "^" key "=" {
+            print key "=" value
+            updated = 1
+            next
+        }
+        { print }
+        END {
+            if (!updated) {
+                print key "=" value
+            }
+        }
+    ' "${config_file}" > "${temp_file}" || {
+        rm -f "${temp_file}"
+        return 1
+    }
+    arena_config_copy_file_mode "${config_file}" "${temp_file}"
+    mv "${temp_file}" "${config_file}"
+}
+
 arena_config_set_team_count() {
     local config_file="$1"
     local team_count="$2"

@@ -631,6 +631,9 @@ privileged containers, use the production-like DinD smoke:
 ./scripts/staging-dind-smoke.sh
 ```
 
+For PR-label-gated staging deployments to an Oracle VPS, see
+[`docs/staging-deploy.md`](docs/staging-deploy.md).
+
 For the full Docker integration test (SC-005) on a native Linux host:
 
 ```bash

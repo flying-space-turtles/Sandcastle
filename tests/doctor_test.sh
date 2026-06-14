@@ -243,7 +243,9 @@ assert_status "${firewall_output}" FAIL firewall.traffic
 
 invalid_fixture="${TMP_ROOT}/invalid-config"
 make_fixture "${invalid_fixture}" complete
-sed -i '/^ARENA_SERVICE_PORT=/d' "${invalid_fixture}/config/arena.env"
+awk '!/^ARENA_SERVICE_PORT=/' "${invalid_fixture}/config/arena.env" \
+    > "${invalid_fixture}/config/arena.env.tmp"
+mv "${invalid_fixture}/config/arena.env.tmp" "${invalid_fixture}/config/arena.env"
 invalid_output="$(run_doctor "${invalid_fixture}" empty)"
 assert_status "${invalid_output}" FAIL arena.config
 assert_status "${invalid_output}" WARN bot.api

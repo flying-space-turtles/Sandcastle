@@ -25,8 +25,10 @@ COMPOSE_SUBNET=""
 declare -a CONFIGURED_IDS=()
 declare -a SSH_IDS=()
 declare -a VULN_IDS=()
-declare -A CONTAINER_STATE=()
-declare -A REQUIRED_PORT_OWNER=()
+declare -a CONTAINER_STATE_KEYS=()
+declare -a CONTAINER_STATE_VALUES=()
+declare -a REQUIRED_PORT_OWNER_KEYS=()
+declare -a REQUIRED_PORT_OWNER_VALUES=()
 
 # shellcheck source=scripts/lib/arena_config.sh
 source "${ROOT}/scripts/lib/arena_config.sh"
@@ -163,6 +165,82 @@ array_contains() {
     return 1
 }
 
+container_state_set() {
+    local key="$1"
+    local value="$2"
+    local index
+
+    for index in "${!CONTAINER_STATE_KEYS[@]}"; do
+        if [[ "${CONTAINER_STATE_KEYS[${index}]}" == "${key}" ]]; then
+            CONTAINER_STATE_VALUES[${index}]="${value}"
+            return
+        fi
+    done
+    CONTAINER_STATE_KEYS+=("${key}")
+    CONTAINER_STATE_VALUES+=("${value}")
+}
+
+container_state_get() {
+    local key="$1"
+    local default="${2:-}"
+    local index
+
+    for index in "${!CONTAINER_STATE_KEYS[@]}"; do
+        if [[ "${CONTAINER_STATE_KEYS[${index}]}" == "${key}" ]]; then
+            printf '%s\n' "${CONTAINER_STATE_VALUES[${index}]}"
+            return
+        fi
+    done
+    printf '%s\n' "${default}"
+}
+
+container_state_keys() {
+    ((${#CONTAINER_STATE_KEYS[@]} == 0)) || printf '%s\n' "${CONTAINER_STATE_KEYS[@]}"
+}
+
+required_port_owner_set() {
+    local key="$1"
+    local value="$2"
+    local index
+
+    for index in "${!REQUIRED_PORT_OWNER_KEYS[@]}"; do
+        if [[ "${REQUIRED_PORT_OWNER_KEYS[${index}]}" == "${key}" ]]; then
+            REQUIRED_PORT_OWNER_VALUES[${index}]="${value}"
+            return
+        fi
+    done
+    REQUIRED_PORT_OWNER_KEYS+=("${key}")
+    REQUIRED_PORT_OWNER_VALUES+=("${value}")
+}
+
+required_port_owner_get() {
+    local key="$1"
+    local default="${2:-}"
+    local index
+
+    for index in "${!REQUIRED_PORT_OWNER_KEYS[@]}"; do
+        if [[ "${REQUIRED_PORT_OWNER_KEYS[${index}]}" == "${key}" ]]; then
+            printf '%s\n' "${REQUIRED_PORT_OWNER_VALUES[${index}]}"
+            return
+        fi
+    done
+    printf '%s\n' "${default}"
+}
+
+required_port_owner_has_value() {
+    local value="$1"
+    local index
+
+    for index in "${!REQUIRED_PORT_OWNER_VALUES[@]}"; do
+        [[ "${REQUIRED_PORT_OWNER_VALUES[${index}]}" == "${value}" ]] && return 0
+    done
+    return 1
+}
+
+required_port_owner_keys() {
+    ((${#REQUIRED_PORT_OWNER_KEYS[@]} == 0)) || printf '%s\n' "${REQUIRED_PORT_OWNER_KEYS[@]}"
+}
+
 cidr_overlaps() {
     local first="$1"
     local second="$2"
@@ -222,7 +300,7 @@ load_compose_metadata() {
         fi
 
         if [[ -n "${current_service}" && "${line}" =~ ^[[:space:]]+-[[:space:]]*\"?([0-9]+):([0-9]+) ]]; then
-            REQUIRED_PORT_OWNER["${BASH_REMATCH[1]}"]="${current_service}"
+            required_port_owner_set "${BASH_REMATCH[1]}" "${current_service}"
         fi
 
         if [[ -z "${COMPOSE_SUBNET}" && "${line}" =~ subnet:[[:space:]]*([^[:space:]#]+) ]]; then
@@ -367,7 +445,7 @@ load_container_state() {
 
     while IFS=$'\t' read -r name state; do
         [[ -n "${name}" ]] || continue
-        CONTAINER_STATE["${name}"]="${state}"
+        container_state_set "${name}" "${state}"
     done < <(docker ps -a --format '{{.Names}}{{"\t"}}{{.State}}' 2>/dev/null)
 }
 
@@ -380,25 +458,25 @@ check_required_ports() {
 
     for id in "${CONFIGURED_IDS[@]}"; do
         owner="team${id}-ssh"
-        if ! printf '%s\n' "${REQUIRED_PORT_OWNER[@]:-}" | grep -Fxq "${owner}"; then
+        if ! required_port_owner_has_value "${owner}"; then
             missing_config+=("${owner}")
             continue
         fi
         if ((CONFIG_LOADED)); then
             expected_port=$((ARENA_SSH_BASE_PORT + id))
-            if [[ "${REQUIRED_PORT_OWNER[${expected_port}]:-}" != "${owner}" ]]; then
+            if [[ "$(required_port_owner_get "${expected_port}")" != "${owner}" ]]; then
                 missing_config+=("${owner}:expected-${expected_port}")
             fi
         fi
     done
     if ((CONFIG_LOADED)); then
-        REQUIRED_PORT_OWNER["${ARENA_FIREWALL_WS_PORT}"]="sandcastle-firewall"
-        REQUIRED_PORT_OWNER["${ARENA_FIREWALL_PROXY_PORT}"]="sandcastle-firewall"
+        required_port_owner_set "${ARENA_FIREWALL_WS_PORT}" "sandcastle-firewall"
+        required_port_owner_set "${ARENA_FIREWALL_PROXY_PORT}" "sandcastle-firewall"
     fi
     ports=()
     while IFS= read -r port; do
         ports+=("${port}")
-    done < <(printf '%s\n' "${!REQUIRED_PORT_OWNER[@]}" | sort -n)
+    done < <(required_port_owner_keys | sort -n)
 
     if ((${#missing_config[@]} > 0)); then
         report FAIL host.ports \
@@ -416,8 +494,8 @@ check_required_ports() {
     listeners="$(ss -H -ltn 2>/dev/null || true)"
 
     for port in "${ports[@]}"; do
-        owner="${REQUIRED_PORT_OWNER[${port}]}"
-        state="${CONTAINER_STATE[${owner}]:-absent}"
+        owner="$(required_port_owner_get "${port}")"
+        state="$(container_state_get "${owner}" absent)"
         if awk -v port="${port}" '$4 ~ (":" port "$") { found=1 } END { exit !found }' <<< "${listeners}"; then
             if [[ "${state}" != "running" ]]; then
                 conflicts+=("${port} (${owner} is ${state})")
@@ -583,18 +661,18 @@ check_runtime_topology() {
 
     ((DOCKER_DAEMON)) || return
 
-    for name in "${!CONTAINER_STATE[@]}"; do
+    while IFS= read -r name; do
         if [[ "${name}" =~ ^team([0-9]+)-(ssh|vuln|vuln-app|dind)$ ]]; then
             id="${BASH_REMATCH[1]}"
             if ! array_contains "${id}" "${CONFIGURED_IDS[@]}"; then
-                if [[ "${CONTAINER_STATE[${name}]}" == "running" ]]; then
+                if [[ "$(container_state_get "${name}")" == "running" ]]; then
                     running_orphans+=("${name}")
                 else
                     stopped_orphans+=("${name}")
                 fi
             fi
         fi
-    done
+    done < <(container_state_keys)
 
     if ((${#running_orphans[@]} > 0)); then
         report FAIL runtime.orphans \
@@ -610,19 +688,19 @@ check_runtime_topology() {
 
     for id in "${CONFIGURED_IDS[@]}"; do
         for expected in "team${id}-ssh" "team${id}-vuln"; do
-            if [[ "${CONTAINER_STATE[${expected}]:-absent}" == "running" ]]; then
+            if [[ "$(container_state_get "${expected}" absent)" == "running" ]]; then
                 RUNTIME_ACTIVE=1
             fi
         done
         if [[ "${ARENA_ISOLATION_MODE:-trusted}" == "dind" &&
-              "${CONTAINER_STATE[team${id}-dind]:-absent}" == "running" ]]; then
+              "$(container_state_get "team${id}-dind" absent)" == "running" ]]; then
             RUNTIME_ACTIVE=1
         fi
-        if [[ "${CONTAINER_STATE[team${id}-vuln-app]:-absent}" == "running" ]]; then
+        if [[ "$(container_state_get "team${id}-vuln-app" absent)" == "running" ]]; then
             RUNTIME_ACTIVE=1
         fi
     done
-    if [[ "${CONTAINER_STATE[sandcastle-firewall]:-absent}" == "running" ]]; then
+    if [[ "$(container_state_get sandcastle-firewall absent)" == "running" ]]; then
         RUNTIME_ACTIVE=1
     fi
 
@@ -633,19 +711,19 @@ check_runtime_topology() {
 
     for id in "${CONFIGURED_IDS[@]}"; do
         for expected in "team${id}-ssh" "team${id}-vuln"; do
-            state="${CONTAINER_STATE[${expected}]:-absent}"
+            state="$(container_state_get "${expected}" absent)"
             if [[ "${state}" != "running" ]]; then
                 missing+=("${expected}:${state}")
             fi
         done
         if [[ "${ARENA_ISOLATION_MODE:-trusted}" == "dind" ]]; then
-            state="${CONTAINER_STATE[team${id}-dind]:-absent}"
+            state="$(container_state_get "team${id}-dind" absent)"
             if [[ "${state}" != "running" ]]; then
                 missing+=("team${id}-dind:${state}")
             fi
         fi
     done
-    state="${CONTAINER_STATE[sandcastle-firewall]:-absent}"
+    state="$(container_state_get sandcastle-firewall absent)"
     if [[ "${state}" != "running" ]]; then
         missing+=("sandcastle-firewall:${state}")
     fi
@@ -667,7 +745,7 @@ check_runtime_docker_access() {
 
     for id in "${CONFIGURED_IDS[@]}"; do
         name="team${id}-vuln"
-        [[ "${CONTAINER_STATE[${name}]:-absent}" == "running" ]] || continue
+        [[ "$(container_state_get "${name}" absent)" == "running" ]] || continue
         if [[ "${ARENA_ISOLATION_MODE:-trusted}" == "dind" ]]; then
             host_mount="$(
                 docker inspect \
@@ -746,7 +824,7 @@ check_app_health() {
             )"
             state="${state:-absent}"
         else
-            state="${CONTAINER_STATE[${app}]:-absent}"
+            state="$(container_state_get "${app}" absent)"
         fi
         if [[ "${state}" != "running" ]]; then
             stopped+=("${app}:${state}")
@@ -776,7 +854,7 @@ check_firewall() {
     local bridge_value rules listing rule_line packets
 
     ((DOCKER_DAEMON)) || return
-    if [[ "${CONTAINER_STATE[sandcastle-firewall]:-absent}" != "running" ]]; then
+    if [[ "$(container_state_get sandcastle-firewall absent)" != "running" ]]; then
         if ((RUNTIME_ACTIVE)); then
             report FAIL firewall.runtime \
                 "The firewall is not running while other arena infrastructure is active." \
