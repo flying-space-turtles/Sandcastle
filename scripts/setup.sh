@@ -757,6 +757,7 @@ EOF
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./config/arena.env:/app/config/arena.env:ro
+      - ./challenges:/app/challenges
       - bot-controller-data:/data
     environment:
       ARENA_BOT_API_PORT: "${ARENA_BOT_API_PORT}"

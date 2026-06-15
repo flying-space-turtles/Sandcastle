@@ -6,8 +6,14 @@ import json
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from enum import StrEnum
+from enum import Enum
 from typing import Any
+
+try:
+    from enum import StrEnum
+except ImportError:  # Python 3.10 in team SSH containers
+    class StrEnum(str, Enum):
+        pass
 
 SCHEMA_VERSION = 1
 _ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$")

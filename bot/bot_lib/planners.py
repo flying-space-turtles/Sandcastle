@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import importlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 from typing import Iterable, Protocol
 
 from .actions import ACTION_REGISTRY
@@ -12,6 +13,7 @@ from .runtime import BotContext
 class BotTask:
     target_team: int
     action_id: str
+    arguments: dict[str, Any] = field(default_factory=dict)
 
 
 class Planner(Protocol):
@@ -80,6 +82,7 @@ PLANNER_REGISTRY: dict[str, Planner] = {
     ScriptedPlanner.id: ScriptedPlanner(),
     ReconFirstPlanner.id: ReconFirstPlanner(),
 }
+_MODEL_PLANNER: Planner | None = None
 
 
 def planner_catalog() -> list[dict[str, str]]:
@@ -110,9 +113,12 @@ def planner_catalog() -> list[dict[str, str]]:
 
 def load_planner(planner_id: str) -> Planner:
     if planner_id == "model":
+        global _MODEL_PLANNER
         from .model_planner import make_model_planner  # lazy: avoids circular import
 
-        return make_model_planner()
+        if _MODEL_PLANNER is None:
+            _MODEL_PLANNER = make_model_planner()
+        return _MODEL_PLANNER
 
     if planner_id in PLANNER_REGISTRY:
         return PLANNER_REGISTRY[planner_id]

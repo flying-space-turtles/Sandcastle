@@ -15,7 +15,7 @@ import {
   Trophy,
   X,
 } from 'lucide-react';
-import { gameserverApiUrl } from '../data/arenaConfig';
+import { botApiUrl, gameserverApiUrl } from '../data/arenaConfig';
 
 type MatchStatus = 'CREATED' | 'RUNNING' | 'PAUSED' | 'FINISHED' | 'FAILED';
 type CheckerStatus = 'UP' | 'DOWN' | 'MUMBLE' | 'CORRUPT' | 'PENDING';
@@ -59,6 +59,12 @@ interface DashboardSnapshot {
   }>;
 }
 
+interface MatchPlanSnapshot {
+  assignments: Array<{ team_id: number; assignment_kind: string }>;
+  deployed_challenge: { vulnerability?: string; challenge_id?: string } | null;
+  latest_published_challenge: { id?: string; vulnerability?: string; challenge_id?: string; deployed_at?: string | null } | null;
+}
+
 const POLL_INTERVAL_MS = 2500;
 const STALE_AFTER_MS = 8000;
 const formatScore = (value: number) => Number.isInteger(value) ? value.toString() : value.toFixed(2);
@@ -77,6 +83,9 @@ const Scoreboard = () => {
   );
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [controlsOpen, setControlsOpen] = useState(false);
+  const [startQueuedAgents, setStartQueuedAgents] = useState(true);
+  const [deployLatestChallenge, setDeployLatestChallenge] = useState(true);
+  const [matchPlan, setMatchPlan] = useState<MatchPlanSnapshot | null>(null);
   const [now, setNow] = useState(Date.now());
 
   const refresh = useCallback(async () => {
@@ -106,6 +115,14 @@ const Scoreboard = () => {
     else sessionStorage.removeItem('sandcastle.operatorToken');
   }, [operatorToken]);
 
+  useEffect(() => {
+    if (!controlsOpen) return;
+    fetch(`${botApiUrl}/match-plan`, { cache: 'no-store' })
+      .then((response) => response.ok ? response.json() : null)
+      .then((body) => setMatchPlan(body as MatchPlanSnapshot | null))
+      .catch(() => setMatchPlan(null));
+  }, [controlsOpen]);
+
   const runAction = async (action: 'start' | 'pause' | 'resume' | 'step' | 'finish' | 'restart') => {
     if (!operatorToken) {
       setActionError('Enter the operator token before using match controls.');
@@ -120,6 +137,21 @@ const Scoreboard = () => {
     setPendingAction(action);
     setActionError(null);
     try {
+      if (action === 'start' && (deployLatestChallenge || startQueuedAgents)) {
+        const planResponse = await fetch(`${botApiUrl}/match-plan/prepare`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            deploy_latest_challenge: deployLatestChallenge,
+            start_agents: startQueuedAgents,
+          }),
+        });
+        const planBody = await planResponse.json().catch(() => ({})) as { error?: string; output?: string };
+        if (!planResponse.ok) {
+          const detail = planBody.error || planBody.output || `match prepare failed with HTTP ${planResponse.status}`;
+          throw new Error(detail.length > 1200 ? `${detail.slice(0, 1200)}...` : detail);
+        }
+      }
       const path = action === 'step' ? '/api/rounds/step' : `/api/match/${action}`;
       const response = await fetch(`${gameserverApiUrl}${path}`, {
         method: 'POST',
@@ -288,6 +320,22 @@ const Scoreboard = () => {
               <span>Current state<strong>{matchStatus || 'Unknown'}</strong></span>
               <span>Round<strong>{snapshot?.round ? `#${snapshot.round.round_number}` : 'Not started'}</strong></span>
             </div>
+            <div className="control-summary">
+              <span>Challenge<strong>{matchPlan?.deployed_challenge?.vulnerability?.replaceAll('_', ' ') || 'Default service'}</strong></span>
+              <span>Queued agents<strong>{matchPlan?.assignments.length ?? 0}</strong></span>
+            </div>
+            <div className="control-summary">
+              <span>Latest published<strong>{matchPlan?.latest_published_challenge?.vulnerability?.replaceAll('_', ' ') || 'None'}</strong></span>
+              <span>Arena deploy<strong>{matchPlan?.latest_published_challenge?.deployed_at ? 'Current' : matchPlan?.latest_published_challenge ? 'Pending' : 'Default'}</strong></span>
+            </div>
+            <label className="check-field" style={{ margin: '12px 24px 0' }}>
+              <input type="checkbox" checked={deployLatestChallenge} onChange={(event) => setDeployLatestChallenge(event.target.checked)} />
+              Deploy newest published challenge and restart arena before Start match
+            </label>
+            <label className="check-field" style={{ margin: '12px 24px 0' }}>
+              <input type="checkbox" checked={startQueuedAgents} onChange={(event) => setStartQueuedAgents(event.target.checked)} />
+              Start queued bots and agents before Start match creates round 1
+            </label>
             <div className="control-actions" role="group" aria-label="Scheduler actions">
               <button disabled={matchStatus !== 'CREATED' || pendingAction !== null} onClick={() => void runAction('start')}><Play size={16} />Start match</button>
               <button disabled={matchStatus !== 'RUNNING' || pendingAction !== null} onClick={() => void runAction('pause')}><Pause size={16} />Pause</button>

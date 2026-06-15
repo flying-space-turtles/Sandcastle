@@ -4,15 +4,19 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import hmac
 import json
 import os
 import re
+import shlex
 import sqlite3
 import subprocess
 import sys
 import tempfile
 import threading
+import traceback
+import time
 import uuid
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -21,7 +25,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from bot_lib import ARENA_DEFAULTS, action_catalog, planner_catalog
-from bot_lib.agent_contracts import AgentType, BudgetPolicy, ModelProvider
+from bot_lib.agent_contracts import AgentMemoryEntry, AgentType, BudgetPolicy, ModelProvider, ModelRequest
 from bot_lib.agent_memory import AgentMemoryStore
 from bot_lib.agent_planning import (
     AgentPlanningService,
@@ -418,6 +422,64 @@ class DeploymentStore:
             ).fetchall()
 
 
+class MatchPlanStore:
+    """Persistent pre-match assignments for bots and attack/defense agents."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with self.connect() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS match_agent_assignments (
+                    team_id INTEGER PRIMARY KEY,
+                    assignment_kind TEXT NOT NULL,
+                    config_json TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+
+    def connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.path, timeout=10)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def upsert(self, team_id: int, assignment_kind: str, config: dict[str, Any]) -> None:
+        timestamp = _now()
+        with self.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO match_agent_assignments
+                    (team_id, assignment_kind, config_json, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?)
+                ON CONFLICT(team_id) DO UPDATE SET
+                    assignment_kind = excluded.assignment_kind,
+                    config_json = excluded.config_json,
+                    updated_at = excluded.updated_at
+                """,
+                (team_id, assignment_kind, json.dumps(config, sort_keys=True), timestamp, timestamp),
+            )
+
+    def delete(self, team_ids: list[int] | None = None) -> int:
+        with self.connect() as conn:
+            if team_ids is None:
+                cursor = conn.execute("DELETE FROM match_agent_assignments")
+            else:
+                cursor = conn.executemany(
+                    "DELETE FROM match_agent_assignments WHERE team_id = ?",
+                    [(team_id,) for team_id in team_ids],
+                )
+            return cursor.rowcount if cursor.rowcount is not None else 0
+
+    def list(self) -> list[sqlite3.Row]:
+        with self.connect() as conn:
+            return conn.execute(
+                "SELECT * FROM match_agent_assignments ORDER BY team_id ASC"
+            ).fetchall()
+
+
 class _UnavailableProvider:
     charges_budget = False
 
@@ -430,9 +492,55 @@ class _UnavailableProvider:
         raise ModelGatewayError(self.message)
 
 
-def _build_planning_service(memory: "AgentMemoryStore | None" = None) -> AgentPlanningService:
-    primary = ModelProvider(ARENA_DEFAULTS.agent_provider)
-    fallback = ModelProvider(ARENA_DEFAULTS.agent_fallback_provider)
+PROVIDER_MODELS: dict[ModelProvider, tuple[str, ...]] = {
+    ModelProvider.FAKE: ("fake-v1",),
+    ModelProvider.OPENAI: ("gpt-5.4-mini", "gpt-4o-mini"),
+    ModelProvider.GEMINI: ("gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-1.5-pro"),
+}
+
+
+def _default_model_for_provider(provider: ModelProvider) -> str:
+    models = PROVIDER_MODELS.get(provider)
+    if models:
+        return models[0]
+    return f"{provider.value}-default"
+
+
+def _normalize_model_id(provider: ModelProvider, model_id: str | None = None) -> str:
+    candidate = str(model_id or "").strip()
+    if not candidate:
+        return _default_model_for_provider(provider)
+    known = PROVIDER_MODELS.get(provider, ())
+    if known and candidate not in known:
+        allowed = ", ".join(known)
+        raise ValueError(
+            f"model {candidate!r} is not valid for provider {provider.value}; choose one of: {allowed}"
+        )
+    return candidate
+
+
+def _model_budget_policy() -> BudgetPolicy:
+    return BudgetPolicy(
+        max_actions_per_round=ARENA_DEFAULTS.agent_max_calls_per_round,
+        max_calls_per_round=ARENA_DEFAULTS.agent_max_calls_per_round,
+        max_calls_per_match=ARENA_DEFAULTS.agent_max_calls_per_match,
+        max_input_chars=ARENA_DEFAULTS.agent_max_input_chars,
+        max_output_tokens=ARENA_DEFAULTS.agent_max_output_tokens,
+        max_cost_usd_per_call=ARENA_DEFAULTS.agent_max_cost_usd_per_call,
+        max_cost_usd_per_match=ARENA_DEFAULTS.agent_max_cost_usd_per_match,
+        max_cost_usd_per_day=ARENA_DEFAULTS.agent_max_cost_usd_per_day,
+        timeout_seconds=ARENA_DEFAULTS.agent_timeout_seconds,
+        max_retries=ARENA_DEFAULTS.agent_max_retries,
+    )
+
+
+def _build_model_adapters(
+    model_id: str | None = None,
+    *,
+    primary_provider: ModelProvider | None = None,
+) -> dict[ModelProvider, ModelProviderAdapter]:
+    primary = primary_provider or ModelProvider(ARENA_DEFAULTS.agent_provider)
+    requested_model = _normalize_model_id(primary, model_id)
     adapters: dict[ModelProvider, ModelProviderAdapter] = {
         ModelProvider.FAKE: DeterministicPlanningFakeProvider()
     }
@@ -440,7 +548,11 @@ def _build_planning_service(memory: "AgentMemoryStore | None" = None) -> AgentPl
     if openai_key:
         adapters[ModelProvider.OPENAI] = OpenAIProvider(
             api_key=openai_key,
-            model_id=ARENA_DEFAULTS.agent_model or "gpt-5.4-mini",
+            model_id=(
+                requested_model
+                if primary is ModelProvider.OPENAI
+                else _default_model_for_provider(ModelProvider.OPENAI)
+            ),
             input_cost_per_million=ARENA_DEFAULTS.openai_input_cost_per_million,
             output_cost_per_million=ARENA_DEFAULTS.openai_output_cost_per_million,
         )
@@ -453,7 +565,11 @@ def _build_planning_service(memory: "AgentMemoryStore | None" = None) -> AgentPl
     if gemini_key:
         adapters[ModelProvider.GEMINI] = GeminiProvider(
             api_key=gemini_key,
-            model_id=ARENA_DEFAULTS.agent_model or "gemini-2.0-flash-lite",
+            model_id=(
+                requested_model
+                if primary is ModelProvider.GEMINI
+                else _default_model_for_provider(ModelProvider.GEMINI)
+            ),
             input_cost_per_million=0.075,
             output_cost_per_million=0.30,
         )
@@ -466,35 +582,47 @@ def _build_planning_service(memory: "AgentMemoryStore | None" = None) -> AgentPl
         ModelProvider.OLLAMA,
         "Ollama provider is not implemented",
     )
+    return adapters
 
-    policy = BudgetPolicy(
-        max_actions_per_round=ARENA_DEFAULTS.agent_max_calls_per_round,
-        max_calls_per_round=ARENA_DEFAULTS.agent_max_calls_per_round,
-        max_calls_per_match=ARENA_DEFAULTS.agent_max_calls_per_match,
-        max_input_chars=ARENA_DEFAULTS.agent_max_input_chars,
-        max_output_tokens=ARENA_DEFAULTS.agent_max_output_tokens,
-        max_cost_usd_per_call=ARENA_DEFAULTS.agent_max_cost_usd_per_call,
-        max_cost_usd_per_match=ARENA_DEFAULTS.agent_max_cost_usd_per_match,
-        max_cost_usd_per_day=ARENA_DEFAULTS.agent_max_cost_usd_per_day,
-        timeout_seconds=ARENA_DEFAULTS.agent_timeout_seconds,
-        max_retries=ARENA_DEFAULTS.agent_max_retries,
-    )
+
+def _build_budgeted_gateway(
+    *,
+    provider: ModelProvider | None = None,
+    fallback_provider: ModelProvider | None = None,
+    model_id: str | None = None,
+) -> tuple[BudgetedModelGateway, BudgetPolicy, str]:
+    primary = provider or ModelProvider(ARENA_DEFAULTS.agent_provider)
+    fallback = fallback_provider or ModelProvider(ARENA_DEFAULTS.agent_fallback_provider)
+    policy = _model_budget_policy()
     gateway = ModelGateway(
-        adapters,
+        _build_model_adapters(model_id, primary_provider=primary),
         primary_provider=primary,
         fallback_provider=fallback,
         max_retries=policy.max_retries,
     )
+    effective_model = _normalize_model_id(primary, model_id)
+    return BudgetedModelGateway(gateway, BUDGET_LEDGER), policy, effective_model
+
+
+def _build_planning_service(
+    memory: "AgentMemoryStore | None" = None,
+    *,
+    provider: ModelProvider | None = None,
+    model_id: str | None = None,
+) -> AgentPlanningService:
+    primary = provider or ModelProvider(ARENA_DEFAULTS.agent_provider)
+    gateway, policy, effective_model = _build_budgeted_gateway(provider=primary, model_id=model_id)
     return AgentPlanningService(
-        BudgetedModelGateway(gateway, BUDGET_LEDGER),
+        gateway,
         num_teams=ARENA_DEFAULTS.team_count,
-        model_id=(ARENA_DEFAULTS.agent_model if primary is not ModelProvider.FAKE else "fake-v1"),
+        model_id=effective_model,
         budget=policy,
         memory=memory,
     )
 
 
 STORE = DeploymentStore(DATABASE)
+MATCH_PLAN = MatchPlanStore(DATABASE)
 BUDGET_LEDGER = ModelBudgetLedger(DATABASE)
 PLAN_CREDENTIALS = PlanningCredentialStore(DATABASE)
 AGENT_MEMORY = AgentMemoryStore(DATABASE)
@@ -543,6 +671,114 @@ _CHALLENGE_OPTIONS: dict[str, Any] = {
 }
 
 
+def _safe_rel(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(REPO_ROOT))
+    except ValueError:
+        return str(path.resolve())
+
+
+def _artifact_tree(root: Path, *, max_entries: int = 80) -> tuple[list[str], bool]:
+    entries: list[str] = []
+    truncated = False
+    for path in sorted(root.rglob("*")):
+        if "__pycache__" in path.parts or path.name.endswith(".pyc"):
+            continue
+        rel = path.relative_to(root)
+        depth = len(rel.parts) - 1
+        prefix = "  " * depth + ("- " if path.is_file() else "+ ")
+        entries.append(f"{prefix}{rel.name}")
+        if len(entries) >= max_entries:
+            truncated = True
+            break
+    return entries, truncated
+
+
+def _challenge_artifact_summary(challenge_id: str | None) -> dict[str, Any] | None:
+    if not challenge_id:
+        return None
+    root = REPO_ROOT / "challenges" / "published" / challenge_id
+    if not root.is_dir():
+        return None
+    files = [
+        _safe_rel(path)
+        for path in sorted(root.rglob("*"))
+        if path.is_file() and "__pycache__" not in path.parts and not path.name.endswith(".pyc")
+    ]
+    tree, truncated = _artifact_tree(root)
+    manifest: dict[str, Any] = {}
+    registry_manifest: dict[str, Any] = {}
+    for name, target in (("manifest.json", manifest), ("registry_manifest.json", registry_manifest)):
+        manifest_path = root / name
+        if manifest_path.is_file():
+            try:
+                target.update(json.loads(manifest_path.read_text(encoding="utf-8")))
+            except (OSError, json.JSONDecodeError):
+                pass
+    return {
+        "challenge_id": challenge_id,
+        "path": _safe_rel(root),
+        "file_count": len(files),
+        "files": files[:80],
+        "tree": "\n".join(tree),
+        "tree_truncated": truncated,
+        "service": manifest.get("service", {}),
+        "spec": manifest.get("spec", {}),
+        "registry": registry_manifest,
+    }
+
+
+def _challenge_payload(row: dict[str, Any]) -> dict[str, Any]:
+    payload = ChallengeRunStore.payload(row)
+    payload["artifact"] = _challenge_artifact_summary(payload.get("challenge_id"))
+    return payload
+
+
+def _record_challenge_artifact(run_id: str, challenge_id: str) -> None:
+    artifact = _challenge_artifact_summary(challenge_id)
+    if not artifact:
+        return
+    tree = str(artifact.get("tree") or "")
+    summary = (
+        f"Published challenge {challenge_id}: "
+        f"{artifact.get('file_count', 0)} files under {artifact.get('path')}"
+    )
+    if tree:
+        summary = f"{summary}\n\nCreated file tree:\n{tree}"
+    AGENT_MEMORY.append(
+        AgentMemoryEntry(
+            agent_id="challenge-generator",
+            agent_type=AgentType.CHALLENGE_GENERATOR,
+            run_id=run_id,
+            kind="artifact",
+            summary=summary[:2000],
+            data=artifact,
+        )
+    )
+
+
+def _append_challenge_memory(
+    run_id: str,
+    *,
+    kind: str,
+    summary: str,
+    data: dict[str, Any] | None = None,
+) -> None:
+    try:
+        AGENT_MEMORY.append(
+            AgentMemoryEntry(
+                agent_id="challenge-generator",
+                agent_type=AgentType.CHALLENGE_GENERATOR,
+                run_id=run_id,
+                kind=kind,
+                summary=summary[:2000],
+                data=data or {},
+            )
+        )
+    except Exception:
+        pass
+
+
 # ---------------------------------------------------------------------------
 # Background challenge generation
 # ---------------------------------------------------------------------------
@@ -555,6 +791,8 @@ def _generate_challenge_bg(
     seed: int,
     decoy_endpoints: int,
     max_attempts: int,
+    provider: str = "fake",
+    model_id: str = "",
 ) -> None:
     """Run ChallengeGeneratorAgent in a background thread.
 
@@ -566,10 +804,9 @@ def _generate_challenge_bg(
         import sys as _sys
 
         _sys.path.insert(0, str(REPO_ROOT / "bot"))
-        from challenge.agent import ChallengeGeneratorAgent
+        from challenge.agent import TOOL_SCHEMAS, ChallengeGeneratorAgent, ToolRejectedError
         from challenge.registry import ChallengeRegistry
         from challenge.validator import ChallengeValidator
-        from bot_lib.agent_contracts import ToolCall
 
         staging = REPO_ROOT / "challenges" / "staging"
         published_root = REPO_ROOT / "challenges" / "published"
@@ -588,6 +825,11 @@ def _generate_challenge_bg(
             max_attempts=max_attempts,
         )
 
+        selected_provider = ModelProvider(str(provider or "fake"))
+        gateway, budget, effective_model = _build_budgeted_gateway(
+            provider=selected_provider,
+            model_id=model_id,
+        )
         spec_dict = {
             "vulnerability": vulnerability,
             "difficulty": difficulty,
@@ -595,28 +837,167 @@ def _generate_challenge_bg(
             "decoy_endpoints": decoy_endpoints,
             "max_attempts": max_attempts,
         }
-        state = agent.start({**spec_dict, "run_id": run_id})
-
-        # Step through the tool loop (spec.create → render → validate → publish)
-        tools_sequence = [
-            ToolCall(
-                f"{run_id}-c1",
-                "challenge.spec.create",
-                {
-                    "vulnerability": vulnerability,
-                    "difficulty": difficulty,
-                    "seed": seed,
-                    "decoy_endpoints": decoy_endpoints,
-                },
+        _append_challenge_memory(
+            run_id,
+            kind="observation",
+            summary=(
+                f"challenge request accepted: {vulnerability} / {difficulty}, "
+                f"provider={selected_provider.value}, model={effective_model}"
             ),
-            ToolCall(f"{run_id}-c2", "challenge.render", {}),
-            ToolCall(f"{run_id}-c3", "challenge.validate", {}),
-            ToolCall(f"{run_id}-c4", "challenge.publish", {}),
-        ]
-        for tool in tools_sequence:
+            data={
+                **spec_dict,
+                "provider": selected_provider.value,
+                "model_id": effective_model,
+                "staging_root": _safe_rel(staging),
+                "published_root": _safe_rel(published_root),
+            },
+        )
+        state = agent.start({**spec_dict, "run_id": run_id, "provider": selected_provider.value, "model_id": effective_model})
+        max_steps = max(4, max_attempts * 4)
+        system_prompt = (
+            "You are Sandcastle's ChallengeGeneratorAgent. Create and publish one "
+            "bounded Flask challenge by selecting exactly one registered tool per step. "
+            "Use challenge.spec.create first, then render, validate, revise or inspect "
+            "if validation fails, and publish only after validation passed. Never request "
+            "unregistered tools and never write files directly."
+        )
+
+        for step in range(1, max_steps + 1):
             if state.status != "running":
                 break
-            agent.execute_tool(state, tool)
+            observation = agent.build_observation(state)
+            observation.update(
+                {
+                    "requested_vulnerability": vulnerability,
+                    "requested_difficulty": difficulty,
+                    "requested_seed": seed,
+                    "requested_decoy_endpoints": decoy_endpoints,
+                    "step": step,
+                }
+            )
+            request = ModelRequest(
+                agent_id=state.agent_id,
+                agent_type=AgentType.CHALLENGE_GENERATOR,
+                run_id=run_id,
+                correlation_id=f"{run_id}-challenge-step-{step}",
+                system_prompt=system_prompt,
+                observation=observation,
+                tool_schemas=TOOL_SCHEMAS,
+                budget=budget,
+                round_number=step,
+                team_id=None,
+            )
+            _append_challenge_memory(
+                run_id,
+                kind="model_request",
+                summary=f"requesting challenge step {step} from {selected_provider.value}/{effective_model}",
+                data={
+                    "step": step,
+                    "provider": selected_provider.value,
+                    "model_id": effective_model,
+                    "current_spec": observation.get("current_spec"),
+                    "last_render_id": observation.get("last_render_id"),
+                    "last_validation": observation.get("last_validation"),
+                },
+            )
+            try:
+                gateway_result = gateway.call(
+                    request,
+                    model_id=effective_model,
+                    estimated_cost_usd=budget.max_cost_usd_per_call,
+                )
+            except (ModelBudgetExceeded, ModelGatewayError) as exc:
+                state.status = "failed"
+                state.error = str(exc)
+                _append_challenge_memory(
+                    run_id,
+                    kind="error",
+                    summary=f"model call failed at step {step}: {exc}",
+                    data={
+                        "step": step,
+                        "provider": selected_provider.value,
+                        "model_id": effective_model,
+                        "error_type": type(exc).__name__,
+                    },
+                )
+                break
+            calls = gateway_result.response.tool_calls[:1]
+            _append_challenge_memory(
+                run_id,
+                kind="plan",
+                summary=(
+                    f"model selected {calls[0].tool_id if calls else 'no tool'} "
+                    f"via {gateway_result.response.provider.value}/{gateway_result.response.model_id}"
+                ),
+                data={
+                    "step": step,
+                    "provider": gateway_result.response.provider.value,
+                    "model_id": gateway_result.response.model_id,
+                    "used_fallback": gateway_result.used_fallback,
+                    "finish_reason": gateway_result.response.finish_reason,
+                    "usage": gateway_result.response.usage.as_dict(),
+                    "tool_calls": [call.as_dict() for call in calls],
+                },
+            )
+            if not calls:
+                state.status = "failed"
+                state.error = "model returned no challenge tool call"
+                _append_challenge_memory(
+                    run_id,
+                    kind="error",
+                    summary=state.error,
+                    data={
+                        "step": step,
+                        "provider": gateway_result.response.provider.value,
+                        "model_id": gateway_result.response.model_id,
+                        "finish_reason": gateway_result.response.finish_reason,
+                    },
+                )
+                break
+            try:
+                result = agent.execute_tool(state, calls[0])
+            except ToolRejectedError as exc:
+                AGENT_MEMORY.append(
+                    AgentMemoryEntry(
+                        agent_id=state.agent_id,
+                        agent_type=AgentType.CHALLENGE_GENERATOR,
+                        run_id=run_id,
+                        kind="error",
+                        summary=f"rejected challenge tool: {exc}",
+                        data={"step": step, "tool_call": calls[0].as_dict()},
+                    )
+                )
+                state.error = str(exc)
+                continue
+            if result.status == "error":
+                state.error = result.summary
+            _append_challenge_memory(
+                run_id,
+                kind="observation",
+                summary=f"state after {calls[0].tool_id}: {state.status}",
+                data={
+                    "step": step,
+                    "status": state.status,
+                    "attempt": state.attempt,
+                    "last_render_id": state.last_render_id,
+                    "published_challenge_id": state.published_challenge_id,
+                    "last_validation": {
+                        "status": (state.last_validation or {}).get("status"),
+                        "exploit_succeeded": (state.last_validation or {}).get("vulnerable_exploit_succeeded"),
+                        "checker_before": (state.last_validation or {}).get("checker_passed_before_patch"),
+                    } if state.last_validation else None,
+                },
+            )
+
+        if state.status == "running" and not state.published_challenge_id:
+            state.status = "failed"
+            state.error = state.error or f"maximum model steps exhausted ({max_steps})"
+            _append_challenge_memory(
+                run_id,
+                kind="error",
+                summary=state.error,
+                data={"max_steps": max_steps, "attempt": state.attempt},
+            )
 
         challenge_id = state.published_challenge_id
         if challenge_id:
@@ -628,20 +1009,39 @@ def _generate_challenge_bg(
                 challenge_id=challenge_id,
                 spec_json=_json.dumps(spec_dict),
             )
+            _record_challenge_artifact(run_id, challenge_id)
         else:
             error = state.error or "generation did not complete"
             CHALLENGE_STORE.update(run_id, status="failed", error=error)
+            _append_challenge_memory(
+                run_id,
+                kind="error",
+                summary=f"challenge generation failed: {error}",
+                data={"status": state.status, "error": error},
+            )
 
     except Exception as exc:  # noqa: BLE001
         CHALLENGE_STORE.update(run_id, status="failed", error=str(exc))
+        _append_challenge_memory(
+            run_id,
+            kind="error",
+            summary=f"challenge generator crashed: {exc}",
+            data={"exception": type(exc).__name__, "traceback": traceback.format_exc(limit=8)},
+        )
 
 
 def _deploy_challenge_to_arena(challenge_id: str) -> tuple[bool, str]:
     """Inject a published challenge into all team containers.
 
-    Runs:
-      setup.sh --service-template challenges/published/<id> --overwrite-services
-      arena.sh up
+    The bot controller runs inside a container with the host Docker socket.
+    Running the host-level setup/arena scripts from there would make Docker
+    Compose resolve bind paths against the controller filesystem. Instead,
+    deploy directly through the already-running team vulnerable machines:
+
+    - copy the published challenge into each team's mounted service workspace
+    - replace docker-compose.yml with the arena-scoped app compose
+    - rebuild/recreate teamN-vuln-app from inside teamN-vuln
+    - update the gameserver checker to a generated-challenge compatible checker
 
     Returns (ok, output).
     """
@@ -649,19 +1049,349 @@ def _deploy_challenge_to_arena(challenge_id: str) -> tuple[bool, str]:
     if not challenge_path.is_dir():
         return False, f"challenge directory not found: {challenge_path}"
 
-    setup_sh = REPO_ROOT / "scripts" / "setup.sh"
-    arena_sh = REPO_ROOT / "scripts" / "arena.sh"
+    outputs: list[str] = []
+    ok = True
+    for team_id in range(1, ARENA_DEFAULTS.team_count + 1):
+        team_ok, team_output = _deploy_challenge_to_team(team_id, challenge_path)
+        outputs.append(f"team{team_id}:\n{team_output}")
+        ok = ok and team_ok
+        if not team_ok:
+            break
 
-    rc1, out1 = _run(
-        ["bash", str(setup_sh), "--service-template", str(challenge_path), "--overwrite-services"],
-        timeout=120,
+    if ok:
+        checker_ok, checker_output = _install_generated_checker(challenge_path)
+        outputs.append(f"gameserver checker:\n{checker_output}")
+        ok = checker_ok
+
+    return ok, "\n\n".join(outputs)
+
+
+def _team_username(team_id: int) -> str:
+    pattern = _arena_values().get("ARENA_TEAM_USERNAME_PATTERN", "team{team}")
+    return pattern.replace("{team}", str(team_id))
+
+
+def _checker_credentials(team_id: int, service_name: str = "example-vuln") -> dict[str, str]:
+    secret = _arena_values().get("ARENA_CHECKER_SECRET", "")
+    if not secret:
+        secret = "sandcastle-local-checker-secret-change-me"
+    slug = re.sub(r"[^a-zA-Z0-9_]", "_", service_name).strip("_") or "service"
+
+    def derive(purpose: str) -> str:
+        scope = f"sandcastle-checker-v1:{purpose}:{team_id}:{service_name}"
+        return hmac.new(secret.encode("utf-8"), scope.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    return {
+        "username": f"checker_t{team_id}_{slug}"[:64],
+        "password": derive("password"),
+        "plant_token": derive("plant"),
+    }
+
+
+def _team_app_compose(team_id: int) -> str:
+    values = _arena_values()
+    credentials = _checker_credentials(team_id)
+    service_port = str(ARENA_DEFAULTS.service_port)
+    app_mem = values.get("ARENA_TEAM_APP_MEM_LIMIT", "256m")
+    app_cpu = values.get("ARENA_TEAM_APP_CPU_LIMIT", "0.50")
+    app_pids = values.get("ARENA_TEAM_APP_PIDS_LIMIT", "256")
+    max_restarts = values.get("ARENA_TEAM_MAX_RESTARTS", "3")
+    log_size = values.get("ARENA_LOG_MAX_SIZE", "50m")
+    log_files = values.get("ARENA_LOG_MAX_FILES", "3")
+    isolation = values.get("ARENA_ISOLATION_MODE", "trusted")
+    network_part = (
+        f'    ports:\n      - "{service_port}:{service_port}"\n'
+        if isolation == "dind"
+        else f'    network_mode: "container:team{team_id}-vuln"\n'
     )
-    if rc1 != 0:
-        return False, f"setup.sh failed:\n{out1}"
+    return f"""name: sandcastle-team{team_id}
 
-    rc2, out2 = _run(["bash", str(arena_sh), "up"], timeout=180)
-    combined = f"setup.sh:\n{out1}\n\narena.sh up:\n{out2}"
-    return rc2 == 0, combined
+services:
+  team{team_id}-vuln-app:
+    build:
+      context: .
+    image: sandcastle/team{team_id}-vuln-app:latest
+    container_name: team{team_id}-vuln-app
+{network_part}    environment:
+      TEAM_ID: "{team_id}"
+      TEAM_NAME: "Team {team_id}"
+      SERVICE_PORT: "{service_port}"
+      SECRET_KEY: "sandcastle-team{team_id}-dev-secret"
+      CHECKER_USERNAME: "{credentials["username"]}"
+      CHECKER_PASSWORD: "{credentials["password"]}"
+      PLANT_TOKEN: "{credentials["plant_token"]}"
+    volumes:
+      - team-data:/app/data
+    labels:
+      sandcastle.role: "vuln-app"
+      sandcastle.team: "team{team_id}"
+    deploy:
+      resources:
+        limits:
+          memory: {app_mem}
+          cpus: '{app_cpu}'
+          pids: {app_pids}
+    logging:
+      driver: json-file
+      options:
+        max-size: "{log_size}"
+        max-file: "{log_files}"
+    restart: "on-failure:{max_restarts}"
+
+volumes:
+  team-data:
+    name: sandcastle_team{team_id}-data
+    labels:
+      sandcastle.role: "vuln-data"
+      sandcastle.team: "team{team_id}"
+"""
+
+
+def _deploy_challenge_to_team(team_id: int, challenge_path: Path) -> tuple[bool, str]:
+    user = _team_username(team_id)
+    container = f"team{team_id}-vuln"
+    service_dir = f"/home/{user}/example-vuln"
+    quoted_dir = shlex.quote(service_dir)
+    outputs: list[str] = []
+
+    rc, inspect_out = _run(["docker", "inspect", "--format", "{{.State.Running}}", container])
+    if rc != 0 or inspect_out.strip() != "true":
+        return False, f"{container} is not running; start the arena before deploying a challenge"
+
+    rc, out = _run(
+        [
+            "docker",
+            "exec",
+            container,
+            "sh",
+            "-lc",
+            f"mkdir -p {quoted_dir} && find {quoted_dir} -mindepth 1 -maxdepth 1 -exec rm -rf -- {{}} +",
+        ],
+        timeout=30,
+    )
+    outputs.append(out)
+    if rc != 0:
+        return False, "\n".join(part for part in outputs if part)
+
+    rc, out = _run(["docker", "cp", f"{challenge_path}/.", f"{container}:{service_dir}/"], timeout=60)
+    outputs.append(out)
+    if rc != 0:
+        return False, "\n".join(part for part in outputs if part)
+
+    compose_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yml", prefix=f"sandcastle_team{team_id}_compose_", delete=False
+        ) as handle:
+            handle.write(_team_app_compose(team_id))
+            compose_path = handle.name
+        rc, out = _run(
+            ["docker", "cp", compose_path, f"{container}:{service_dir}/docker-compose.yml"],
+            timeout=30,
+        )
+        outputs.append(out)
+        if rc != 0:
+            return False, "\n".join(part for part in outputs if part)
+    finally:
+        if compose_path:
+            Path(compose_path).unlink(missing_ok=True)
+
+    rc, out = _run(
+        [
+            "docker",
+            "exec",
+            container,
+            "sh",
+            "-lc",
+            (
+                f"chown -R {shlex.quote(user)}:{shlex.quote(user)} {quoted_dir} && "
+                f"cd {quoted_dir} && "
+                f"(docker rm -f team{team_id}-vuln-app >/dev/null 2>&1 || true) && "
+                "docker compose up -d --build --force-recreate --remove-orphans"
+            ),
+        ],
+        timeout=180,
+    )
+    outputs.append(out)
+    if rc != 0:
+        return False, "\n".join(part for part in outputs if part)
+
+    deadline = time.monotonic() + min(60, ARENA_DEFAULTS.agent_timeout_seconds * 4)
+    last = ""
+    while time.monotonic() < deadline:
+        rc, out = _run(
+            [
+                "docker",
+                "exec",
+                container,
+                "curl",
+                "-fsS",
+                "--max-time",
+                "2",
+                f"http://127.0.0.1:{ARENA_DEFAULTS.service_port}/health",
+            ],
+            timeout=5,
+        )
+        last = out
+        if rc == 0 and "ok" in out.lower():
+            outputs.append("health ok")
+            return True, "\n".join(part for part in outputs if part)
+        time.sleep(1)
+
+    outputs.append(f"health check failed: {last}")
+    return False, "\n".join(part for part in outputs if part)
+
+
+def _generated_checker_wrapper() -> str:
+    return '''from __future__ import annotations
+
+import json
+import urllib.error
+import urllib.request
+
+from checkers.contract import (
+    CheckRequest,
+    CheckerMetadata,
+    CheckerOutcome,
+    CheckerStatus,
+    GetRequest,
+    PutRequest,
+    Transport,
+)
+
+
+class GeneratedChallengeChecker:
+    metadata = CheckerMetadata(
+        name="generated-challenge",
+        service_name="example-vuln",
+        version="1.0.0",
+        transport=Transport.HTTP,
+        default_port=8080,
+        timeout_seconds=5.0,
+    )
+
+    def put(self, request: PutRequest) -> CheckerOutcome:
+        try:
+            body = json.dumps({"flag": request.flag}).encode()
+            req = urllib.request.Request(
+                self._url(request, "/internal/plant"),
+                data=body,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Plant-Token": request.context.credentials.require("plant_token"),
+                },
+            )
+            with urllib.request.urlopen(req, timeout=request.context.timeout_seconds) as resp:
+                payload = resp.read().decode("utf-8", errors="replace")
+            if '"planted"' not in payload:
+                return CheckerOutcome(CheckerStatus.MUMBLE, "plant endpoint response was malformed")
+            return CheckerOutcome(CheckerStatus.UP, "flag planted through generated challenge endpoint")
+        except urllib.error.HTTPError as exc:
+            return CheckerOutcome(CheckerStatus.MUMBLE, f"flag plant returned HTTP {exc.code}")
+        except Exception as exc:
+            return CheckerOutcome(CheckerStatus.MUMBLE, f"flag plant failed: {type(exc).__name__}")
+
+    def get(self, request: GetRequest) -> CheckerOutcome:
+        health = self._health(request)
+        if health.status is not CheckerStatus.UP:
+            return health
+        return CheckerOutcome(CheckerStatus.UP, "generated challenge is healthy after flag plant")
+
+    def check(self, request: CheckRequest) -> CheckerOutcome:
+        return self._health(request)
+
+    def _health(self, request: PutRequest | GetRequest | CheckRequest) -> CheckerOutcome:
+        try:
+            with urllib.request.urlopen(self._url(request, "/health"), timeout=request.context.timeout_seconds) as resp:
+                body = resp.read().decode("utf-8", errors="replace")
+            if resp.status != 200 or "ok" not in body.lower():
+                return CheckerOutcome(CheckerStatus.MUMBLE, f"health returned HTTP {resp.status}")
+            return CheckerOutcome(CheckerStatus.UP, "generated challenge health check passed")
+        except urllib.error.HTTPError as exc:
+            return CheckerOutcome(CheckerStatus.MUMBLE, f"health returned HTTP {exc.code}")
+        except Exception as exc:
+            return CheckerOutcome(CheckerStatus.MUMBLE, f"health failed: {type(exc).__name__}")
+
+    @staticmethod
+    def _url(request: PutRequest | GetRequest | CheckRequest, path: str) -> str:
+        target = request.context.target
+        return f"http://{target.host}:{target.port}{path}"
+
+
+CHECKER = GeneratedChallengeChecker()
+'''
+
+
+def _install_generated_checker(challenge_path: Path) -> tuple[bool, str]:
+    del challenge_path
+    container = "sandcastle-gameserver"
+    rc, out = _run(["docker", "inspect", container], timeout=10)
+    if rc != 0:
+        return False, "sandcastle-gameserver is not running; start the arena before deploying a challenge"
+
+    checker_path = ""
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".py", prefix="sandcastle_generated_checker_", delete=False
+        ) as handle:
+            handle.write(_generated_checker_wrapper())
+            checker_path = handle.name
+        rc, out = _run(
+            ["docker", "exec", container, "mkdir", "-p", "/app/services/example-vuln"],
+            timeout=10,
+        )
+        if rc != 0:
+            return False, out
+        rc, out = _run(
+            ["docker", "cp", checker_path, f"{container}:/app/services/example-vuln/checker.py"],
+            timeout=30,
+        )
+        if rc != 0:
+            return False, out
+    finally:
+        if checker_path:
+            Path(checker_path).unlink(missing_ok=True)
+    return True, "generated challenge checker installed"
+
+
+def _latest_published_challenge() -> dict[str, Any] | None:
+    return next(
+        (row for row in CHALLENGE_STORE.list(limit=100) if row.get("status") == "published"),
+        None,
+    )
+
+
+def _latest_deployed_challenge() -> dict[str, Any] | None:
+    return next((row for row in CHALLENGE_STORE.list(limit=100) if row.get("deployed_at")), None)
+
+
+def _deploy_challenge_run(row: dict[str, Any]) -> tuple[bool, str, dict[str, Any] | None]:
+    challenge_id = row.get("challenge_id")
+    if not challenge_id:
+        return False, "no challenge_id - publish must complete first", row
+    ok, output = _deploy_challenge_to_arena(str(challenge_id))
+    if ok:
+        CHALLENGE_STORE.update(str(row["id"]), deployed_at=_now())
+        row = CHALLENGE_STORE.get(str(row["id"]))
+    return ok, output, row
+
+
+def _ensure_latest_challenge_deployed() -> tuple[bool, str, dict[str, Any] | None, bool]:
+    latest_published = _latest_published_challenge()
+    if latest_published is None:
+        return True, "No published challenge exists; keeping the current arena service.", None, False
+
+    latest_deployed = _latest_deployed_challenge()
+    if latest_deployed and latest_deployed.get("id") == latest_published.get("id"):
+        return (
+            True,
+            f"Latest challenge already deployed: {latest_published.get('challenge_id')}",
+            latest_published,
+            False,
+        )
+
+    ok, output, deployed = _deploy_challenge_run(latest_published)
+    return ok, output, deployed, ok
 
 
 def _deployment_events(row: sqlite3.Row) -> list[dict[str, Any]]:
@@ -708,6 +1438,10 @@ def _planning_identity(token: str) -> PlanningIdentity | None:
         agent_type = AgentType(raw_agent_type)
     except ValueError:
         agent_type = AgentType.ATTACK_DEFENSE
+    try:
+        provider = ModelProvider(str(row["provider"] or ARENA_DEFAULTS.agent_provider))
+    except ValueError:
+        provider = ModelProvider.FAKE
     return PlanningIdentity(
         deployment_id=credential.deployment_id,
         team_id=credential.team_id,
@@ -716,6 +1450,8 @@ def _planning_identity(token: str) -> PlanningIdentity | None:
         agent_id=agent_id,
         run_id=run_id,
         agent_type=agent_type,
+        provider=provider,
+        model_id=str(row["model_id"] or ""),
     )
 
 
@@ -787,6 +1523,129 @@ def _deployment_payload(row: sqlite3.Row, include_config: bool = False) -> dict[
     if include_config:
         payload["config"] = json.loads(row["config_json"])
     return payload
+
+
+def _assignment_payload(row: sqlite3.Row) -> dict[str, Any]:
+    config = json.loads(row["config_json"])
+    latest = next(
+        (
+            _deployment_payload(dep)
+            for dep in STORE.list_by_agent_type(
+                "attack_defense" if row["assignment_kind"] == "attack_defense" else "scripted"
+            )
+            if int(dep["team_id"]) == int(row["team_id"])
+        ),
+        None,
+    )
+    return {
+        "team_id": int(row["team_id"]),
+        "assignment_kind": str(row["assignment_kind"]),
+        "config": config,
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+        "latest_deployment": latest,
+    }
+
+
+def _match_plan_payload() -> dict[str, Any]:
+    rows = MATCH_PLAN.list()
+    latest_deployed = _latest_deployed_challenge()
+    latest_published = _latest_published_challenge()
+    return {
+        "assignments": [_assignment_payload(row) for row in rows],
+        "deployed_challenge": _challenge_payload(latest_deployed) if latest_deployed else None,
+        "latest_published_challenge": _challenge_payload(latest_published) if latest_published else None,
+        "instructions": [
+            "Generate a challenge in Challenge Lab.",
+            "Start the match from Match controls. The newest published challenge is copied into every team service workspace and the arena is restarted before round 1.",
+            "Assign scripted bots or AI attack/defense agents to teams.",
+            "Queued bots and AI attack/defense agents launch from the same Match controls flow.",
+        ],
+    }
+
+
+def _assignment_config(body: dict[str, Any], assignment_kind: str) -> dict[str, Any]:
+    if assignment_kind == "attack_defense":
+        provider = ModelProvider(str(body.get("provider", "fake")))
+        model_id = _normalize_model_id(provider, str(body.get("model_id") or ""))
+        body = {
+            **body,
+            "planner": "model",
+            "bot_name": str(body.get("bot_name", "AttackDefenseAgent")),
+            "provider": provider.value,
+            "model_id": model_id,
+            "actions": body.get(
+                "actions",
+                [
+                    "attack.recon",
+                    "attack.exploit",
+                    "defend.inspect_files",
+                    "defend.run_checker",
+                    "defend.apply_patch",
+                    "defend.run_exploit_regression",
+                ],
+            ),
+            "target_policy": body.get("target_policy", "all_opponents"),
+            "loop_interval": body.get("loop_interval", 30),
+            "stop_on_success": body.get("stop_on_success", False),
+            "timeout": body.get("timeout", 10),
+        }
+    else:
+        body = {
+            **body,
+            "planner": str(body.get("planner", "recon_first")),
+            "bot_name": str(body.get("bot_name", "Scripted bot")),
+            "actions": body.get("actions", ["recon.health"]),
+            "target_policy": body.get("target_policy", "all_opponents"),
+        }
+    config = _public_config(body)
+    if "provider" in body:
+        config["provider"] = str(body.get("provider") or "fake")[:80]
+    if "model_id" in body:
+        config["model_id"] = str(body.get("model_id") or "")[:120]
+    return config
+
+
+def _start_match_plan() -> tuple[bool, list[dict[str, Any]], str]:
+    rows = MATCH_PLAN.list()
+    deployments: list[dict[str, Any]] = []
+    outputs: list[str] = []
+    ok = True
+    for row in rows:
+        config = json.loads(row["config_json"])
+        deployment, output = _deploy_one(int(row["team_id"]), config)
+        deployments.append(deployment)
+        if output:
+            outputs.append(output)
+        ok = ok and deployment["status"] == "RUNNING"
+    return ok, deployments, "\n\n".join(outputs)
+
+
+def _prepare_match_plan(
+    *, deploy_latest_challenge: bool = True, start_agents: bool = True
+) -> tuple[bool, list[dict[str, Any]], str, dict[str, Any] | None, bool]:
+    outputs: list[str] = []
+    deployed_challenge: dict[str, Any] | None = None
+    challenge_deployed = False
+
+    if deploy_latest_challenge:
+        ok, output, challenge_row, challenge_deployed = _ensure_latest_challenge_deployed()
+        if output:
+            outputs.append(f"challenge:\n{output}")
+        if challenge_row is not None:
+            deployed_challenge = _challenge_payload(challenge_row)
+        if not ok:
+            return False, [], "\n\n".join(outputs), deployed_challenge, challenge_deployed
+
+    deployments: list[dict[str, Any]] = []
+    if start_agents:
+        ok, deployments, output = _start_match_plan()
+        if output:
+            outputs.append(f"agents:\n{output}")
+        if not ok:
+            return False, deployments, "\n\n".join(outputs), deployed_challenge, challenge_deployed
+
+    return True, deployments, "\n\n".join(outputs), deployed_challenge, challenge_deployed
 
 
 def _validate_teams(value: object) -> list[int]:
@@ -871,8 +1730,16 @@ def _deploy_one(team_id: int, public_config: dict[str, Any]) -> tuple[dict[str, 
     is_model_agent = planner == "model"
     agent_type_str = "attack_defense" if is_model_agent else "scripted"
     agent_id = f"team{team_id}-attack-defense" if is_model_agent else ""
-    provider_str = str(ARENA_DEFAULTS.agent_provider) if is_model_agent else "scripted"
-    model_id_str = str(ARENA_DEFAULTS.agent_model or "fake-v1") if is_model_agent else ""
+    provider_str = (
+        str(public_config.get("provider") or ARENA_DEFAULTS.agent_provider)
+        if is_model_agent
+        else "scripted"
+    )
+    model_id_str = (
+        str(public_config.get("model_id") or ARENA_DEFAULTS.agent_model or "fake-v1")
+        if is_model_agent
+        else ""
+    )
 
     # Stop same-scope conflicting active runs (does NOT stop other agent types)
     conflict_scope = STORE.active_by_scope(agent_type_str, team_id)
@@ -940,6 +1807,7 @@ def _deploy_one(team_id: int, public_config: dict[str, Any]) -> tuple[dict[str, 
         if plan_token:
             env["PLAN_ENDPOINT"] = _planning_url()
             env["PLAN_TOKEN"] = plan_token
+            env["DEFENSE_TOKEN"] = plan_token
         rc, output = _run(
             [
                 "bash",
@@ -975,30 +1843,50 @@ def _deploy_one(team_id: int, public_config: dict[str, Any]) -> tuple[dict[str, 
 def _available_providers() -> list[dict[str, Any]]:
     """Return which providers are configured (no keys exposed)."""
     providers = [
-        {"id": "fake", "label": "Fake (no cost, offline)", "available": True},
+        {"id": "fake", "label": "Fake (no cost, offline)", "available": True, "models": ["fake-v1"]},
         {
             "id": "openai",
             "label": "OpenAI",
             "available": bool(os.environ.get("OPENAI_API_KEY")),
-            "models": ["gpt-4o-mini", "gpt-4o", "gpt-3.5-turbo"],
+            "models": list(PROVIDER_MODELS[ModelProvider.OPENAI]),
         },
         {
             "id": "gemini",
             "label": "Google Gemini",
             "available": bool(os.environ.get("GEMINI_API_KEY")),
-            "models": ["gemini-2.0-flash-lite", "gemini-2.0-flash", "gemini-1.5-pro"],
+            "models": list(PROVIDER_MODELS[ModelProvider.GEMINI]),
         },
     ]
     return providers
 
 
-def _agent_log_markdown(run_id: str, limit: int = 100) -> str:
+def _provider_error(provider: str, model_id: str | None = None) -> str | None:
+    try:
+        selected = ModelProvider(provider)
+    except ValueError:
+        return f"unsupported provider: {provider}"
+    try:
+        _normalize_model_id(selected, model_id)
+    except ValueError as exc:
+        return str(exc)
+    if selected is ModelProvider.FAKE:
+        return None
+    if selected is ModelProvider.OPENAI and not os.environ.get("OPENAI_API_KEY"):
+        return "OPENAI_API_KEY is not configured in the bot-controller environment"
+    if selected is ModelProvider.GEMINI and not os.environ.get("GEMINI_API_KEY"):
+        return "GEMINI_API_KEY is not configured in the bot-controller environment"
+    if selected is ModelProvider.OLLAMA:
+        return "Ollama provider is not implemented"
+    return None
+
+
+def _agent_log_markdown(run_id: str, limit: int = 100, title: str = "Agent Log") -> str:
     """Render agent memory entries as a clean Markdown thinking log."""
     entries = AGENT_MEMORY.recent_as_dicts(run_id, limit=limit)
     if not entries:
-        return f"# Agent Log\n\n*No entries yet for run `{run_id}`.*\n"
+        return f"# {title}\n\n*No entries yet for run `{run_id}`.*\n"
 
-    lines: list[str] = [f"# Agent Log — `{run_id}`\n"]
+    lines: list[str] = [f"# {title} — `{run_id}`\n"]
     icon_map = {
         "tool_call": "⚙️",
         "tool_result": "✅",
@@ -1006,7 +1894,9 @@ def _agent_log_markdown(run_id: str, limit: int = 100) -> str:
         "run_started": "🚀",
         "run_stopped": "🛑",
         "observation": "👁️",
+        "model_request": "📡",
         "plan": "🧠",
+        "artifact": "📦",
     }
 
     for e in entries:
@@ -1016,7 +1906,7 @@ def _agent_log_markdown(run_id: str, limit: int = 100) -> str:
         summary = e.get("summary", "")
         data = e.get("data") or {}
 
-        tool_id = data.get("tool_id") or data.get("action_id") or ""
+        tool_id = data.get("tool_id") or data.get("action_id") or data.get("event_type") or ""
         title_parts = [icon, kind]
         if tool_id:
             title_parts.append(f"`{tool_id}`")
@@ -1044,8 +1934,12 @@ def _agent_log_markdown(run_id: str, limit: int = 100) -> str:
         }
         if display_data:
             try:
+                tree = display_data.pop("tree", "")
                 json_str = json.dumps(display_data, indent=2, ensure_ascii=False)
                 lines.append(f"```json\n{json_str[:2000]}\n```\n")
+                if tree:
+                    lines.append("**Created file tree:**\n")
+                    lines.append(f"```text\n{str(tree)[:4000]}\n```\n")
             except Exception:  # noqa: BLE001
                 pass
 
@@ -1109,7 +2003,12 @@ class BotAPIHandler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length))
             if not isinstance(payload, dict):
                 raise PlanningRequestError("planning request must be an object")
-            response = PLANNING_SERVICE.plan(identity, payload)
+            planning_service = _build_planning_service(
+                AGENT_MEMORY,
+                provider=identity.provider,
+                model_id=identity.model_id,
+            )
+            response = planning_service.plan(identity, payload)
         except (json.JSONDecodeError, PlanningRequestError, TypeError, ValueError) as exc:
             self._json(400, {"error": str(exc)})
             return
@@ -1239,7 +2138,7 @@ class BotAPIHandler(BaseHTTPRequestHandler):
 
         if path == "/challenges":
             rows = CHALLENGE_STORE.list(limit=100)
-            self._json(200, {"challenges": [ChallengeRunStore.payload(r) for r in rows]})
+            self._json(200, {"challenges": [_challenge_payload(r) for r in rows]})
             return
 
         challenge_match = re.fullmatch(r"/challenges/([a-zA-Z0-9._-]+)(?:/(log|deploy))?", path)
@@ -1256,7 +2155,7 @@ class BotAPIHandler(BaseHTTPRequestHandler):
                     limit = min(200, max(1, int(query.get("limit", ["100"])[0])))
                 except (ValueError, TypeError):
                     limit = 100
-                md = _agent_log_markdown(run_id, limit=limit)
+                md = _agent_log_markdown(run_id, limit=limit, title="Challenge Generator Log")
                 data = md.encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/markdown; charset=utf-8")
@@ -1266,7 +2165,11 @@ class BotAPIHandler(BaseHTTPRequestHandler):
                 self.wfile.write(data)
                 return
             # GET /challenges/<id> — detail (no deploy on GET)
-            self._json(200, {"challenge": ChallengeRunStore.payload(row)})
+            self._json(200, {"challenge": _challenge_payload(row)})
+            return
+
+        if path == "/match-plan":
+            self._json(200, _match_plan_payload())
             return
 
         # AI-015: /providers — available model providers (no keys exposed)
@@ -1300,7 +2203,7 @@ class BotAPIHandler(BaseHTTPRequestHandler):
                 except (ValueError, TypeError):
                     limit = 100
                 run_id_key = str(row["run_id"] or row["id"])
-                md = _agent_log_markdown(run_id_key, limit=limit)
+                md = _agent_log_markdown(run_id_key, limit=limit, title="Agent Log")
                 data = md.encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "text/markdown; charset=utf-8")
@@ -1392,9 +2295,16 @@ class BotAPIHandler(BaseHTTPRequestHandler):
                 seed = int(raw_seed) if raw_seed is not None else int(uuid.uuid4().int % (2**31))
                 decoy = max(0, min(3, int(body.get("decoy_endpoints", 0))))
                 attempts = max(1, min(5, int(body.get("max_attempts", 3))))
+                provider = ModelProvider(str(body.get("provider", "fake"))).value
             except (TypeError, ValueError) as exc:
                 self._json(400, {"error": str(exc)})
                 return
+            requested_model = str(body.get("model_id") or "")
+            provider_error = _provider_error(provider, requested_model)
+            if provider_error:
+                self._json(409, {"error": provider_error})
+                return
+            normalized_model = _normalize_model_id(ModelProvider(provider), requested_model)
             import json as _json
 
             spec_dict = {
@@ -1409,13 +2319,13 @@ class BotAPIHandler(BaseHTTPRequestHandler):
                 seed=seed,
                 decoy_endpoints=decoy,
                 max_attempts=attempts,
-                provider=body.get("provider", "fake"),
-                model_id=body.get("model_id", ""),
+                provider=provider,
+                model_id=normalized_model,
                 spec_json=_json.dumps(spec_dict),
             )
             t = threading.Thread(
                 target=_generate_challenge_bg,
-                args=(run_id, vuln, diff, seed, decoy, attempts),
+                args=(run_id, vuln, diff, seed, decoy, attempts, provider, normalized_model),
                 daemon=True,
             )
             t.start()
@@ -1440,17 +2350,79 @@ class BotAPIHandler(BaseHTTPRequestHandler):
             if not challenge_id:
                 self._json(409, {"error": "no challenge_id — publish must complete first"})
                 return
-            ok, output = _deploy_challenge_to_arena(challenge_id)
-            if ok:
-                CHALLENGE_STORE.update(run_id, deployed_at=_now())
-                row = CHALLENGE_STORE.get(run_id)
+            ok, output, row = _deploy_challenge_run(row)
             self._json(
                 200 if ok else 500,
                 {
                     "ok": ok,
                     "challenge_id": challenge_id,
                     "output": output[-4000:],  # cap to avoid huge responses
-                    "challenge": ChallengeRunStore.payload(row) if row else None,
+                    "challenge": _challenge_payload(row) if row else None,
+                },
+            )
+            return
+
+        if path == "/match-plan/agents":
+            try:
+                teams = _validate_teams(body.get("teams"))
+                assignment_kind = str(body.get("assignment_kind", body.get("kind", "attack_defense")))
+                if assignment_kind not in {"attack_defense", "scripted"}:
+                    raise ValueError("assignment_kind must be attack_defense or scripted")
+                if assignment_kind == "attack_defense":
+                    provider_error = _provider_error(
+                        str(body.get("provider", "fake")),
+                        str(body.get("model_id") or ""),
+                    )
+                    if provider_error:
+                        self._json(409, {"error": provider_error})
+                        return
+                config = _assignment_config(body, assignment_kind)
+                for team_id in teams:
+                    MATCH_PLAN.upsert(team_id, assignment_kind, config)
+            except (KeyError, TypeError, ValueError) as exc:
+                self._json(400, {"error": str(exc)})
+                return
+            self._json(200, {"ok": True, **_match_plan_payload()})
+            return
+
+        if path == "/match-plan/agents/clear":
+            try:
+                raw_teams = body.get("teams")
+                teams = _validate_teams(raw_teams) if raw_teams is not None else None
+            except (TypeError, ValueError) as exc:
+                self._json(400, {"error": str(exc)})
+                return
+            deleted = MATCH_PLAN.delete(teams)
+            self._json(200, {"ok": True, "deleted": deleted, **_match_plan_payload()})
+            return
+
+        if path == "/match-plan/start-agents":
+            ok, deployments, output = _start_match_plan()
+            self._json(
+                200 if ok else 500,
+                {
+                    "ok": ok,
+                    "deployments": deployments,
+                    "output": output[-4000:],
+                    **_match_plan_payload(),
+                },
+            )
+            return
+
+        if path == "/match-plan/prepare":
+            ok, deployments, output, challenge, challenge_deployed = _prepare_match_plan(
+                deploy_latest_challenge=bool(body.get("deploy_latest_challenge", True)),
+                start_agents=bool(body.get("start_agents", True)),
+            )
+            self._json(
+                200 if ok else 500,
+                {
+                    "ok": ok,
+                    "deployments": deployments,
+                    "challenge": challenge,
+                    "challenge_deployed": challenge_deployed,
+                    "output": output[-4000:],
+                    **_match_plan_payload(),
                 },
             )
             return

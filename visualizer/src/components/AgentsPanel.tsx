@@ -9,6 +9,12 @@ import { botApiUrl } from '../data/arenaConfig';
 
 interface Provider { id: string; label: string; available: boolean; models?: string[]; }
 
+const DEFAULT_PROVIDERS: Provider[] = [
+  { id: 'fake', label: 'Fake (offline)', available: true, models: ['fake-v1'] },
+  { id: 'openai', label: 'OpenAI', available: false, models: ['gpt-5.4-mini', 'gpt-4o-mini'] },
+  { id: 'gemini', label: 'Google Gemini', available: false, models: ['gemini-2.5-flash-lite', 'gemini-2.5-flash', 'gemini-1.5-pro'] },
+];
+
 interface VulnOption { id: string; label: string; icon: string; description: string; }
 interface DiffOption { id: string; label: string; }
 interface ChallengeOptions {
@@ -30,6 +36,7 @@ interface ChallengeRun {
   deployed_at: string | null;
   error: string | null;
   created_at: string;
+  artifact?: { path: string; file_count: number; tree: string } | null;
 }
 
 interface AgentRun {
@@ -44,12 +51,30 @@ interface AgentRun {
   summary: { captures: number; accepted: number; failures: number; current_activity: { type: string } | null };
 }
 
+interface MatchAssignment {
+  team_id: number;
+  assignment_kind: 'attack_defense' | 'scripted';
+  config: { bot_name?: string; planner?: string; provider?: string; model_id?: string; actions?: string[] };
+  updated_at: string;
+  latest_deployment?: AgentRun | null;
+}
+
+interface MatchPlan {
+  assignments: MatchAssignment[];
+  deployed_challenge: ChallengeRun | null;
+  latest_published_challenge: ChallengeRun | null;
+  instructions: string[];
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 async function api<T>(path: string, opts?: RequestInit): Promise<T> {
   const r = await fetch(`${botApiUrl}${path}`, opts);
-  const body = await r.json().catch(() => ({})) as T & { error?: string };
-  if (!r.ok) throw new Error((body as any).error || `HTTP ${r.status}`);
+  const body = await r.json().catch(() => ({})) as T & { error?: string; output?: string };
+  if (!r.ok) {
+    const detail = body.error || body.output || `HTTP ${r.status}`;
+    throw new Error(detail.length > 1200 ? `${detail.slice(0, 1200)}...` : detail);
+  }
   return body;
 }
 
@@ -78,6 +103,48 @@ function StatusPill({ s }: { s: string }) {
   return <span className={`challenge-status-pill challenge-status-pill--${s}`}>{s}</span>;
 }
 
+function mergeProviders(providers: Provider[]): Provider[] {
+  const byId = new Map(DEFAULT_PROVIDERS.map(p => [p.id, p]));
+  providers.forEach(p => byId.set(p.id, { ...byId.get(p.id), ...p, models: p.models?.length ? p.models : byId.get(p.id)?.models }));
+  return [...byId.values()];
+}
+
+function ProviderModelFields({
+  providers,
+  provider,
+  modelId,
+  onProvider,
+  onModel,
+}: {
+  providers: Provider[];
+  provider: string;
+  modelId: string;
+  onProvider: (provider: string) => void;
+  onModel: (modelId: string) => void;
+}) {
+  const options = mergeProviders(providers);
+  const selected = options.find(p => p.id === provider) ?? options[0];
+  return (
+    <div className="form-row">
+      <label className="drawer-field">
+        <span>Provider</span>
+        <select value={provider} onChange={e => { onProvider(e.target.value); onModel(''); }}>
+          {options.map(p => (
+            <option key={p.id} value={p.id}>{p.label}{p.available ? '' : ' (key not detected)'}</option>
+          ))}
+        </select>
+      </label>
+      <label className="drawer-field">
+        <span>Model <small>(blank = provider default)</small></span>
+        <select value={modelId} onChange={e => onModel(e.target.value)}>
+          <option value="">Default ({selected?.models?.[0] ?? 'provider default'})</option>
+          {(selected?.models ?? []).map(m => <option key={m} value={m}>{m}</option>)}
+        </select>
+      </label>
+    </div>
+  );
+}
+
 function LogDrawer({ title, runId, endpoint, onClose }: {
   title: string; runId: string; endpoint: string; onClose: () => void;
 }) {
@@ -100,12 +167,13 @@ function LogDrawer({ title, runId, endpoint, onClose }: {
 
   async function deployToArena() {
     setDeploying(true);
+    setDeployOut('Deploying challenge to every team and rebuilding app containers...');
     try {
       const r = await api<{ ok: boolean; output: string }>(`${endpoint.replace('/log', '/deploy')}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
       });
       setDeployOut(r.output || (r.ok ? 'Deployed.' : 'Failed.'));
-    } catch (e) { setDeployOut(String(e)); }
+    } catch (e) { setDeployOut(e instanceof Error ? e.message : String(e)); }
     setDeploying(false);
   }
 
@@ -127,7 +195,7 @@ function LogDrawer({ title, runId, endpoint, onClose }: {
         </div>
         {isChallenge && isDone && (
           <div className="drawer-footer">
-            <span style={{ color: 'var(--muted)', fontSize: 12 }}>Ready to deploy to all team containers</span>
+            <span style={{ color: 'var(--muted)', fontSize: 12 }}>Deploy copies this app to every team; Match controls then starts round 1.</span>
             <button className="primary-button" disabled={deploying} onClick={deployToArena}>
               <Rocket size={15}/>{deploying ? 'Deploying…' : 'Deploy to Arena'}
             </button>
@@ -169,9 +237,17 @@ function ChallengeLab({ providers }: { providers: Provider[] }) {
     return () => clearInterval(t);
   }, [load]);
 
-  const selectedProv = providers.find(p => p.id === provider);
   const visible = challenges.filter(c => filter === 'all' || c.status === 'running');
   const inspectRun = challenges.find(c => c.id === inspectId);
+  const vulnerabilityOptions = options?.vulnerabilities ?? [
+    { id:'path_traversal', label:'Path Traversal', icon:'', description:'Directory traversal via /export' },
+    { id:'sql_injection', label:'SQL Injection', icon:'', description:'Bypass login via SQLi' },
+    { id:'command_injection', label:'Command Injection', icon:'', description:'OS command via diagnostics' },
+  ];
+  const difficultyOptions = options?.difficulties?.length ? options.difficulties : [
+    { id: 'easy', label: 'Easy' },
+    { id: 'medium', label: 'Medium' },
+  ];
 
   async function generate() {
     setBusy(true); setNotice('');
@@ -200,6 +276,35 @@ function ChallengeLab({ providers }: { providers: Provider[] }) {
           <button className="icon-button" onClick={load}><RefreshCw size={16}/></button>
           <button className="primary-button" onClick={() => setCreateOpen(true)}><Plus size={16}/>Generate challenge</button>
         </div>
+      </section>
+
+      <section className="challenge-config-panel" aria-label="Challenge generator controls">
+        <label className="drawer-field">
+          <span>Exploit type</span>
+          <select value={vuln} onChange={event => setVuln(event.target.value)}>
+            {vulnerabilityOptions.map(option => (
+              <option key={option.id} value={option.id}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+        <label className="drawer-field">
+          <span>Difficulty</span>
+          <select value={diff} onChange={event => setDiff(event.target.value)}>
+            {difficultyOptions.map(option => (
+              <option key={option.id} value={option.id}>{option.label}</option>
+            ))}
+          </select>
+        </label>
+        <ProviderModelFields
+          providers={providers}
+          provider={provider}
+          modelId={modelId}
+          onProvider={setProvider}
+          onModel={setModelId}
+        />
+        <button className="primary-button" disabled={busy} onClick={generate}>
+          <Rocket size={15}/>{busy ? 'Starting...' : 'Create vuln app'}
+        </button>
       </section>
 
       {/* Stats */}
@@ -236,11 +341,12 @@ function ChallengeLab({ providers }: { providers: Provider[] }) {
             </div>
             <div className="deployment-activity">
               <Activity size={14}/>
-              <span>{c.deployed_at ? `Deployed ${new Date(c.deployed_at).toLocaleTimeString()}` : c.status === 'running' ? 'Generating…' : c.error || c.status}</span>
+              <span>{c.deployed_at ? `Deployed ${new Date(c.deployed_at).toLocaleTimeString()} for future rounds` : c.status === 'running' ? 'Generating and validating…' : c.error || c.status}</span>
             </div>
             <div className="deployment-stats">
               <span><VulnBadge v={c.vulnerability}/></span>
               <span><DiffBadge d={c.difficulty}/></span>
+              {c.artifact && <span><b>{c.artifact.file_count}</b> files</span>}
               {c.decoy_endpoints > 0 && <span><b>{c.decoy_endpoints}</b> decoys</span>}
             </div>
           </button>
@@ -270,14 +376,10 @@ function ChallengeLab({ providers }: { providers: Provider[] }) {
               <fieldset className="choice-fieldset">
                 <legend>Vulnerability type</legend>
                 <div className="choice-grid">
-                  {(options?.vulnerabilities ?? [
-                    { id:'path_traversal', label:'Path Traversal', icon:'🗂️', description:'Directory traversal via /export' },
-                    { id:'sql_injection', label:'SQL Injection', icon:'🗄️', description:'Bypass login via SQLi' },
-                    { id:'command_injection', label:'Command Injection', icon:'💻', description:'OS command via diagnostics' },
-                  ]).map(v => (
+                  {vulnerabilityOptions.map(v => (
                     <label key={v.id} className={vuln === v.id ? 'is-selected' : ''} title={v.description}>
                       <input type="radio" name="vuln" checked={vuln===v.id} onChange={() => setVuln(v.id)}/>
-                      {v.icon} {v.label}
+                      {v.icon ? `${v.icon} ` : ''}{v.label}
                     </label>
                   ))}
                 </div>
@@ -288,9 +390,9 @@ function ChallengeLab({ providers }: { providers: Provider[] }) {
                 <fieldset className="choice-fieldset">
                   <legend>Difficulty</legend>
                   <div className="choice-grid">
-                    {['easy','medium'].map(d => (
-                      <label key={d} className={diff===d?'is-selected':''}>
-                        <input type="radio" name="diff" checked={diff===d} onChange={() => setDiff(d)}/>{d}
+                    {difficultyOptions.map(d => (
+                      <label key={d.id} className={diff===d.id?'is-selected':''}>
+                        <input type="radio" name="diff" checked={diff===d.id} onChange={() => setDiff(d.id)}/>{d.label}
                       </label>
                     ))}
                   </div>
@@ -320,24 +422,13 @@ function ChallengeLab({ providers }: { providers: Provider[] }) {
                 </label>
               </div>
 
-              {/* Provider + model */}
-              <div className="form-row">
-                <label className="drawer-field">
-                  <span>Provider</span>
-                  <select value={provider} onChange={e => { setProvider(e.target.value); setModelId(''); }}>
-                    {providers.map(p => (
-                      <option key={p.id} value={p.id} disabled={!p.available}>{p.available ? '' : '🔒 '}{p.label}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="drawer-field">
-                  <span>Model</span>
-                  <select value={modelId} onChange={e => setModelId(e.target.value)} disabled={!selectedProv?.models?.length}>
-                    {(selectedProv?.models ?? []).map(m => <option key={m} value={m}>{m}</option>)}
-                    {!selectedProv?.models?.length && <option value="">— default —</option>}
-                  </select>
-                </label>
-              </div>
+              <ProviderModelFields
+                providers={providers}
+                provider={provider}
+                modelId={modelId}
+                onProvider={setProvider}
+                onModel={setModelId}
+              />
             </div>
             <div className="drawer-footer">
               <span><VulnBadge v={vuln}/> <DiffBadge d={diff}/></span>
@@ -366,11 +457,12 @@ function ChallengeLab({ providers }: { providers: Provider[] }) {
 
 function AgentsSection({ providers }: { providers: Provider[] }) {
   const [runs, setRuns] = useState<AgentRun[]>([]);
+  const [plan, setPlan] = useState<MatchPlan | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [inspectId, setInspectId] = useState<string | null>(null);
   const [teams, setTeams] = useState<{ id: number; container_up: boolean }[]>([]);
   const [selectedTeams, setSelectedTeams] = useState<Set<number>>(new Set());
-  const [kind, setKind] = useState<'attack_defense' | 'challenge_generator'>('attack_defense');
+  const [kind, setKind] = useState<'attack_defense' | 'scripted'>('attack_defense');
   const [provider, setProvider] = useState('fake');
   const [modelId, setModelId] = useState('');
   const [busy, setBusy] = useState(false);
@@ -382,11 +474,12 @@ function AgentsSection({ providers }: { providers: Provider[] }) {
       .then(d => setRuns(d.agent_runs)).catch(() => {});
     api<{ teams: { id: number; container_up: boolean }[] }>('/status')
       .then(d => setTeams(d.teams)).catch(() => {});
+    api<MatchPlan>('/match-plan')
+      .then(setPlan).catch(() => {});
   }, []);
 
   useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, [load]);
 
-  const selectedProv = providers.find(p => p.id === provider);
   const visible = runs.filter(r => filter === 'all' || ['RUNNING','DEPLOYING'].includes(r.status));
   const inspectRun = runs.find(r => r.id === inspectId);
 
@@ -394,27 +487,40 @@ function AgentsSection({ providers }: { providers: Provider[] }) {
     setSelectedTeams(prev => { const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s; });
   }
 
-  async function deploy() {
+  async function assign() {
     setBusy(true); setNotice('');
     try {
-      const actions = kind === 'attack_defense' ? [
-        'attack.recon','attack.exploit','attack.submit_flag',
-        'defend.inspect_files','defend.snapshot','defend.apply_patch',
-        'defend.run_checker','defend.run_exploit_regression',
-      ] : [];
-      await api('/deployments', {
+      const actions = kind === 'attack_defense'
+        ? ['attack.recon','attack.exploit','defend.inspect_files','defend.run_checker','defend.apply_patch','defend.run_exploit_regression']
+        : ['recon.health','exploit.path_traversal','exploit.cmdi','exploit.sqli'];
+      await api('/match-plan/agents', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          teams: [...selectedTeams], planner: 'model', agent_type: kind,
-          bot_name: `AI-${kind} (${[...selectedTeams].map(t=>`T${t}`).join(',')})`,
+          teams: [...selectedTeams], assignment_kind: kind,
+          planner: kind === 'attack_defense' ? 'model' : 'recon_first',
+          bot_name: `${kind === 'attack_defense' ? 'AttackDefenseAgent' : 'Scripted bot'} (${[...selectedTeams].map(t=>`T${t}`).join(',')})`,
           provider, model_id: modelId || undefined, actions,
           target_policy: 'all_opponents', target_teams: [],
           loop_interval: 30, stop_on_success: false,
           flag_re: 'FLAG\\{[a-f0-9]{32}\\}', timeout: 10,
         }),
       });
-      setNotice('Agent deployed.'); setCreateOpen(false); setSelectedTeams(new Set()); load();
+      setNotice('Assignment saved. Start the match from Match controls to launch queued agents.'); setCreateOpen(false); setSelectedTeams(new Set()); load();
     } catch (e) { setNotice(String(e)); }
+    setBusy(false);
+  }
+
+  async function startAssignedAgents() {
+    setBusy(true); setNotice('Preparing arena and starting assigned bots and agents…');
+    try {
+      const result = await api<{ deployments: AgentRun[]; output?: string; challenge_deployed?: boolean }>('/match-plan/prepare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deploy_latest_challenge: true, start_agents: true }),
+      });
+      setNotice(`${result.deployments.length} assigned runtime${result.deployments.length===1?'':'s'} started${result.challenge_deployed ? ' after arena regeneration' : ''}.`);
+      load();
+    } catch (e) { setNotice(e instanceof Error ? e.message : String(e)); }
     setBusy(false);
   }
 
@@ -429,13 +535,46 @@ function AgentsSection({ providers }: { providers: Provider[] }) {
 
       <section className="fleet-hero" style={{ marginBottom: 0 }}>
         <div>
-          <span className="page-kicker">Attack / Defense</span>
-          <p>Deploy AI agents per team — they attack opponents and defend their service.</p>
+          <span className="page-kicker">Match plan</span>
+          <p>Assign scripted bots or AI attack/defense agents before the match; Match controls prepares the arena and launches them before round 1.</p>
         </div>
         <div className="fleet-hero__actions">
           <button className="icon-button" onClick={load}><RefreshCw size={16}/></button>
-          <button className="primary-button" onClick={() => setCreateOpen(true)}><Plus size={16}/>Deploy agent</button>
+          <button className="primary-button" disabled={busy || !plan?.assignments.length} onClick={() => void startAssignedAgents()}><Rocket size={16}/>Prepare and start</button>
+          <button className="primary-button" onClick={() => setCreateOpen(true)}><Plus size={16}/>Assign team</button>
         </div>
+      </section>
+
+      <section className="challenge-config-panel agent-config-panel" aria-label="Agent model controls">
+        <ProviderModelFields
+          providers={providers}
+          provider={provider}
+          modelId={modelId}
+          onProvider={setProvider}
+          onModel={setModelId}
+        />
+        <button className="primary-button" onClick={() => setCreateOpen(true)}>
+          <Plus size={15}/>Assign team with model
+        </button>
+      </section>
+
+      <section className="fleet-pulse" style={{ marginTop: 14 }}>
+        <div><span className="pulse-icon is-violet"><FlaskConical size={17}/></span><p><span>Deployed challenge</span><strong>{plan?.deployed_challenge ? 'Ready' : 'None'}</strong><small>{plan?.deployed_challenge?.vulnerability?.replace(/_/g, ' ') || 'Deploy from Challenge Lab first'}</small></p></div>
+        <div><span className="pulse-icon is-blue"><Swords size={17}/></span><p><span>Assigned teams</span><strong>{plan?.assignments.length ?? 0}</strong><small>queued for match start</small></p></div>
+      </section>
+
+      <section className="deployment-grid" style={{ marginBottom: 18 }}>
+        {plan?.assignments.map(a => (
+          <article key={a.team_id} className="deployment-card status-deploying">
+            <div className="deployment-card__top">
+              <span className="team-orb">T{a.team_id}</span>
+              <div><strong>{a.assignment_kind === 'attack_defense' ? 'AttackDefenseAgent' : 'Scripted bot'}</strong><span>{a.config.provider || a.config.planner || 'scripted'}{a.config.model_id ? ` / ${a.config.model_id}` : ''}</span></div>
+              <span className="deployment-status">{a.latest_deployment?.status || 'QUEUED'}</span>
+            </div>
+            <div className="deployment-activity"><Activity size={14}/><span>Will launch from the same prepare flow used by Match controls.</span></div>
+            <div className="deployment-stats"><span><b>{a.config.actions?.length ?? 0}</b> actions</span><span>{new Date(a.updated_at).toLocaleTimeString()}</span></div>
+          </article>
+        ))}
       </section>
 
       <div className="fleet-toolbar" style={{ marginTop: 14 }}>
@@ -469,8 +608,8 @@ function AgentsSection({ providers }: { providers: Provider[] }) {
           <div className="fleet-empty">
             <Brain size={26}/>
             <h2>No agents {filter==='active'?'running':'deployed'}</h2>
-            <p>Deploy an AI agent to a team to begin autonomous attack/defense.</p>
-            <button className="primary-button" onClick={() => setCreateOpen(true)}><Plus size={15}/>Deploy agent</button>
+            <p>Assign a team above, then start the match with queued agents enabled.</p>
+            <button className="primary-button" onClick={() => setCreateOpen(true)}><Plus size={15}/>Assign team</button>
           </div>
         )}
       </section>
@@ -482,18 +621,18 @@ function AgentsSection({ providers }: { providers: Provider[] }) {
         <div className="drawer-backdrop" onMouseDown={() => setCreateOpen(false)}>
           <aside className="ops-drawer ops-drawer--wide" onMouseDown={e => e.stopPropagation()}>
             <div className="drawer-heading">
-              <div><span className="section-icon"><Brain size={17}/></span><div><h2>Deploy AI agent</h2><p>One agent per team, per type.</p></div></div>
+              <div><span className="section-icon"><Brain size={17}/></span><div><h2>Assign for match start</h2><p>Queued assignments launch when the match starts.</p></div></div>
               <button className="icon-button" onClick={() => setCreateOpen(false)}><X size={17}/></button>
             </div>
             <div className="deployment-form">
               <fieldset className="choice-fieldset">
-                <legend>Agent type</legend>
+                <legend>Runtime type</legend>
                 <div className="choice-grid">
                   <label className={kind==='attack_defense'?'is-selected':''}>
-                    <input type="radio" checked={kind==='attack_defense'} onChange={()=>setKind('attack_defense')}/>⚔️ Attack / Defense
+                    <input type="radio" checked={kind==='attack_defense'} onChange={()=>setKind('attack_defense')}/>Attack / Defense Agent
                   </label>
-                  <label className={kind==='challenge_generator'?'is-selected':''}>
-                    <input type="radio" checked={kind==='challenge_generator'} onChange={()=>setKind('challenge_generator')} disabled/>🏗️ Challenge Generator (use Challenge Lab)
+                  <label className={kind==='scripted'?'is-selected':''}>
+                    <input type="radio" checked={kind==='scripted'} onChange={()=>setKind('scripted')}/>Scripted Bot
                   </label>
                 </div>
               </fieldset>
@@ -511,28 +650,18 @@ function AgentsSection({ providers }: { providers: Provider[] }) {
                 </div>
               </fieldset>
 
-              <div className="form-row">
-                <label className="drawer-field">
-                  <span>Provider</span>
-                  <select value={provider} onChange={e=>{setProvider(e.target.value);setModelId('');}}>
-                    {providers.map(p=>(
-                      <option key={p.id} value={p.id} disabled={!p.available}>{p.available?'':'🔒 '}{p.label}</option>
-                    ))}
-                  </select>
-                </label>
-                <label className="drawer-field">
-                  <span>Model</span>
-                  <select value={modelId} onChange={e=>setModelId(e.target.value)} disabled={!selectedProv?.models?.length}>
-                    {(selectedProv?.models??[]).map(m=><option key={m} value={m}>{m}</option>)}
-                    {!selectedProv?.models?.length && <option value="">— default —</option>}
-                  </select>
-                </label>
-              </div>
+              <ProviderModelFields
+                providers={providers}
+                provider={provider}
+                modelId={modelId}
+                onProvider={setProvider}
+                onModel={setModelId}
+              />
             </div>
             <div className="drawer-footer">
               <span>{selectedTeams.size} team{selectedTeams.size!==1?'s':''} selected</span>
-              <button className="primary-button" disabled={busy||selectedTeams.size===0} onClick={deploy}>
-                <Rocket size={15}/>{busy?'Deploying…':'Deploy'}
+              <button className="primary-button" disabled={busy||selectedTeams.size===0} onClick={assign}>
+                <Rocket size={15}/>{busy?'Saving…':'Save assignment'}
               </button>
             </div>
           </aside>
@@ -564,9 +693,7 @@ function AgentsSection({ providers }: { providers: Provider[] }) {
 // ── Main panel ────────────────────────────────────────────────────────────────
 
 export default function AgentsPanel() {
-  const [providers, setProviders] = useState<Provider[]>([
-    { id:'fake', label:'Fake (no cost)', available:true },
-  ]);
+  const [providers, setProviders] = useState<Provider[]>(DEFAULT_PROVIDERS);
 
   useEffect(() => {
     api<{ providers: Provider[] }>('/providers')

@@ -134,6 +134,13 @@ class RendererTests(unittest.TestCase):
         c = render(_spec(), staging_root=self.staging)
         self.assertTrue((c.staging_dir / "checker.py").exists())
 
+    def test_generated_app_python_compiles_for_each_vuln(self):
+        for vuln in ("path_traversal", "command_injection", "sql_injection"):
+            with self.subTest(vulnerability=vuln):
+                c = render(_spec(vulnerability=vuln), staging_root=self.staging)
+                source = (c.staging_dir / "app" / "app.py").read_text()
+                compile(source, str(c.staging_dir / "app" / "app.py"), "exec")
+
     def test_no_provider_keys_in_any_file(self):
         import re
         c = render(_spec(), staging_root=self.staging)

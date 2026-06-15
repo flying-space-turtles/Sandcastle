@@ -99,6 +99,8 @@ def _render_app(spec: ChallengeSpec) -> str:
         return render_template("export.html", body=json.dumps(result) if result else None, error=None)
 """)
 
+    vuln_route = textwrap.indent(vuln_route.strip(), "    ")
+
     return textwrap.dedent(f"""\
 \"\"\"Generated {label} service — template flask-notes-v1 / seed {seed}.\"\"\"
 # GENERATED — do not edit; re-render from ChallengeSpec to change.
@@ -197,8 +199,8 @@ def create_app():
     def health():
         return {{"status": "ok"}}
 
-    {vuln_route}
-    {decoy_code}
+{vuln_route}
+{decoy_code}
 
     @app.post("/internal/plant")
     def plant_flag():
