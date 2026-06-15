@@ -1,5 +1,12 @@
 # Sandcastle
 
+[![CI](https://img.shields.io/github/actions/workflow/status/Matteoverzotti/Sandcastle/ci.yml?branch=main&label=CI)](https://github.com/Matteoverzotti/Sandcastle/actions/workflows/ci.yml)
+[![Live deployment](https://img.shields.io/badge/live-sandcastle.matteoverz.xyz-2ea44f)](https://sandcastle.matteoverz.xyz/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Python](https://img.shields.io/badge/python-3.12-3776ab)
+![Node](https://img.shields.io/badge/node-22-5fa04e)
+![Docker Compose](https://img.shields.io/badge/docker-compose-2496ed)
+
 Sandcastle is a local, Docker-based Attack and Defense CTF arena for testing
 autonomous software agents in a realistic security game loop.
 
@@ -12,6 +19,38 @@ The project is built for experiments where agents must do more than solve a
 static puzzle. They have to inspect unfamiliar code, patch their own service,
 keep it alive, attack opponents, submit flags, and operate inside clear
 infrastructure and credential boundaries.
+
+## Live Deployment
+
+The current public staging deployment is available at
+[sandcastle.matteoverz.xyz](https://sandcastle.matteoverz.xyz/).
+
+Staging is disposable and PR-driven. It is intended for validating the operator
+console, routing, generated challenges, and bot-controller workflows against a
+real VPS deployment before merging. The deployment path is documented in
+[Staging deployments](docs/staging-deploy.md).
+
+## Quickstart
+
+Requirements:
+
+- Linux host with Docker Engine and the Docker Compose plugin.
+- Python 3.12 for backend scripts and tests.
+- Node.js 22 for the visualizer build.
+
+Generate the local arena and start it:
+
+```bash
+./scripts/setup.sh
+./scripts/arena.sh up
+./scripts/arena.sh status
+```
+
+Open the visualizer at
+[http://127.0.0.1:4173](http://127.0.0.1:4173).
+
+For operator credentials, team SSH access, bot commands, and troubleshooting,
+see the [Operator guide](docs/operator-guide.md).
 
 ## What Sandcastle Provides
 
@@ -92,6 +131,58 @@ planning, provider gateways, scoped credentials, memory, and team-local tools.
 | `scripts/` | Arena setup, lifecycle, doctor, smoke tests, cleanup, and staging helpers. |
 | `docs/` | Architecture, threat model, scoring, round engine, isolation, staging, and authoring guides. |
 | `diagrams/` | High-level system diagrams used in this README. |
+
+## Development Checks
+
+Common local validation commands:
+
+```bash
+docker compose config --quiet
+python3 -B tests/gameserver_test.py
+python3 -B tests/agent_plan_api_test.py
+python3 -B tests/openai_provider_test.py
+./tests/staging_deploy_test.sh
+```
+
+The full fast suite is available through:
+
+```bash
+./scripts/run-tests.sh --fast
+```
+
+When `config/arena.env` changes, regenerate and commit the generated Compose
+file:
+
+```bash
+./scripts/setup.sh
+git diff -- docker-compose.yml config/arena.env
+```
+
+CI enforces that `docker-compose.yml` stays in sync with
+`config/arena.env`.
+
+## Deployment And Secrets
+
+Staging deploys are managed by GitHub Actions and the `deploy:staging` pull
+request label. The workflow checks out the PR head, syncs it to the VPS, applies
+staging-only arena configuration, runs a Docker-in-Docker smoke deployment, and
+leaves a live arena running for review.
+
+Provider keys are never committed. For model-backed challenge generation and AI
+agents, configure these GitHub environment secrets for staging:
+
+| Secret | Purpose |
+|---|---|
+| `OPENAI_API_KEY` | Enables OpenAI-backed challenge generation and agents. |
+| `GEMINI_API_KEY` | Enables Gemini-backed challenge generation and agents. |
+| `STAGING_OPERATOR_TOKEN` | Authorizes match controls in the operator console. |
+| `STAGING_CHECKER_SECRET` | Master secret used by service checkers. |
+| `STAGING_TEAM_TOKEN_PATTERN` | Per-team submission token pattern containing `{team}`. |
+
+The bot controller only receives provider keys through container environment
+variables at deploy time. If a provider appears as `key not detected` in the UI,
+inspect the staging workflow secrets and the `bot-controller` runtime
+environment.
 
 ## Documentation
 
