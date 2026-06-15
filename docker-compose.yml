@@ -48,10 +48,6 @@ networks:
           gateway: 10.10.0.1
   control-plane:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.30.0.0/24
-          gateway: 172.30.0.1
 
 services:
   team1-vuln:
@@ -318,12 +314,7 @@ services:
     image: sandcastle/visualizer:latest
     container_name: sandcastle-visualizer
     hostname: sandcastle-visualizer
-    networks:
-      - control-plane
-    extra_hosts:
-      - "host.docker.internal:172.30.0.1"
-    ports:
-      - "127.0.0.1:4173:80"
+    network_mode: host
     labels:
       sandcastle.role: "visualizer"
     deploy:

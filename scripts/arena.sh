@@ -527,7 +527,7 @@ print_status() {
     visualizer_state="$(container_state sandcastle-visualizer)"
     visualizer_health="-"
     if [[ "${visualizer_state}" == "running" ]]; then
-        if docker exec sandcastle-visualizer wget -q -O - http://127.0.0.1/ >/dev/null 2>&1; then
+        if docker exec sandcastle-visualizer wget -q -O - "http://127.0.0.1:${ARENA_VISUALIZER_PORT}/" >/dev/null 2>&1; then
             visualizer_health="healthy"
         else
             visualizer_health="unhealthy"

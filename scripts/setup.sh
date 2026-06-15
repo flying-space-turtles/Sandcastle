@@ -507,10 +507,6 @@ networks:
           gateway: ${ARENA_CTF_GATEWAY}
   control-plane:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.30.0.0/24
-          gateway: 172.30.0.1
 EOF
 
     cat >> "${COMPOSE_FILE}" <<EOF
@@ -809,12 +805,7 @@ EOF
     image: sandcastle/visualizer:latest
     container_name: sandcastle-visualizer
     hostname: sandcastle-visualizer
-    networks:
-      - control-plane
-    extra_hosts:
-      - "host.docker.internal:172.30.0.1"
-    ports:
-      - "${ARENA_VISUALIZER_BIND_HOST}:${ARENA_VISUALIZER_PORT}:80"
+    network_mode: host
     labels:
       sandcastle.role: "visualizer"
     deploy:
