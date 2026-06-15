@@ -15,7 +15,8 @@ import {
   Trophy,
   X,
 } from 'lucide-react';
-import { botApiUrl, gameserverApiUrl } from '../data/arenaConfig';
+import { gameserverApiUrl } from '../data/arenaConfig';
+import { OPERATOR_TOKEN_STORAGE_KEY, botApiRequest, setOperatorToken as persistOperatorToken } from '../data/operatorApi';
 
 type MatchStatus = 'CREATED' | 'RUNNING' | 'PAUSED' | 'FINISHED' | 'FAILED';
 type CheckerStatus = 'UP' | 'DOWN' | 'MUMBLE' | 'CORRUPT' | 'PENDING';
@@ -87,7 +88,7 @@ const Scoreboard = () => {
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [operatorToken, setOperatorToken] = useState(
-    () => sessionStorage.getItem('sandcastle.operatorToken') || '',
+    () => sessionStorage.getItem(OPERATOR_TOKEN_STORAGE_KEY) || '',
   );
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [controlsOpen, setControlsOpen] = useState(false);
@@ -120,13 +121,17 @@ const Scoreboard = () => {
   }, [refresh]);
 
   useEffect(() => {
-    if (operatorToken) sessionStorage.setItem('sandcastle.operatorToken', operatorToken);
-    else sessionStorage.removeItem('sandcastle.operatorToken');
+    persistOperatorToken(operatorToken);
   }, [operatorToken]);
 
   useEffect(() => {
     if (!controlsOpen) return;
-    fetch(`${botApiUrl}/match-plan`, { cache: 'no-store' })
+    if (!operatorToken) {
+      setMatchPlan(null);
+      setSelectedChallengeId('');
+      return;
+    }
+    botApiRequest('/match-plan', { cache: 'no-store' }, operatorToken)
       .then((response) => response.ok ? response.json() : null)
       .then((body) => {
         const plan = body as MatchPlanSnapshot | null;
@@ -134,18 +139,18 @@ const Scoreboard = () => {
         setSelectedChallengeId(plan?.selected_challenge?.id || '');
       })
       .catch(() => setMatchPlan(null));
-  }, [controlsOpen]);
+  }, [controlsOpen, operatorToken]);
 
   const chooseChallenge = async (runId: string) => {
     setSelectedChallengeId(runId);
     setActionError(null);
     if (!runId) return;
     try {
-      const response = await fetch(`${botApiUrl}/challenges/${runId}/select`, {
+      const response = await botApiRequest(`/challenges/${runId}/select`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: '{}',
-      });
+      }, operatorToken);
       const body = await response.json().catch(() => ({})) as MatchPlanSnapshot & { error?: string };
       if (!response.ok) throw new Error(body.error || `challenge selection failed with HTTP ${response.status}`);
       setMatchPlan(body);
@@ -169,7 +174,7 @@ const Scoreboard = () => {
     setActionError(null);
     try {
       if (action === 'start' && (deploySelectedChallenge || startQueuedAgents)) {
-        const planResponse = await fetch(`${botApiUrl}/match-plan/prepare`, {
+        const planResponse = await botApiRequest('/match-plan/prepare', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -177,7 +182,7 @@ const Scoreboard = () => {
             challenge_run_id: selectedChallengeId || undefined,
             start_agents: startQueuedAgents,
           }),
-        });
+        }, operatorToken);
         const planBody = await planResponse.json().catch(() => ({})) as { error?: string; output?: string };
         if (!planResponse.ok) {
           const detail = planBody.error || planBody.output || `match prepare failed with HTTP ${planResponse.status}`;

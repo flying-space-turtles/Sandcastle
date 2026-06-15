@@ -279,6 +279,7 @@ services:
     networks:
       ctf-network:
         ipv4_address: 10.10.0.4
+      control-plane: {}
     ports:
       - "127.0.0.1:7878:7878"
     volumes:
@@ -313,10 +314,7 @@ services:
     image: sandcastle/visualizer:latest
     container_name: sandcastle-visualizer
     hostname: sandcastle-visualizer
-    networks:
-      - control-plane
-    ports:
-      - "127.0.0.1:4173:80"
+    network_mode: host
     labels:
       sandcastle.role: "visualizer"
     deploy:

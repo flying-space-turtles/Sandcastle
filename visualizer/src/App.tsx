@@ -14,7 +14,7 @@ import TopologyNav from './components/TopologyNav';
 import { parseDockerCompose } from './data/dockerComposeParser';
 import { buildDockerFlow } from './graph/dockerGraph';
 import { useNetworkEvents } from './hooks/useNetworkEvents';
-import type { MachineNodeData, Mode, Topology } from './types';
+import type { MachineNodeData, Mode, ServiceDefinition, Topology } from './types';
 
 const dockerfileSources: Record<string, string> = {
   'ssh/Dockerfile': sshDockerfile,
@@ -43,13 +43,21 @@ const dockerfileSources: Record<string, string> = {
   './Dockerfile': vulnDockerfile,
 };
 
+const HIDDEN_TOPOLOGY_ROLES = new Set(['gameserver', 'visualizer']);
+
+const isTopologyServiceVisible = (service: ServiceDefinition) =>
+  service.labels['sandcastle.visualizer.hidden'] !== 'true' &&
+  !HIDDEN_TOPOLOGY_ROLES.has(service.labels['sandcastle.role'] || '') &&
+  !HIDDEN_TOPOLOGY_ROLES.has(service.serviceName);
+
 const buildTopology = (yamlSource: string): Topology => {
   const parsedCompose = parseDockerCompose(yamlSource, dockerfileSources);
+  const services = parsedCompose.services.filter(isTopologyServiceVisible);
+  const usedNetworkNames = new Set(services.flatMap((service) => service.networks.map((network) => network.name)));
   const parsed = {
     ...parsedCompose,
-    services: parsedCompose.services.filter(
-      (service) => service.labels['sandcastle.visualizer.hidden'] !== 'true',
-    ),
+    networks: parsedCompose.networks.filter((network) => usedNetworkNames.has(network.name)),
+    services,
   };
   const flow = buildDockerFlow(parsed);
 

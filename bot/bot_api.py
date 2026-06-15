@@ -94,6 +94,10 @@ def _team_token(team_id: int) -> str:
     return _arena_values()["ARENA_TEAM_TOKEN_PATTERN"].replace("{team}", str(team_id))
 
 
+def _operator_token() -> str:
+    return os.environ.get("ARENA_OPERATOR_TOKEN") or _arena_values().get("ARENA_OPERATOR_TOKEN", "")
+
+
 def _gameserver_url() -> str:
     return f"http://{ARENA_DEFAULTS.network_prefix}.0.2:8000"
 
@@ -2271,6 +2275,22 @@ class BotAPIHandler(BaseHTTPRequestHandler):
             return {}
         return body if isinstance(body, dict) else {}
 
+    def _require_operator(self) -> bool:
+        configured_token = _operator_token()
+        if not configured_token:
+            self._json(503, {"error": "operator token is not configured"})
+            return False
+        authorization = self.headers.get("Authorization", "")
+        scheme, separator, token = authorization.partition(" ")
+        if (
+            not separator
+            or not hmac.compare_digest(scheme.lower(), "bearer")
+            or not hmac.compare_digest(token, configured_token)
+        ):
+            self._json(401, {"error": "missing or invalid operator token"})
+            return False
+        return True
+
     def _plan(self) -> None:
         authorization = self.headers.get("Authorization", "")
         scheme, separator, token = authorization.partition(" ")
@@ -2327,6 +2347,8 @@ class BotAPIHandler(BaseHTTPRequestHandler):
 
         if path == "/health":
             self._json(200, {"ok": True, "service": "bot-controller"})
+            return
+        if not self._require_operator():
             return
         if path == "/catalog":
             self._json(200, {"actions": action_catalog(), "planners": planner_catalog()})
@@ -2552,6 +2574,8 @@ class BotAPIHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path.rstrip("/")
         if path == "/plan":
             self._plan()
+            return
+        if not self._require_operator():
             return
         body = self._body()
         if path in {"/deployments", "/deploy"}:
