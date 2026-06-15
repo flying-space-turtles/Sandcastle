@@ -29,9 +29,9 @@ Three isolation mechanisms were considered:
 The filter proxy remains useful because it preserves
 `network_mode: container:teamN-vuln`, which is the simplest way for the
 challenge app to share the vuln machine's IP address. DinD uses a different
-shape: the app runs inside the team daemon, publishes the service port on the
-DinD sidecar, and `teamN-vuln` forwards `10.10.N.3:SERVICE_PORT` to that
-sidecar.
+shape: the app runs inside the team daemon on that nested daemon's host
+network, and `teamN-vuln` forwards `10.10.N.3:SERVICE_PORT` to the
+team-local DinD sidecar.
 
 ---
 

@@ -238,6 +238,17 @@ dind_app_diagnostics() {
             "cd '${service_dir}' && docker compose ps || true"
         docker exec "${machine}" sh -lc \
             "cd '${service_dir}' && docker compose logs --no-color --tail=120 || true"
+        echo "--- team${team_id} DinD service forwarder diagnostics ---"
+        docker exec "${machine}" sh -lc \
+            "getent hosts 'team${team_id}-dind' || true"
+        docker exec "${machine}" sh -lc \
+            "ps -ef | grep '[s]ocat' || true"
+        docker exec "${machine}" sh -lc \
+            "ss -lntp || true"
+        docker exec "${machine}" sh -lc \
+            "curl -sv --max-time 5 'http://127.0.0.1:${ARENA_SERVICE_PORT}/health' 2>&1 || true"
+        docker exec "${machine}" sh -lc \
+            "curl -sv --max-time 5 'http://team${team_id}-dind:${ARENA_SERVICE_PORT}/health' 2>&1 || true"
     } >&2 || true
 }
 
@@ -693,6 +704,12 @@ up_arena() {
     wait_for_dind_forwarders "${timeout}" || {
         STATUS_FORMAT="text"
         print_status || true
+        if [[ "${ARENA_ISOLATION_MODE}" == "dind" ]]; then
+            local id
+            for ((id = 1; id <= ARENA_TEAM_COUNT; id++)); do
+                dind_app_diagnostics "${id}"
+            done
+        fi
         die "one or more DinD service forwarders failed health checks"
     }
     verify_network_path

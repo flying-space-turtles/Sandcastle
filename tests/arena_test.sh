@@ -364,6 +364,7 @@ set -e
 }
 grep -Fq "DinD service forwarder timeout" <<< "${dind_forwarder_failure}"
 grep -Fq "one or more DinD service forwarders failed health checks" <<< "${dind_forwarder_failure}"
+grep -Fq "DinD service forwarder diagnostics" <<< "${dind_forwarder_failure}"
 
 : > "${LOG_FILE}"
 set +e
