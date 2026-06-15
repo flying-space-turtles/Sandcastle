@@ -308,6 +308,9 @@ wait_for_infrastructure() {
         if [[ "$(container_state sandcastle-bot-controller)" != "running" ]]; then
             pending+=("sandcastle-bot-controller")
         fi
+        if [[ "$(container_state sandcastle-visualizer)" != "running" ]]; then
+            pending+=("sandcastle-visualizer")
+        fi
 
         ((${#pending[@]} == 0)) && return 0
         ((attempt < attempts)) && sleep "${HEALTH_POLL_SECONDS}"
@@ -391,6 +394,7 @@ component_ready() {
 print_status() {
     local id gateway machine app gateway_state machine_state app_state health
     local firewall_state bot_controller_state bot_controller_health
+    local visualizer_state visualizer_health
     local ready=0
 
     if [[ "${STATUS_FORMAT}" == "text" ]]; then
@@ -460,19 +464,31 @@ print_status() {
             bot_controller_health="unhealthy"
         fi
     fi
+    visualizer_state="$(container_state sandcastle-visualizer)"
+    visualizer_health="-"
+    if [[ "${visualizer_state}" == "running" ]]; then
+        if docker exec sandcastle-visualizer wget -q -O - http://127.0.0.1/ >/dev/null 2>&1; then
+            visualizer_health="healthy"
+        else
+            visualizer_health="unhealthy"
+        fi
+    fi
 
     if [[ "${STATUS_FORMAT}" == "text" ]]; then
         printf '%-8s %-10s %-12s %-10s\n' "-" "firewall" "${firewall_state}" "-"
         printf '%-8s %-10s %-12s %-10s\n' "-" "gameserver" "${gameserver_state}" "${gameserver_health}"
         printf '%-8s %-10s %-12s %-10s\n' "-" "bot-api" "${bot_controller_state}" "${bot_controller_health}"
+        printf '%-8s %-10s %-12s %-10s\n' "-" "visualizer" "${visualizer_state}" "${visualizer_health}"
     else
         printf -- '-\tfirewall\t%s\t-\n' "${firewall_state}"
         printf -- '-\tgameserver\t%s\t%s\n' "${gameserver_state}" "${gameserver_health}"
         printf -- '-\tbot-api\t%s\t%s\n' "${bot_controller_state}" "${bot_controller_health}"
+        printf -- '-\tvisualizer\t%s\t%s\n' "${visualizer_state}" "${visualizer_health}"
     fi
     component_ready "${firewall_state}" || ready=1
     component_ready "${gameserver_state}" "${gameserver_health}" || ready=1
     component_ready "${bot_controller_state}" "${bot_controller_health}" || ready=1
+    component_ready "${visualizer_state}" "${visualizer_health}" || ready=1
 
     return "${ready}"
 }

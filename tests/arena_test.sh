@@ -135,6 +135,9 @@ case "${1:-}" in
         if [[ "${scenario}" == "final-status-fail" && "${machine}" == "sandcastle-bot-controller" ]]; then
             exit 1
         fi
+        if [[ "${scenario}" == "visualizer-fail" && "${machine}" == "sandcastle-visualizer" ]]; then
+            exit 1
+        fi
         if [[ "${scenario}" == "firewall-runtime-fail" && "${machine}" == "sandcastle-firewall" ]]; then
             exit 1
         fi
@@ -227,6 +230,7 @@ status_output="$(run_arena healthy status --format tsv)"
 grep -Fq $'team1\tgateway\trunning\t-' <<< "${status_output}"
 grep -Fq $'team2\tapp\trunning\thealthy' <<< "${status_output}"
 grep -Fq -- $'-\tfirewall\trunning\t-' <<< "${status_output}"
+grep -Fq -- $'-\tvisualizer\trunning\thealthy' <<< "${status_output}"
 
 set +e
 missing_output="$(run_arena missing-app status --format tsv)"
@@ -237,6 +241,16 @@ set -e
     exit 1
 }
 grep -Fq $'team2\tapp\tabsent\tnot-running' <<< "${missing_output}"
+
+set +e
+visualizer_output="$(run_arena visualizer-fail status --format tsv)"
+visualizer_rc=$?
+set -e
+((visualizer_rc != 0)) || {
+    echo "Status should fail when the visualizer health check fails" >&2
+    exit 1
+}
+grep -Fq -- $'-\tvisualizer\trunning\tunhealthy' <<< "${visualizer_output}"
 
 : > "${LOG_FILE}"
 run_arena healthy down >/dev/null

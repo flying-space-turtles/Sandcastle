@@ -42,8 +42,8 @@ case "${1:-} ${2:-}" in
     "ps -aq")
         if [[ "$*" == *"name=^/team[0-9]+-(vuln|ssh|vuln-app|dind)$"* ]]; then
             printf '%s\n' team1-dind team1-vuln team1-vuln-app
-        elif [[ "$*" == *"name=^/sandcastle-(monitor|firewall|gameserver|bot-controller)$"* ]]; then
-            printf '%s\n' sandcastle-gameserver sandcastle-bot-controller
+        elif [[ "$*" == *"name=^/sandcastle-(monitor|firewall|gameserver|bot-controller|visualizer)$"* ]]; then
+            printf '%s\n' sandcastle-gameserver sandcastle-bot-controller sandcastle-visualizer
         fi
         ;;
     "volume ls")
@@ -208,6 +208,7 @@ PATH="${MOCK_BIN}:${PATH}" \
 assert_file_contains "${LOG_FILE}" "docker rm -f"
 assert_file_contains "${LOG_FILE}" "team1-dind"
 assert_file_contains "${LOG_FILE}" "sandcastle-gameserver"
+assert_file_contains "${LOG_FILE}" "sandcastle-visualizer"
 assert_file_contains "${LOG_FILE}" "docker volume rm -f"
 assert_file_contains "${LOG_FILE}" "sandcastle_team1-dind-data"
 assert_file_contains "${LOG_FILE}" "sandcastle_team1-dind-run"

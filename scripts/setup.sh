@@ -473,6 +473,7 @@ x-sandcastle-arena:
   flag_expiry_rounds: ${ARENA_FLAG_EXPIRY_ROUNDS}
   checker_max_concurrency: ${ARENA_CHECKER_MAX_CONCURRENCY}
   gameserver_port: ${ARENA_GAMESERVER_PORT}
+  visualizer_port: ${ARENA_VISUALIZER_PORT}
   submission_rate_limit: ${ARENA_SUBMISSION_RATE_LIMIT}
   submission_rate_window_seconds: ${ARENA_SUBMISSION_RATE_WINDOW_SECONDS}
   score_attack_points: ${ARENA_SCORE_ATTACK_POINTS}
@@ -488,6 +489,8 @@ x-sandcastle-arena:
   team_app_cpu_limit: ${ARENA_TEAM_APP_CPU_LIMIT}
   team_app_pids_limit: ${ARENA_TEAM_APP_PIDS_LIMIT}
   team_max_restarts: ${ARENA_TEAM_MAX_RESTARTS}
+  visualizer_mem_limit: ${ARENA_VISUALIZER_MEM_LIMIT}
+  visualizer_cpu_limit: ${ARENA_VISUALIZER_CPU_LIMIT}
   log_max_size: ${ARENA_LOG_MAX_SIZE}
   log_max_files: ${ARENA_LOG_MAX_FILES}
 
@@ -793,6 +796,29 @@ EOF
         max-file: "${ARENA_LOG_MAX_FILES}"
     restart: unless-stopped
 
+  visualizer:
+    build:
+      context: .
+      dockerfile: visualizer/Dockerfile
+    image: sandcastle/visualizer:latest
+    container_name: sandcastle-visualizer
+    hostname: sandcastle-visualizer
+    ports:
+      - "${ARENA_VISUALIZER_BIND_HOST}:${ARENA_VISUALIZER_PORT}:80"
+    labels:
+      sandcastle.role: "visualizer"
+    deploy:
+      resources:
+        limits:
+          memory: ${ARENA_VISUALIZER_MEM_LIMIT}
+          cpus: '${ARENA_VISUALIZER_CPU_LIMIT}'
+    logging:
+      driver: json-file
+      options:
+        max-size: "${ARENA_LOG_MAX_SIZE}"
+        max-file: "${ARENA_LOG_MAX_FILES}"
+    restart: unless-stopped
+
 volumes:
   gameserver-data:
     name: sandcastle_gameserver-data
@@ -870,6 +896,7 @@ print_summary() {
         echo "  Firewall feed: ws://localhost:${ARENA_FIREWALL_WS_PORT}"
         echo "  Bot API:       http://${ARENA_BOT_API_HOST}:${ARENA_BOT_API_PORT}"
         echo "  Gameserver:    http://localhost:${ARENA_GAMESERVER_PORT}"
+        echo "  Visualizer:    http://localhost:${ARENA_VISUALIZER_PORT}"
     else
         echo "Run ./scripts/setup.sh --show-access to print development credentials and connection commands."
     fi

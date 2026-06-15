@@ -13,6 +13,7 @@ x-sandcastle-arena:
   flag_expiry_rounds: 5
   checker_max_concurrency: 8
   gameserver_port: 8000
+  visualizer_port: 4173
   submission_rate_limit: 60
   submission_rate_window_seconds: 60
   score_attack_points: 10
@@ -28,6 +29,8 @@ x-sandcastle-arena:
   team_app_cpu_limit: 0.50
   team_app_pids_limit: 100
   team_max_restarts: 5
+  visualizer_mem_limit: 128m
+  visualizer_cpu_limit: 0.25
   log_max_size: 50m
   log_max_files: 3
 
@@ -278,6 +281,29 @@ services:
         limits:
           memory: 256m
           cpus: '0.50'
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+    restart: unless-stopped
+
+  visualizer:
+    build:
+      context: .
+      dockerfile: visualizer/Dockerfile
+    image: sandcastle/visualizer:latest
+    container_name: sandcastle-visualizer
+    hostname: sandcastle-visualizer
+    ports:
+      - "127.0.0.1:4173:80"
+    labels:
+      sandcastle.role: "visualizer"
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: '0.25'
     logging:
       driver: json-file
       options:

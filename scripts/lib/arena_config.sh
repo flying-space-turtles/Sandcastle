@@ -65,8 +65,9 @@ arena_config_validate_port_layout() {
         "${ARENA_FIREWALL_PROXY_PORT}"
         "${ARENA_BOT_API_PORT}"
         "${ARENA_GAMESERVER_PORT}"
+        "${ARENA_VISUALIZER_PORT}"
     )
-    local port
+    local port index other_index
 
     if ((ssh_last_port > 65535)); then
         arena_config_error \
@@ -81,15 +82,15 @@ arena_config_validate_port_layout() {
             return 1
         fi
     done
-    if [[ "${ARENA_FIREWALL_WS_PORT}" == "${ARENA_FIREWALL_PROXY_PORT}" ||
-          "${ARENA_FIREWALL_WS_PORT}" == "${ARENA_BOT_API_PORT}" ||
-          "${ARENA_FIREWALL_WS_PORT}" == "${ARENA_GAMESERVER_PORT}" ||
-          "${ARENA_FIREWALL_PROXY_PORT}" == "${ARENA_BOT_API_PORT}" ||
-          "${ARENA_FIREWALL_PROXY_PORT}" == "${ARENA_GAMESERVER_PORT}" ||
-          "${ARENA_BOT_API_PORT}" == "${ARENA_GAMESERVER_PORT}" ]]; then
-        arena_config_error "firewall, gameserver and bot API host ports must be distinct"
-        return 1
-    fi
+    for index in "${!host_ports[@]}"; do
+        for other_index in "${!host_ports[@]}"; do
+            ((other_index > index)) || continue
+            if [[ "${host_ports[${index}]}" == "${host_ports[${other_index}]}" ]]; then
+                arena_config_error "firewall, gameserver, bot API and visualizer host ports must be distinct"
+                return 1
+            fi
+        done
+    done
     if [[ "${ARENA_FIREWALL_PROBE_PORT}" == "${ARENA_SERVICE_PORT}" ||
           "${ARENA_FIREWALL_PROBE_PORT}" == "22" ]]; then
         arena_config_error \
@@ -167,6 +168,10 @@ arena_config_load() {
     ARENA_GAMESERVER_CPU_LIMIT="${ARENA_GAMESERVER_CPU_LIMIT:-1.00}"
     ARENA_BOT_MEM_LIMIT="${ARENA_BOT_MEM_LIMIT:-256m}"
     ARENA_BOT_CPU_LIMIT="${ARENA_BOT_CPU_LIMIT:-0.50}"
+    ARENA_VISUALIZER_BIND_HOST="${ARENA_VISUALIZER_BIND_HOST:-127.0.0.1}"
+    ARENA_VISUALIZER_PORT="${ARENA_VISUALIZER_PORT:-4173}"
+    ARENA_VISUALIZER_MEM_LIMIT="${ARENA_VISUALIZER_MEM_LIMIT:-128m}"
+    ARENA_VISUALIZER_CPU_LIMIT="${ARENA_VISUALIZER_CPU_LIMIT:-0.25}"
     ARENA_FIREWALL_MEM_LIMIT="${ARENA_FIREWALL_MEM_LIMIT:-128m}"
     ARENA_FIREWALL_CPU_LIMIT="${ARENA_FIREWALL_CPU_LIMIT:-0.50}"
     ARENA_LOG_MAX_SIZE="${ARENA_LOG_MAX_SIZE:-50m}"
@@ -204,6 +209,7 @@ arena_config_load() {
     arena_config_require_int ARENA_FIREWALL_CAPTURE_RCVBUF_BYTES 65536 268435456 || return 1
     arena_config_require_int ARENA_FIREWALL_RECENT_ICMP_LIMIT 1 1000000 || return 1
     arena_config_require_int ARENA_BOT_API_PORT 1 65535 || return 1
+    arena_config_require_int ARENA_VISUALIZER_PORT 1 65535 || return 1
     arena_config_require_int ARENA_BOT_LOOP_SECONDS 0 86400 || return 1
     arena_config_require_int ARENA_STARTUP_TIMEOUT_SECONDS 1 86400 || return 1
     arena_config_require_int ARENA_ROUND_DURATION_SECONDS 1 86400 || return 1
@@ -230,6 +236,8 @@ arena_config_load() {
     arena_config_require_cpu_limit ARENA_GAMESERVER_CPU_LIMIT || return 1
     arena_config_require_mem_limit ARENA_BOT_MEM_LIMIT || return 1
     arena_config_require_cpu_limit ARENA_BOT_CPU_LIMIT || return 1
+    arena_config_require_mem_limit ARENA_VISUALIZER_MEM_LIMIT || return 1
+    arena_config_require_cpu_limit ARENA_VISUALIZER_CPU_LIMIT || return 1
     arena_config_require_mem_limit ARENA_FIREWALL_MEM_LIMIT || return 1
     arena_config_require_cpu_limit ARENA_FIREWALL_CPU_LIMIT || return 1
     arena_config_require_mem_limit ARENA_LOG_MAX_SIZE || return 1
@@ -291,6 +299,10 @@ arena_config_load() {
         arena_config_error "ARENA_SSH_BIND_HOST contains unsupported characters"
         return 1
     fi
+    if [[ ! "${ARENA_VISUALIZER_BIND_HOST}" =~ ^[a-zA-Z0-9_.:-]+$ ]]; then
+        arena_config_error "ARENA_VISUALIZER_BIND_HOST contains unsupported characters"
+        return 1
+    fi
     if [[ -n "${ARENA_DIND_DNS_SERVERS}" &&
           ! "${ARENA_DIND_DNS_SERVERS}" =~ ^[a-zA-Z0-9_.:-]+(,[a-zA-Z0-9_.:-]+)*$ ]]; then
         arena_config_error "ARENA_DIND_DNS_SERVERS must be a comma-separated list of DNS server addresses"
@@ -336,6 +348,8 @@ arena_config_load() {
         ARENA_BOT_API_HOST \
         ARENA_BOT_API_PORT \
         ARENA_BOT_LOOP_SECONDS \
+        ARENA_VISUALIZER_BIND_HOST \
+        ARENA_VISUALIZER_PORT \
         ARENA_STARTUP_TIMEOUT_SECONDS \
         ARENA_ROUND_DURATION_SECONDS \
         ARENA_FLAG_EXPIRY_ROUNDS \
@@ -364,6 +378,8 @@ arena_config_load() {
         ARENA_GAMESERVER_CPU_LIMIT \
         ARENA_BOT_MEM_LIMIT \
         ARENA_BOT_CPU_LIMIT \
+        ARENA_VISUALIZER_MEM_LIMIT \
+        ARENA_VISUALIZER_CPU_LIMIT \
         ARENA_FIREWALL_MEM_LIMIT \
         ARENA_FIREWALL_CPU_LIMIT \
         ARENA_LOG_MAX_SIZE \

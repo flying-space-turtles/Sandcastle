@@ -74,7 +74,7 @@ remove_containers() {
     matches=()
     while IFS= read -r match; do
         matches+=("${match}")
-    done < <(docker ps -aq --filter "name=^/sandcastle-(monitor|firewall|gameserver|bot-controller)$")
+    done < <(docker ps -aq --filter "name=^/sandcastle-(monitor|firewall|gameserver|bot-controller|visualizer)$")
     ((${#matches[@]} == 0)) || containers+=("${matches[@]}")
 
     if ((${#containers[@]} > 0)); then
