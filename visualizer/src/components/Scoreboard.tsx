@@ -126,6 +126,11 @@ const Scoreboard = () => {
 
   useEffect(() => {
     if (!controlsOpen) return;
+    if (!operatorToken) {
+      setMatchPlan(null);
+      setSelectedChallengeId('');
+      return;
+    }
     botApiRequest('/match-plan', { cache: 'no-store' }, operatorToken)
       .then((response) => response.ok ? response.json() : null)
       .then((body) => {

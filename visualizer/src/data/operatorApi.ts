@@ -27,7 +27,7 @@ export const setOperatorToken = (token: string) => {
   }
 };
 
-export const botApiRequest = (path: string, options: RequestInit = {}, token = getOperatorToken()) => {
+export const botApiRequest = async (path: string, options: RequestInit = {}, token = getOperatorToken()) => {
   if (!token) {
     throw new OperatorAuthError();
   }
