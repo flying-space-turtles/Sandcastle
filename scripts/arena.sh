@@ -148,6 +148,15 @@ verify_firewall_runtime() {
             --comment sandcastle-firewall-transparent-proxy \
             -j REDIRECT \
             --to-ports "$PROXY_PORT"
+        iptables -t filter -C INPUT \
+            -s "$CTF_NETWORK" \
+            -p tcp \
+            --dport "$PROXY_PORT" \
+            -m conntrack \
+            --ctstate DNAT \
+            -m comment \
+            --comment sandcastle-firewall-proxy-input \
+            -j ACCEPT
         ss -lnt | grep -Eq "[:.]${PROXY_PORT}[[:space:]]"
         ss -lnt | grep -Eq "[:.]${WS_PORT}[[:space:]]"
     ' >/dev/null ||
@@ -155,6 +164,10 @@ verify_firewall_runtime() {
 }
 
 verify_network_path() {
+    if [[ "${ARENA_ISOLATION_MODE:-trusted}" == "dind" ]]; then
+        echo "[*] Skipping legacy firewall network smoke in DinD mode."
+        return 0
+    fi
     [[ -x "${NETWORK_SMOKE}" ]] ||
         die "missing executable network smoke test: ${NETWORK_SMOKE}"
     "${NETWORK_SMOKE}" ||
@@ -200,6 +213,25 @@ dind_daemon_ready() {
     docker exec "${machine}" sh -lc \
         'command -v docker >/dev/null && docker info >/dev/null' \
         >/dev/null 2>&1
+}
+
+dind_app_diagnostics() {
+    local team_id="$1"
+    local machine="team${team_id}-vuln"
+    local username service_dir
+
+    [[ "${ARENA_ISOLATION_MODE}" == "dind" ]] || return 0
+    [[ "$(container_state "${machine}")" == "running" ]] || return 0
+
+    username="$(team_username "${team_id}")"
+    service_dir="/home/${username}/example-vuln"
+    {
+        echo "--- team${team_id} nested DinD compose diagnostics ---"
+        docker exec "${machine}" sh -lc \
+            "cd '${service_dir}' && docker compose ps || true"
+        docker exec "${machine}" sh -lc \
+            "cd '${service_dir}' && docker compose logs --no-color --tail=120 || true"
+    } >&2 || true
 }
 
 app_container_state() {
@@ -276,6 +308,9 @@ wait_for_infrastructure() {
         if [[ "$(container_state sandcastle-bot-controller)" != "running" ]]; then
             pending+=("sandcastle-bot-controller")
         fi
+        if [[ "$(container_state sandcastle-visualizer)" != "running" ]]; then
+            pending+=("sandcastle-visualizer")
+        fi
 
         ((${#pending[@]} == 0)) && return 0
         ((attempt < attempts)) && sleep "${HEALTH_POLL_SECONDS}"
@@ -300,8 +335,12 @@ recreate_apps() {
             service_dir="/home/${username}/example-vuln"
             docker exec "team${id}-vuln" sh -lc \
                 "cd '${service_dir}' && docker rm -f '${app}' >/dev/null 2>&1 || true"
-            docker exec "team${id}-vuln" sh -lc \
-                "cd '${service_dir}' && docker compose up -d --build --force-recreate --remove-orphans"
+            if ! docker exec "team${id}-vuln" sh -lc \
+                "cd '${service_dir}' && docker compose up -d --build --force-recreate --remove-orphans"; then
+                echo "arena.sh: nested DinD compose failed for team${id}" >&2
+                dind_app_diagnostics "${id}"
+                return 1
+            fi
         else
             # network_mode: container:<parent> stores the parent container ID.
             # Removing the old app before Compose up prevents stale namespace reuse.
@@ -355,6 +394,7 @@ component_ready() {
 print_status() {
     local id gateway machine app gateway_state machine_state app_state health
     local firewall_state bot_controller_state bot_controller_health
+    local visualizer_state visualizer_health
     local ready=0
 
     if [[ "${STATUS_FORMAT}" == "text" ]]; then
@@ -424,19 +464,31 @@ print_status() {
             bot_controller_health="unhealthy"
         fi
     fi
+    visualizer_state="$(container_state sandcastle-visualizer)"
+    visualizer_health="-"
+    if [[ "${visualizer_state}" == "running" ]]; then
+        if docker exec sandcastle-visualizer wget -q -O - http://127.0.0.1/ >/dev/null 2>&1; then
+            visualizer_health="healthy"
+        else
+            visualizer_health="unhealthy"
+        fi
+    fi
 
     if [[ "${STATUS_FORMAT}" == "text" ]]; then
         printf '%-8s %-10s %-12s %-10s\n' "-" "firewall" "${firewall_state}" "-"
         printf '%-8s %-10s %-12s %-10s\n' "-" "gameserver" "${gameserver_state}" "${gameserver_health}"
         printf '%-8s %-10s %-12s %-10s\n' "-" "bot-api" "${bot_controller_state}" "${bot_controller_health}"
+        printf '%-8s %-10s %-12s %-10s\n' "-" "visualizer" "${visualizer_state}" "${visualizer_health}"
     else
         printf -- '-\tfirewall\t%s\t-\n' "${firewall_state}"
         printf -- '-\tgameserver\t%s\t%s\n' "${gameserver_state}" "${gameserver_health}"
         printf -- '-\tbot-api\t%s\t%s\n' "${bot_controller_state}" "${bot_controller_health}"
+        printf -- '-\tvisualizer\t%s\t%s\n' "${visualizer_state}" "${visualizer_health}"
     fi
     component_ready "${firewall_state}" || ready=1
     component_ready "${gameserver_state}" "${gameserver_health}" || ready=1
     component_ready "${bot_controller_state}" "${bot_controller_health}" || ready=1
+    component_ready "${visualizer_state}" "${visualizer_health}" || ready=1
 
     return "${ready}"
 }
@@ -558,10 +610,17 @@ up_arena() {
         die "infrastructure startup failed; run ./scripts/arena.sh status"
     verify_firewall_runtime
 
-    recreate_apps
+    recreate_apps ||
+        die "vulnerable app recreation failed"
     wait_for_apps "${timeout}" || {
         STATUS_FORMAT="text"
         print_status || true
+        if [[ "${ARENA_ISOLATION_MODE}" == "dind" ]]; then
+            local id
+            for ((id = 1; id <= ARENA_TEAM_COUNT; id++)); do
+                dind_app_diagnostics "${id}"
+            done
+        fi
         die "one or more vulnerable apps failed health checks"
     }
     verify_network_path
@@ -569,7 +628,7 @@ up_arena() {
     echo
     echo "[+] Complete arena is healthy."
     STATUS_FORMAT="text"
-    print_status
+    print_status || true
 }
 
 main() {

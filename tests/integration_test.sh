@@ -60,6 +60,13 @@ log_info()  { printf '[*] %s\n' "$*"; }
 log_ok()    { printf '[+] %s\n' "$*"; }
 log_fail()  { printf '[!] FAIL: %s\n' "$*" >&2; }
 
+status_has_line() {
+    local needle="$1"
+    local haystack="$2"
+
+    grep -Fq -- "${needle}" <<<"${haystack}"
+}
+
 die() {
     log_fail "$*"
     exit 1
@@ -83,6 +90,22 @@ collect_failure_logs() {
 }
 
 trap 'rc=$?; if ((rc != 0)); then collect_failure_logs; fi' EXIT
+
+checker_plant_token() {
+    local team="$1"
+    local service_name plant_token
+
+    service_name="$(basename "${ARENA_SERVICE_TEMPLATE_PATH%/}")"
+    IFS=$'\t' read -r _ _ plant_token < <(
+        python3 "${ROOT}/gameserver/checker_credentials.py" \
+            --secret "${ARENA_CHECKER_SECRET}" \
+            --team "${team}" \
+            --service "${service_name}"
+    )
+    [[ -n "${plant_token}" ]] ||
+        die "failed to derive checker plant token for team${team}/${service_name}"
+    printf '%s\n' "${plant_token}"
+}
 
 # ---------------------------------------------------------------------------
 # ═══════════════════════════════════════════════════════════════════════════
@@ -327,6 +350,9 @@ EOF
     assert_log "docker compose -f ${FIXTURE}/docker-compose.yml up -d --build --remove-orphans"
     assert_log "docker rm -f team1-vuln-app"
     assert_log "docker compose -f ${FIXTURE}/teams/generated/team1/example-vuln/docker-compose.yml up"
+    status_sample=$'team1\tgateway\trunning\t-\nteam1\tapp\trunning\thealthy\n-\tfirewall\trunning\t-'
+    status_has_line $'-\tfirewall\trunning' "${status_sample}" ||
+        die "status matcher failed for firewall line"
     log_ok "[local] 1/5  up: ok"
 
     # -----------------------------------------------------------------------
@@ -460,12 +486,12 @@ run_docker_tests() {
     log_info "[docker] 2/7  status check"
     status_output="$("${ARENA}" status --format tsv)"
     for team in 1 2; do
-        grep -Fq "team${team}"$'\t'"gateway"$'\t'"running" <<<"${status_output}" ||
+        status_has_line "team${team}"$'\t'"gateway"$'\t'"running" "${status_output}" ||
             die "team${team} gateway not running"
-        grep -Fq "team${team}"$'\t'"app"$'\t'"running"$'\t'"healthy" <<<"${status_output}" ||
+        status_has_line "team${team}"$'\t'"app"$'\t'"running"$'\t'"healthy" "${status_output}" ||
             die "team${team} app not healthy"
     done
-    grep -Fq $'-\tfirewall\trunning' <<<"${status_output}" ||
+    status_has_line $'-\tfirewall\trunning' "${status_output}" ||
         die "firewall not running"
     log_ok "[docker] 2/7  status: ok"
 
@@ -475,9 +501,14 @@ run_docker_tests() {
     log_info "[docker] 3/7  SSH gateway reachability"
     for team in 1 2; do
         ssh_port="$((ARENA_SSH_BASE_PORT + team))"
-        timeout 10 bash -c "
-            until nc -z -w2 127.0.0.1 ${ssh_port}; do sleep 1; done
-        " || die "team${team} SSH gateway port ${ssh_port} not reachable"
+        timeout 10 bash -c '
+            host="$1"
+            port="$2"
+            until (: >"/dev/tcp/${host}/${port}") >/dev/null 2>&1; do
+                sleep 1
+            done
+        ' _ 127.0.0.1 "${ssh_port}" ||
+            die "team${team} SSH gateway port ${ssh_port} not reachable"
     done
     log_ok "[docker] 3/7  SSH reachability: ok"
 
@@ -485,7 +516,8 @@ run_docker_tests() {
     # STEP 4: Plant a known flag via /internal/plant
     # -----------------------------------------------------------------------
     log_info "[docker] 4/7  flag plant via /internal/plant"
-    TEST_FLAG="FLAG{$(tr -dc a-f0-9 </dev/urandom | head -c 32)}"
+    TEST_FLAG="FLAG{$(python3 -c 'import secrets; print(secrets.token_hex(16))')}"
+    TEAM2_PLANT_TOKEN="$(checker_plant_token 2)"
     # team2 app is at 10.10.2.3:ARENA_SERVICE_PORT inside the ctf network;
     # we use docker exec on team1-vuln so we're inside the correct network.
     plant_response="$(
@@ -493,7 +525,7 @@ run_docker_tests() {
             curl -fsS \
                 --max-time 10 \
                 -X POST \
-                -H "X-Plant-Token: ${SECRET_KEY:-sandcastle-default-secret-change-me}" \
+                -H "X-Plant-Token: ${TEAM2_PLANT_TOKEN}" \
                 -H "Content-Type: application/json" \
                 -d "{\"flag\":\"${TEST_FLAG}\"}" \
                 "http://${ARENA_NETWORK_PREFIX}.2.3:${ARENA_SERVICE_PORT}/internal/plant"

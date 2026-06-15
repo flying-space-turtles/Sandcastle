@@ -169,15 +169,18 @@ be removed from Docker history or the images rebuilt with a
 
 | Port | Bound address | Service | Authentication | Risk if exposed to participants |
 |---|---|---|---|---|
-| `2200+N` (e.g., 2201, 2202) | `0.0.0.0` | SSH gateway for team N | Password (`TEAM_PASS`) | Password brute-force; participant reaches their own team's gateway, which is expected |
+| `2200+N` (e.g., 2201, 2202) | `127.0.0.1` by default via `ARENA_SSH_BIND_HOST` | SSH gateway for team N | Password (`TEAM_PASS`) | Password brute-force if deliberately rebound to a public interface; participant reaches their own team's gateway, which is expected |
 | `8000` | `0.0.0.0` | Gameserver HTTP API | Bearer token (operator) or team submission token | Operator endpoints are token-protected; flag submission is team-scoped; unauthenticated read-only endpoints expose standings |
 | `7878` | `127.0.0.1` | Bot controller HTTP API | None | Localhost-only; no authentication; anyone on the host can trigger bot actions or read bot state |
+| `4173` | `127.0.0.1` by default via `ARENA_VISUALIZER_BIND_HOST` | Visualizer/operator console | Browser-held operator token for privileged actions | Bind only to trusted interfaces; use SSH forwarding for staging |
 | `6789` | `0.0.0.0` (via host networking) | Firewall WebSocket event feed | None | Any host that can reach the port receives the full event stream including source IPs of all cross-team traffic |
 | `15000` | `0.0.0.0` (via host networking) | Transparent proxy | N/A (transparent) | Participants who discover this port can send traffic that appears to come from the firewall host |
 
 **Required control for untrusted mode:**
 - Bind the gameserver to the internal CTF network or an operator-only
   interface, not `0.0.0.0`, unless public access is intended.
+- Keep `ARENA_SSH_BIND_HOST=127.0.0.1` unless team SSH access is routed through
+  a VPN, bastion, or other controlled ingress path.
 - Add authentication or IP allowlist to the WebSocket event feed.
 - The bot API must remain on `127.0.0.1` or be moved behind an operator
   network segment.

@@ -55,14 +55,20 @@ if ! command -v shellcheck >/dev/null 2>&1; then
     echo "run-tests.sh: shellcheck is required" >&2
     exit 1
 fi
-mapfile -t shell_files < <(git -C "${ROOT}" ls-files '*.sh')
-shellcheck -x -P "${ROOT}/scripts/lib" "${shell_files[@]/#/${ROOT}/}"
+shell_files=()
+while IFS= read -r shell_file; do
+    shell_files+=("${ROOT}/${shell_file}")
+done < <(git -C "${ROOT}" ls-files '*.sh')
+shellcheck -x -P "${ROOT}/scripts/lib" "${shell_files[@]}"
 ok "shellcheck: all tracked shell scripts passed"
 
 # ---------------------------------------------------------------------------
 step "Python syntax check: all tracked modules"
-mapfile -t python_files < <(git -C "${ROOT}" ls-files '*.py')
-python3 -B -m py_compile "${python_files[@]/#/${ROOT}/}"
+python_files=()
+while IFS= read -r python_file; do
+    python_files+=("${ROOT}/${python_file}")
+done < <(git -C "${ROOT}" ls-files '*.py')
+python3 -B -m py_compile "${python_files[@]}"
 ok "py_compile: all tracked Python files are syntactically valid"
 
 # ---------------------------------------------------------------------------
@@ -194,6 +200,14 @@ step "Setup/generation tests"
 # ---------------------------------------------------------------------------
 step "Arena lifecycle tests"
 "${ROOT}/tests/arena_test.sh"
+
+# ---------------------------------------------------------------------------
+step "Staging DinD smoke orchestration tests"
+"${ROOT}/tests/staging_dind_smoke_test.sh"
+
+# ---------------------------------------------------------------------------
+step "Staging deployment tests"
+"${ROOT}/tests/staging_deploy_test.sh"
 
 # ---------------------------------------------------------------------------
 step "Integration test (local fixture mode)"

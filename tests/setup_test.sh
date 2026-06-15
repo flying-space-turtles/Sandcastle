@@ -130,11 +130,16 @@ after="$(fixture_hashes "${deterministic_fixture}")"
 }
 grep -Fq 'team_count: 2' "${deterministic_fixture}/docker-compose.yml"
 grep -Fq 'checker_max_concurrency: 8' "${deterministic_fixture}/docker-compose.yml"
+grep -Fq 'visualizer_port: 4173' "${deterministic_fixture}/docker-compose.yml"
 grep -Fq 'submission_rate_limit: 60' "${deterministic_fixture}/docker-compose.yml"
 grep -Fq 'score_attack_points: 10' "${deterministic_fixture}/docker-compose.yml"
 grep -Fq 'score_defense_points: 2' "${deterministic_fixture}/docker-compose.yml"
 grep -Fq 'score_sla_points: 1' "${deterministic_fixture}/docker-compose.yml"
-grep -Fq '2202:22' "${deterministic_fixture}/docker-compose.yml"
+grep -Fq '127.0.0.1:2202:22' "${deterministic_fixture}/docker-compose.yml"
+grep -Fq '127.0.0.1:4173:80' "${deterministic_fixture}/docker-compose.yml"
+grep -Fq './services/example-vuln:/srv/example-vuln:ro' "${deterministic_fixture}/docker-compose.yml"
+grep -Fq 'sandcastle/visualizer:latest' "${deterministic_fixture}/docker-compose.yml"
+grep -Fq 'dockerfile: visualizer/Dockerfile' "${deterministic_fixture}/docker-compose.yml"
 team1_service_compose="${deterministic_fixture}/teams/generated/team1/example-vuln/docker-compose.yml"
 team2_service_compose="${deterministic_fixture}/teams/generated/team2/example-vuln/docker-compose.yml"
 grep -Fq 'CHECKER_USERNAME: "checker_t1_example_vuln"' "${team1_service_compose}"
@@ -154,6 +159,7 @@ assert_contains "${access_output}" "ssh -p 2201 team1@localhost"
 assert_contains "${access_output}" "Password:     team1pass"
 assert_contains "${access_output}" "API token:    sandcastle-team1-submission-token-change-me"
 assert_contains "${access_output}" "ws://localhost:6789"
+assert_contains "${access_output}" "Visualizer:    http://localhost:4173"
 
 dind_fixture="${TMP_ROOT}/dind"
 make_fixture "${dind_fixture}" 2
@@ -164,14 +170,18 @@ grep -Fq 'team1-dind:' "${dind_fixture}/docker-compose.yml"
 grep -Fq 'image: docker:27-dind' "${dind_fixture}/docker-compose.yml"
 grep -Fq 'team1-dind-run:/var/run/dind' "${dind_fixture}/docker-compose.yml"
 grep -Fq 'DOCKER_HOST: "unix:///var/run/dind/docker.sock"' "${dind_fixture}/docker-compose.yml"
+grep -Fq -- '--dns=1.1.1.1' "${dind_fixture}/docker-compose.yml"
 team1_vuln_block="$(sed -n '/^  team1-vuln:/,/^  team1-ssh:/p' "${dind_fixture}/docker-compose.yml")"
 if grep -Fq '/var/run/docker.sock:/var/run/docker.sock' <<< "${team1_vuln_block}"; then
     echo "DinD team vulnerable machine mounted the host Docker socket" >&2
     exit 1
 fi
 dind_service_compose="${dind_fixture}/teams/generated/team1/example-vuln/docker-compose.yml"
+grep -Fq 'network: host' "${dind_service_compose}"
 grep -Fq 'ports:' "${dind_service_compose}"
 grep -Fq '"8080:8080"' "${dind_service_compose}"
+grep -Fq 'dns:' "${dind_service_compose}"
+grep -Fq '      - 1.1.1.1' "${dind_service_compose}"
 if grep -Fq 'network_mode: "container:team1-vuln"' "${dind_service_compose}"; then
     echo "DinD team app compose should not use host-container network_mode" >&2
     exit 1

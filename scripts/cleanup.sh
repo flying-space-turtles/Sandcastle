@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Remove all Docker resources created by the Sandcastle scaffold.
+# Remove resources created by the Sandcastle scaffold.
 
 set -euo pipefail
 
@@ -7,16 +7,18 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "${ROOT}"
 
 REMOVE_IMAGES=1
+REMOVE_GENERATED=0
 
 usage() {
     cat <<'EOF'
-Usage: ./scripts/cleanup.sh [--keep-images]
+Usage: ./scripts/cleanup.sh [--keep-images] [--remove-generated]
 
 Remove Sandcastle Docker containers, volumes, networks, and images.
 
 Options:
-  --keep-images    Keep sandcastle/* Docker images
-  -h, --help       Show this help text
+  --keep-images       Keep sandcastle/* Docker images
+  --remove-generated  Remove generated team workspaces after Docker cleanup
+  -h, --help          Show this help text
 EOF
 }
 
@@ -24,6 +26,9 @@ while (($# > 0)); do
     case "$1" in
         --keep-images)
             REMOVE_IMAGES=0
+            ;;
+        --remove-generated)
+            REMOVE_GENERATED=1
             ;;
         -h|--help)
             usage
@@ -46,31 +51,31 @@ remove_containers() {
     while IFS= read -r match; do
         matches+=("${match}")
     done < <(docker ps -aq --filter "label=sandcastle.role")
-    containers+=("${matches[@]}")
+    ((${#matches[@]} == 0)) || containers+=("${matches[@]}")
 
     matches=()
     while IFS= read -r match; do
         matches+=("${match}")
     done < <(docker ps -aq --filter "label=com.docker.compose.project=sandcastle")
-    containers+=("${matches[@]}")
+    ((${#matches[@]} == 0)) || containers+=("${matches[@]}")
 
     matches=()
     while IFS= read -r match; do
         matches+=("${match}")
     done < <(docker ps -aq --filter "label=com.docker.compose.project" --filter "name=^/team[0-9]+-vuln-app$")
-    containers+=("${matches[@]}")
+    ((${#matches[@]} == 0)) || containers+=("${matches[@]}")
 
     matches=()
     while IFS= read -r match; do
         matches+=("${match}")
-    done < <(docker ps -aq --filter "name=^/team[0-9]+-(vuln|ssh|vuln-app)$")
-    containers+=("${matches[@]}")
+    done < <(docker ps -aq --filter "name=^/team[0-9]+-(vuln|ssh|vuln-app|dind)$")
+    ((${#matches[@]} == 0)) || containers+=("${matches[@]}")
 
     matches=()
     while IFS= read -r match; do
         matches+=("${match}")
-    done < <(docker ps -aq --filter "name=^/sandcastle-(monitor|firewall)$")
-    containers+=("${matches[@]}")
+    done < <(docker ps -aq --filter "name=^/sandcastle-(monitor|firewall|gameserver|bot-controller|visualizer)$")
+    ((${#matches[@]} == 0)) || containers+=("${matches[@]}")
 
     if ((${#containers[@]} > 0)); then
         printf '%s\n' "${containers[@]}" | sort -u | xargs docker rm -f
@@ -85,19 +90,25 @@ remove_volumes() {
     while IFS= read -r match; do
         matches+=("${match}")
     done < <(docker volume ls -q --filter "label=sandcastle.role")
-    volumes+=("${matches[@]}")
+    ((${#matches[@]} == 0)) || volumes+=("${matches[@]}")
 
     matches=()
     while IFS= read -r match; do
         matches+=("${match}")
     done < <(docker volume ls -q --filter "label=com.docker.compose.project=sandcastle")
-    volumes+=("${matches[@]}")
+    ((${#matches[@]} == 0)) || volumes+=("${matches[@]}")
 
     matches=()
     while IFS= read -r match; do
         matches+=("${match}")
     done < <(docker volume ls -q --filter "name=^sandcastle_team[0-9]+-data$")
-    volumes+=("${matches[@]}")
+    ((${#matches[@]} == 0)) || volumes+=("${matches[@]}")
+
+    matches=()
+    while IFS= read -r match; do
+        matches+=("${match}")
+    done < <(docker volume ls -q --filter "name=^sandcastle_team[0-9]+-dind-(data|run)$")
+    ((${#matches[@]} == 0)) || volumes+=("${matches[@]}")
 
     if ((${#volumes[@]} > 0)); then
         printf '%s\n' "${volumes[@]}" | sort -u | xargs docker volume rm -f
@@ -112,13 +123,13 @@ remove_networks() {
     while IFS= read -r match; do
         matches+=("${match}")
     done < <(docker network ls -q --filter "label=com.docker.compose.project=sandcastle")
-    networks+=("${matches[@]}")
+    ((${#matches[@]} == 0)) || networks+=("${matches[@]}")
 
     matches=()
     while IFS= read -r match; do
         matches+=("${match}")
     done < <(docker network ls -q --filter "name=^sandcastle_ctf-network$")
-    networks+=("${matches[@]}")
+    ((${#matches[@]} == 0)) || networks+=("${matches[@]}")
 
     if ((${#networks[@]} > 0)); then
         printf '%s\n' "${networks[@]}" | sort -u | xargs docker network rm
@@ -137,6 +148,17 @@ remove_images() {
     fi
 }
 
+remove_generated_workspaces() {
+    local generated_dir="${ROOT}/teams/generated"
+
+    if [[ -d "${generated_dir}" ]]; then
+        echo "[*] Removing generated team workspaces..."
+        rm -rf "${generated_dir}"
+    else
+        echo "[*] No generated team workspaces found."
+    fi
+}
+
 echo "[*] Removing Sandcastle containers..."
 remove_containers
 
@@ -151,6 +173,10 @@ if ((REMOVE_IMAGES)); then
     remove_images
 else
     echo "[*] Keeping Sandcastle images."
+fi
+
+if ((REMOVE_GENERATED)); then
+    remove_generated_workspaces
 fi
 
 echo "[*] Cleanup complete."

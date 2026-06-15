@@ -10,7 +10,10 @@ command -v docker >/dev/null 2>&1 || {
     exit 1
 }
 
-mapfile -d '' compose_files < <(
+compose_files=()
+while IFS= read -r -d '' compose_file; do
+    compose_files+=("${compose_file}")
+done < <(
     find "${ROOT}" \
         -path "${ROOT}/.git" -prune -o \
         -path "${ROOT}/visualizer/node_modules" -prune -o \

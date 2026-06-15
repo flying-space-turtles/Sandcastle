@@ -80,6 +80,10 @@ case "${1:-}" in
             echo "-A PREROUTING -s 10.10.0.0/16 -d 10.10.0.0/16 -p tcp -m comment --comment sandcastle-firewall-transparent-proxy -j REDIRECT --to-ports 15000"
             exit 0
         fi
+        if [[ "${container}" == "sandcastle-firewall" && "$*" == *"-S INPUT"* ]]; then
+            echo "-A INPUT -s 10.10.0.0/16 -p tcp -m tcp --dport 15000 -m conntrack --ctstate DNAT -m comment --comment sandcastle-firewall-proxy-input -j ACCEPT"
+            exit 0
+        fi
         if [[ "${container}" == "sandcastle-firewall" && "$*" == *"-L PREROUTING"* ]]; then
             packets=7
             [[ "${scenario}" == "firewall-zero" ]] && packets=0
@@ -187,7 +191,7 @@ services:
   team1-ssh:
     image: test
     ports:
-      - "2201:22"
+      - "127.0.0.1:2201:22"
   firewall:
     image: test
 EOF
@@ -243,7 +247,9 @@ assert_status "${firewall_output}" FAIL firewall.traffic
 
 invalid_fixture="${TMP_ROOT}/invalid-config"
 make_fixture "${invalid_fixture}" complete
-sed -i '/^ARENA_SERVICE_PORT=/d' "${invalid_fixture}/config/arena.env"
+awk '!/^ARENA_SERVICE_PORT=/' "${invalid_fixture}/config/arena.env" \
+    > "${invalid_fixture}/config/arena.env.tmp"
+mv "${invalid_fixture}/config/arena.env.tmp" "${invalid_fixture}/config/arena.env"
 invalid_output="$(run_doctor "${invalid_fixture}" empty)"
 assert_status "${invalid_output}" FAIL arena.config
 assert_status "${invalid_output}" WARN bot.api

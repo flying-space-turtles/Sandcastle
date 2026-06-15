@@ -371,6 +371,10 @@ With the default configuration, each team has:
 |---|---|---|---:|---|
 | Team N | `10.10.N.2` | `10.10.N.3:8080` | `2200 + N` | `teamN` / `teamNpass` |
 
+Team SSH ports bind to `127.0.0.1` by default via `ARENA_SSH_BIND_HOST`.
+Use a VPN, bastion, or another controlled ingress path before exposing them
+from a VPS.
+
 Example for Team 1:
 
 ```bash
@@ -630,6 +634,9 @@ privileged containers, use the production-like DinD smoke:
 ```bash
 ./scripts/staging-dind-smoke.sh
 ```
+
+For PR-label-gated staging deployments to an Oracle VPS, see
+[`docs/staging-deploy.md`](docs/staging-deploy.md).
 
 For the full Docker integration test (SC-005) on a native Linux host:
 

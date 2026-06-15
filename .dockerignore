@@ -13,6 +13,8 @@ venv/
 env/
 teams/generated/
 teams/team*/
+visualizer/node_modules/
+visualizer/dist/
 
 # Scaffold artefacts and per-host bits that should never be baked into an
 # image.
