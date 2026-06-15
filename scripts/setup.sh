@@ -648,6 +648,7 @@ EOF
 ${vuln_networks}
     volumes:
 ${vuln_docker_mount}
+      - ./config/arena.env:/tmp/arena.env:ro
       - ./teams/generated/team${i}/example-vuln:/home/${username}/example-vuln
       - ./services/example-vuln:/srv/example-vuln:ro
     cap_add:

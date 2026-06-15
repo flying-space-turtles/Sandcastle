@@ -171,6 +171,7 @@ grep -Fq 'image: docker:27-dind' "${dind_fixture}/docker-compose.yml"
 grep -Fq 'team1-dind-run:/var/run/dind' "${dind_fixture}/docker-compose.yml"
 grep -Fq 'DOCKER_HOST: "unix:///var/run/dind/docker.sock"' "${dind_fixture}/docker-compose.yml"
 grep -Fq -- '--dns=1.1.1.1' "${dind_fixture}/docker-compose.yml"
+grep -Fq './config/arena.env:/tmp/arena.env:ro' "${dind_fixture}/docker-compose.yml"
 team1_vuln_block="$(sed -n '/^  team1-vuln:/,/^  team1-ssh:/p' "${dind_fixture}/docker-compose.yml")"
 if grep -Fq '/var/run/docker.sock:/var/run/docker.sock' <<< "${team1_vuln_block}"; then
     echo "DinD team vulnerable machine mounted the host Docker socket" >&2

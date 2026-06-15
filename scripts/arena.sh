@@ -303,7 +303,7 @@ refresh_dind_forwarders() {
     echo "[*] Refreshing DinD service forwarders..."
     for ((id = 1; id <= ARENA_TEAM_COUNT; id++)); do
         docker exec "team${id}-vuln" sh -lc \
-            "pkill -f 'socat.*TCP-LISTEN:${ARENA_SERVICE_PORT}.*team${id}-dind:${ARENA_SERVICE_PORT}' >/dev/null 2>&1 || true"
+            "pkill -x socat >/dev/null 2>&1 || true"
     done
 }
 

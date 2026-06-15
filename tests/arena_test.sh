@@ -345,7 +345,7 @@ if grep -Fq "network-smoke" "${LOG_FILE}"; then
 fi
 assert_log "docker exec team1-vuln docker exec team1-vuln-app python3 -c"
 assert_log "docker exec team1-vuln curl -fsS --max-time 2 http://127.0.0.1:8080/health"
-assert_log "docker exec team1-vuln sh -lc pkill -f 'socat.*TCP-LISTEN:8080.*team1-dind:8080'"
+assert_log "docker exec team1-vuln sh -lc pkill -x socat"
 if grep -Fq "docker exec team1-vuln docker exec team1-vuln-app curl" "${LOG_FILE}"; then
     echo "DinD health checks should not require curl inside the app container" >&2
     exit 1
