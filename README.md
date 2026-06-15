@@ -439,11 +439,13 @@ npm run dev
 
 Open `http://localhost:5173`.
 
-The scoreboard polls the authoritative gameserver and shows match state, round
-timing, component scores, and checker results. Paste the operator token printed
-by `./scripts/setup.sh --show-access` to use Start, Pause, Resume, Step, and
-Finish. After finishing a match, use Restart match to clear its rounds and
-scores, return it to CREATED, and then use Start match for a clean round 1.
+The scoreboard polls the authoritative gameserver through same-origin `/api/...`
+requests, proxied by the visualizer container on the Compose control-plane
+network. It shows match state, round timing, component scores, and checker
+results. Paste the operator token printed by `./scripts/setup.sh --show-access`
+to use Start, Pause, Resume, Step, and Finish. After finishing a match, use
+Restart match to clear its rounds and scores, return it to CREATED, and then use
+Start match for a clean round 1.
 
 The topology view parses generated Compose configuration and is explicitly not
 live container health. YAML editing and the raw parser inspector are not part

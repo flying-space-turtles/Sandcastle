@@ -506,6 +506,8 @@ networks:
       config:
         - subnet: ${ARENA_CTF_SUBNET}
           gateway: ${ARENA_CTF_GATEWAY}
+  control-plane:
+    driver: bridge
 EOF
 
     if [[ "${ARENA_ISOLATION_MODE}" == "dind" ]]; then
@@ -749,6 +751,7 @@ EOF
     networks:
       ctf-network:
         ipv4_address: ${ARENA_NETWORK_PREFIX}.0.2
+      control-plane: {}
     ports:
       - "${ARENA_GAMESERVER_PORT}:8000"
     volumes:
@@ -815,6 +818,8 @@ EOF
     image: sandcastle/visualizer:latest
     container_name: sandcastle-visualizer
     hostname: sandcastle-visualizer
+    networks:
+      - control-plane
     ports:
       - "${ARENA_VISUALIZER_BIND_HOST}:${ARENA_VISUALIZER_PORT}:80"
     labels:
