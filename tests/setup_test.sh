@@ -179,10 +179,13 @@ if grep -Fq '/var/run/docker.sock:/var/run/docker.sock' <<< "${team1_vuln_block}
 fi
 dind_service_compose="${dind_fixture}/teams/generated/team1/example-vuln/docker-compose.yml"
 grep -Fq 'network: host' "${dind_service_compose}"
-grep -Fq 'ports:' "${dind_service_compose}"
-grep -Fq '"8080:8080"' "${dind_service_compose}"
+grep -Fq 'network_mode: host' "${dind_service_compose}"
 grep -Fq 'dns:' "${dind_service_compose}"
 grep -Fq '      - 1.1.1.1' "${dind_service_compose}"
+if grep -Fq 'ports:' "${dind_service_compose}"; then
+    echo "DinD team app compose should not rely on published ports" >&2
+    exit 1
+fi
 if grep -Fq 'network_mode: "container:team1-vuln"' "${dind_service_compose}"; then
     echo "DinD team app compose should not use host-container network_mode" >&2
     exit 1
