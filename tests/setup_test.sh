@@ -169,19 +169,40 @@ grep -Fq 'ARENA_ISOLATION_MODE=dind' "${dind_fixture}/config/arena.env"
 grep -Fq 'team1-dind:' "${dind_fixture}/docker-compose.yml"
 grep -Fq 'image: docker:27-dind' "${dind_fixture}/docker-compose.yml"
 grep -Fq 'team1-dind-run:/var/run/dind' "${dind_fixture}/docker-compose.yml"
+grep -Fq 'network_mode: "service:team1-vuln"' "${dind_fixture}/docker-compose.yml"
 grep -Fq 'DOCKER_HOST: "unix:///var/run/dind/docker.sock"' "${dind_fixture}/docker-compose.yml"
 grep -Fq -- '--dns=1.1.1.1' "${dind_fixture}/docker-compose.yml"
+grep -Fq './config/arena.env:/tmp/arena.env:ro' "${dind_fixture}/docker-compose.yml"
+if grep -Fq 'team1-dind-network' "${dind_fixture}/docker-compose.yml"; then
+    echo "DinD mode should share the vulnerable machine network namespace" >&2
+    exit 1
+fi
+if grep -Fq 'SANDCASTLE_DIND_TARGET' "${dind_fixture}/docker-compose.yml"; then
+    echo "DinD mode should not use a TCP forward target" >&2
+    exit 1
+fi
 team1_vuln_block="$(sed -n '/^  team1-vuln:/,/^  team1-ssh:/p' "${dind_fixture}/docker-compose.yml")"
 if grep -Fq '/var/run/docker.sock:/var/run/docker.sock' <<< "${team1_vuln_block}"; then
     echo "DinD team vulnerable machine mounted the host Docker socket" >&2
     exit 1
 fi
+if grep -Fq 'depends_on:' <<< "${team1_vuln_block}"; then
+    echo "DinD vulnerable machine should not depend on the sidecar that shares its network namespace" >&2
+    exit 1
+fi
 dind_service_compose="${dind_fixture}/teams/generated/team1/example-vuln/docker-compose.yml"
 grep -Fq 'network: host' "${dind_service_compose}"
-grep -Fq 'ports:' "${dind_service_compose}"
-grep -Fq '"8080:8080"' "${dind_service_compose}"
+grep -Fq 'network_mode: host' "${dind_service_compose}"
 grep -Fq 'dns:' "${dind_service_compose}"
 grep -Fq '      - 1.1.1.1' "${dind_service_compose}"
+if grep -Fq 'ports:' "${dind_service_compose}"; then
+    echo "DinD team app compose should not depend on nested published ports" >&2
+    exit 1
+fi
+if grep -Fq '      - "8080:8080"' "${dind_service_compose}"; then
+    echo "DinD team app compose should not publish the service port" >&2
+    exit 1
+fi
 if grep -Fq 'network_mode: "container:team1-vuln"' "${dind_service_compose}"; then
     echo "DinD team app compose should not use host-container network_mode" >&2
     exit 1

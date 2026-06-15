@@ -74,6 +74,8 @@ class ActionSchema:
     scope: str
     description: str
     required_capabilities: list[str]
+    parameters: dict[str, Any] = field(default_factory=dict)
+    required: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -83,6 +85,8 @@ class ActionSchema:
             "scope": self.scope,
             "description": self.description,
             "required_capabilities": self.required_capabilities,
+            "parameters": self.parameters,
+            "required": self.required,
         }
 
 
@@ -159,6 +163,7 @@ class RawTask:
 
     target_team: int
     action_id: str
+    arguments: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -173,7 +178,14 @@ class PlannerOutput:
 
     def as_dict(self) -> dict[str, object]:
         return {
-            "tasks": [{"target_team": t.target_team, "action_id": t.action_id} for t in self.tasks],
+            "tasks": [
+                {
+                    "target_team": t.target_team,
+                    "action_id": t.action_id,
+                    "arguments": t.arguments,
+                }
+                for t in self.tasks
+            ],
             "tokens_used": self.tokens_used,
             "cost_usd": self.cost_usd,
             "model_id": self.model_id,
@@ -225,6 +237,11 @@ def validate_plan(
             if task.target_team not in valid_target_teams:
                 errors.append(f"invalid target team {task.target_team} for {task.action_id!r}")
                 continue
+        elif (
+            action is not None and action.scope == "self" and task.target_team in valid_target_teams
+        ):
+            errors.append(f"self-scoped action cannot target opponent team {task.target_team}")
+            continue
 
         accepted.append(task)
 
@@ -341,11 +358,18 @@ class RemoteModelPlannerAdapter:
             raise PlannerError(f"planning endpoint unreachable: {exc}") from exc
 
         raw_tasks = data.get("tasks", [])
-        tasks = [
-            RawTask(target_team=int(t["target_team"]), action_id=str(t["action_id"]))
-            for t in raw_tasks
-            if isinstance(t, dict) and "target_team" in t and "action_id" in t
-        ]
+        tasks = []
+        for t in raw_tasks:
+            if not isinstance(t, dict) or "target_team" not in t or "action_id" not in t:
+                continue
+            arguments = t.get("arguments", {})
+            tasks.append(
+                RawTask(
+                    target_team=int(t["target_team"]),
+                    action_id=str(t["action_id"]),
+                    arguments=arguments if isinstance(arguments, dict) else {},
+                )
+            )
         return PlannerOutput(
             tasks=tasks,
             tokens_used=data.get("tokens_used"),
@@ -379,9 +403,10 @@ def build_observation(
 def build_action_schemas(ctx: BotContext) -> list[ActionSchema]:
     """Return schemas for actions whose capability requirements are all satisfied."""
     schemas = []
+    configured_actions = set(ctx.config.actions)
     for action in ACTION_REGISTRY.values():
         required = frozenset(getattr(action, "required_capabilities", frozenset()))
-        if required <= ctx.capabilities:
+        if action.id in configured_actions and required <= ctx.capabilities:
             schemas.append(
                 ActionSchema(
                     id=action.id,
@@ -390,6 +415,8 @@ def build_action_schemas(ctx: BotContext) -> list[ActionSchema]:
                     scope=action.scope,
                     description=action.description,
                     required_capabilities=sorted(required),
+                    parameters=dict(getattr(action, "parameters", {})),
+                    required=list(getattr(action, "required", [])),
                 )
             )
     return schemas
@@ -472,8 +499,8 @@ class ModelBackedPlanner:
         self._round_number += 1
 
         valid_targets = set(self.targets(ctx, override_target))
-        valid_action_ids = frozenset(ACTION_REGISTRY.keys())
         schemas = build_action_schemas(ctx)
+        valid_action_ids = frozenset(schema.id for schema in schemas)
 
         planner_input = PlannerInput(
             observation=build_observation(
@@ -525,8 +552,13 @@ class ModelBackedPlanner:
         )
 
         self._previous_results = [
-            {"target_team": t.target_team, "action_id": t.action_id, "round": self._round_number}
+            {
+                "target_team": t.target_team,
+                "action_id": t.action_id,
+                "arguments": t.arguments,
+                "round": self._round_number,
+            }
             for t in accepted
         ]
 
-        yield from (BotTask(t.target_team, t.action_id) for t in accepted)
+        yield from (BotTask(t.target_team, t.action_id, t.arguments) for t in accepted)

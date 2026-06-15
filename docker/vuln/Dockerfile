@@ -25,6 +25,8 @@ RUN apt-get update \
         vim \
         nano \
         net-tools \
+        iproute2 \
+        procps \
         iputils-ping \
         dnsutils \
         nmap \
@@ -59,6 +61,7 @@ RUN useradd -m -u "${TEAM_UID}" -s /bin/bash "${TEAM_USER}" \
     && chown -R "${TEAM_USER}:${TEAM_USER}" "/home/${TEAM_USER}/example-vuln"
 
 COPY bot/service_control.py /usr/local/bin/sandcastle-service-control
+COPY bot/bot_lib /usr/local/lib/sandcastle-bot/bot_lib
 
 RUN mkdir -p /run/sshd \
     && sed -i 's/#PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config \
@@ -121,14 +124,6 @@ if [[ -S "${docker_socket}" ]]; then
     fi
 
     usermod -aG "${socket_group}" "${TEAM_USER}"
-fi
-
-if [[ "${ARENA_ISOLATION_MODE:-}" == "dind" ]]; then
-    service_port="${ARENA_SERVICE_PORT:-8080}"
-    dind_target="${SANDCASTLE_DIND_TARGET:-team${TEAM_ID}-dind}"
-    socat \
-        "TCP-LISTEN:${service_port},fork,reuseaddr,bind=0.0.0.0" \
-        "TCP:${dind_target}:${service_port}" &
 fi
 
 python3 /usr/local/bin/sandcastle-service-control &

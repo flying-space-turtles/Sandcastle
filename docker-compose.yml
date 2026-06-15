@@ -33,6 +33,11 @@ x-sandcastle-arena:
   visualizer_cpu_limit: 0.25
   log_max_size: 50m
   log_max_files: 3
+  agent_provider: fake
+  agent_model: gpt-5.4-mini
+  agent_max_calls_per_round: 2
+  agent_max_calls_per_match: 30
+  agent_max_cost_usd_per_match: 0.50
 
 networks:
   ctf-network:
@@ -41,6 +46,8 @@ networks:
       config:
         - subnet: 10.10.0.0/16
           gateway: 10.10.0.1
+  control-plane:
+    driver: bridge
 
 services:
   team1-vuln:
@@ -61,6 +68,7 @@ services:
         ipv4_address: 10.10.1.3
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./config/arena.env:/tmp/arena.env:ro
       - ./teams/generated/team1/example-vuln:/home/team1/example-vuln
       - ./services/example-vuln:/srv/example-vuln:ro
     cap_add:
@@ -137,6 +145,7 @@ services:
         ipv4_address: 10.10.2.3
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+      - ./config/arena.env:/tmp/arena.env:ro
       - ./teams/generated/team2/example-vuln:/home/team2/example-vuln
       - ./services/example-vuln:/srv/example-vuln:ro
     cap_add:
@@ -204,6 +213,7 @@ services:
     network_mode: host
     environment:
       CTF_NETWORK: "10.10.0.0/16"
+      CTF_GATEWAY: "10.10.0.1"
       WS_PORT: "6789"
       PROXY_PORT: "15000"
       EVENT_QUEUE_SIZE: "2048"
@@ -236,6 +246,7 @@ services:
     networks:
       ctf-network:
         ipv4_address: 10.10.0.2
+      control-plane: {}
     ports:
       - "8000:8000"
     volumes:
@@ -265,14 +276,21 @@ services:
     image: sandcastle/bot-controller:latest
     container_name: sandcastle-bot-controller
     hostname: sandcastle-bot-controller
+    networks:
+      ctf-network:
+        ipv4_address: 10.10.0.4
     ports:
       - "127.0.0.1:7878:7878"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./config/arena.env:/app/config/arena.env:ro
+      - ./challenges:/app/challenges
       - bot-controller-data:/data
     environment:
       ARENA_BOT_API_PORT: "7878"
+      CHALLENGE_VALIDATION_NETWORK: "sandcastle_ctf-network"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
     labels:
       sandcastle.role: "bot-controller"
       sandcastle.visualizer.hidden: "true"
@@ -295,6 +313,8 @@ services:
     image: sandcastle/visualizer:latest
     container_name: sandcastle-visualizer
     hostname: sandcastle-visualizer
+    networks:
+      - control-plane
     ports:
       - "127.0.0.1:4173:80"
     labels:

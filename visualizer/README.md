@@ -12,6 +12,11 @@ npm run dev
 ```
 
 The scoreboard is the default view and polls the authoritative gameserver API.
+By default it uses same-origin `/api/...` requests: Vite proxies those to
+`http://localhost:8000` during local development, and the production nginx image
+proxies them to the Compose `gameserver` service. Set `VITE_GAMESERVER_API_URL`
+at build time only when a deployment needs an explicit browser-visible API
+origin.
 Operator actions require the token printed by:
 
 ```bash

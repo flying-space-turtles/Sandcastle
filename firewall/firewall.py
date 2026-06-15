@@ -28,12 +28,14 @@ import websockets
 # Configuration
 
 CTF_NETWORK = ipaddress.ip_network(os.environ["CTF_NETWORK"])
+CTF_GATEWAY = os.environ.get("CTF_GATEWAY") or str(next(CTF_NETWORK.hosts()))
 WS_PORT = int(os.environ["WS_PORT"])
 PROXY_PORT = int(os.environ["PROXY_PORT"])
 EVENT_QUEUE_SIZE = int(os.environ.get("EVENT_QUEUE_SIZE", "2048"))
 CAPTURE_RCVBUF_BYTES = int(os.environ.get("CAPTURE_RCVBUF_BYTES", str(4 * 1024 * 1024)))
 RECENT_ICMP_LIMIT = int(os.environ.get("RECENT_ICMP_LIMIT", "4096"))
 RULE_COMMENT = "sandcastle-firewall-transparent-proxy"
+PROXY_BYPASS_COMMENT = "sandcastle-firewall-proxy-bypass"
 INPUT_RULE_COMMENT = "sandcastle-firewall-proxy-input"
 SO_ORIGINAL_DST = 80
 BUFFER_SIZE = 64 * 1024
@@ -142,6 +144,27 @@ def _rule_spec() -> list[str]:
     ]
 
 
+def _proxy_bypass_rule_spec() -> list[str]:
+    return [
+        "-t",
+        "nat",
+        "-A",
+        "PREROUTING",
+        "-s",
+        f"{CTF_GATEWAY}/32",
+        "-d",
+        str(CTF_NETWORK),
+        "-p",
+        "tcp",
+        "-m",
+        "comment",
+        "--comment",
+        PROXY_BYPASS_COMMENT,
+        "-j",
+        "RETURN",
+    ]
+
+
 def _proxy_input_rule_spec() -> list[str]:
     return [
         "-t",
@@ -205,8 +228,10 @@ def _delete_existing_rules(table: str, chain: str, comment: str) -> None:
 
 def install_redirect_rule() -> None:
     _delete_existing_rules("nat", "PREROUTING", RULE_COMMENT)
+    _delete_existing_rules("nat", "PREROUTING", PROXY_BYPASS_COMMENT)
     _delete_existing_rules("filter", "INPUT", INPUT_RULE_COMMENT)
     _run_iptables(_proxy_input_rule_spec())
+    _run_iptables(_proxy_bypass_rule_spec())
     _run_iptables(_rule_spec())
     print(
         f"[firewall] Redirecting TCP {CTF_NETWORK} -> {CTF_NETWORK} through local port {PROXY_PORT}",
@@ -216,6 +241,7 @@ def install_redirect_rule() -> None:
 
 def remove_redirect_rule() -> None:
     _delete_existing_rules("nat", "PREROUTING", RULE_COMMENT)
+    _delete_existing_rules("nat", "PREROUTING", PROXY_BYPASS_COMMENT)
     _delete_existing_rules("filter", "INPUT", INPUT_RULE_COMMENT)
     print("[firewall] Removed Sandcastle redirect rules", flush=True)
 

@@ -88,8 +88,11 @@ const FALLBACK_CATALOG: BotCatalog = {
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${botApiUrl}${path}`, options);
-  const body = await response.json().catch(() => ({})) as T & { error?: string };
-  if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+  const body = await response.json().catch(() => ({})) as T & { error?: string; output?: string };
+  if (!response.ok) {
+    const detail = body.error || body.output || `HTTP ${response.status}`;
+    throw new Error(detail.length > 1200 ? `${detail.slice(0, 1200)}...` : detail);
+  }
   return body;
 }
 

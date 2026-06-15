@@ -89,7 +89,7 @@ class ObservationTests(unittest.TestCase):
 
     def test_action_schemas_include_watchdog_with_capability(self) -> None:
         ctx = BotContext(
-            config=BotConfig(),
+            config=BotConfig(actions=["recon.health", "maintain.watchdog"]),
             num_teams=3,
             my_team=1,
             capabilities=frozenset({"network.attack", "network.submit", "service.control.local"}),

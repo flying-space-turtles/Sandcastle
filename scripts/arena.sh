@@ -141,6 +141,13 @@ verify_firewall_runtime() {
     docker exec sandcastle-firewall sh -ec '
         test "$(cat /proc/sys/net/bridge/bridge-nf-call-iptables)" = "1"
         iptables -t nat -C PREROUTING \
+            -s "$CTF_GATEWAY/32" \
+            -d "$CTF_NETWORK" \
+            -p tcp \
+            -m comment \
+            --comment sandcastle-firewall-proxy-bypass \
+            -j RETURN
+        iptables -t nat -C PREROUTING \
             -s "$CTF_NETWORK" \
             -d "$CTF_NETWORK" \
             -p tcp \
@@ -231,6 +238,11 @@ dind_app_diagnostics() {
             "cd '${service_dir}' && docker compose ps || true"
         docker exec "${machine}" sh -lc \
             "cd '${service_dir}' && docker compose logs --no-color --tail=120 || true"
+        echo "--- team${team_id} DinD service path diagnostics ---"
+        docker exec "${machine}" sh -lc \
+            "ss -lntp || true"
+        docker exec "${machine}" sh -lc \
+            "curl -sv --max-time 5 'http://127.0.0.1:${ARENA_SERVICE_PORT}/health' 2>&1 || true"
     } >&2 || true
 }
 
@@ -257,12 +269,60 @@ app_container_state() {
 app_is_healthy() {
     local team_id="$1"
     local machine="team${team_id}-vuln"
+    local app="team${team_id}-vuln-app"
 
     [[ "$(container_state "${machine}")" == "running" ]] || return 1
     [[ "$(app_container_state "${team_id}")" == "running" ]] || return 1
+
+    if [[ "${ARENA_ISOLATION_MODE}" == "dind" ]]; then
+        # In DinD mode the app runs inside the nested Docker daemon.
+        # Probe the app container directly so arena startup does not depend on
+        # the team machine's shared network service path before the app is.
+        docker exec "${machine}" \
+            docker exec "${app}" \
+            python3 -c "import json, sys, urllib.request; data = json.load(urllib.request.urlopen('http://127.0.0.1:${ARENA_SERVICE_PORT}/health', timeout=2)); sys.exit(0 if data.get('status') == 'ok' else 1)" \
+            > /dev/null 2>&1
+    else
+        docker exec "${machine}" \
+            curl -fsS --max-time 1 "http://127.0.0.1:${ARENA_SERVICE_PORT}/health" \
+            > /dev/null 2>&1
+    fi
+}
+
+dind_service_path_is_healthy() {
+    local team_id="$1"
+    local machine="team${team_id}-vuln"
+
+    [[ "${ARENA_ISOLATION_MODE}" == "dind" ]] || return 0
+    [[ "$(container_state "${machine}")" == "running" ]] || return 1
+
     docker exec "${machine}" \
-        curl -fsS --max-time 1 "http://127.0.0.1:${ARENA_SERVICE_PORT}/health" \
-        >/dev/null 2>&1
+        curl -fsS --max-time 2 "http://127.0.0.1:${ARENA_SERVICE_PORT}/health" \
+        > /dev/null 2>&1
+}
+
+wait_for_dind_service_paths() {
+    local timeout="$1"
+    local attempts=$((timeout / HEALTH_POLL_SECONDS + 1))
+    local attempt id
+    local -a pending=()
+
+    [[ "${ARENA_ISOLATION_MODE}" == "dind" ]] || return 0
+
+    for ((attempt = 1; attempt <= attempts; attempt++)); do
+        pending=()
+        for ((id = 1; id <= ARENA_TEAM_COUNT; id++)); do
+            if ! dind_service_path_is_healthy "${id}"; then
+                pending+=("team${id}-vuln-service-path")
+            fi
+        done
+
+        ((${#pending[@]} == 0)) && return 0
+        ((attempt < attempts)) && sleep "${HEALTH_POLL_SECONDS}"
+    done
+
+    echo "arena.sh: DinD service path timeout after ${timeout}s: ${pending[*]}" >&2
+    return 1
 }
 
 run_setup() {
@@ -622,6 +682,17 @@ up_arena() {
             done
         fi
         die "one or more vulnerable apps failed health checks"
+    }
+    wait_for_dind_service_paths "${timeout}" || {
+        STATUS_FORMAT="text"
+        print_status || true
+        if [[ "${ARENA_ISOLATION_MODE}" == "dind" ]]; then
+            local id
+            for ((id = 1; id <= ARENA_TEAM_COUNT; id++)); do
+                dind_app_diagnostics "${id}"
+            done
+        fi
+        die "one or more DinD service paths failed health checks"
     }
     verify_network_path
 

@@ -107,6 +107,23 @@ checker_plant_token() {
     printf '%s\n' "${plant_token}"
 }
 
+wait_for_team_local_health() {
+    local team="$1"
+    local timeout="$2"
+    local deadline=$((SECONDS + timeout))
+
+    while ((SECONDS <= deadline)); do
+        if docker exec "team${team}-vuln" \
+            curl -fsS --max-time 5 \
+            "http://127.0.0.1:${ARENA_SERVICE_PORT}/health" >/dev/null; then
+            return 0
+        fi
+        sleep 2
+    done
+
+    return 1
+}
+
 # ---------------------------------------------------------------------------
 # ═══════════════════════════════════════════════════════════════════════════
 #  LOCAL FIXTURE MODE
@@ -501,6 +518,7 @@ run_docker_tests() {
     log_info "[docker] 3/7  SSH gateway reachability"
     for team in 1 2; do
         ssh_port="$((ARENA_SSH_BASE_PORT + team))"
+        # shellcheck disable=SC2016
         timeout 10 bash -c '
             host="$1"
             port="$2"
@@ -567,10 +585,11 @@ run_docker_tests() {
     "${ARENA}" restart --timeout "${SC005_TIMEOUT}" ||
         die "arena.sh restart failed after team1-vuln stop/start"
 
-    # Confirm team1 app is back and healthy
-    docker exec team1-vuln \
-        curl -fsS --max-time 5 \
-        "http://127.0.0.1:${ARENA_SERVICE_PORT}/health" >/dev/null ||
+    # Confirm team1's team-local service path is back and healthy. In DinD
+    # mode arena.sh verifies the nested app before the shared team-facing
+    # service path is necessarily accepting connections, so this check must
+    # tolerate that gap.
+    wait_for_team_local_health 1 "${SC005_TIMEOUT}" ||
         die "team1 app /health failed after restart"
     log_ok "[docker] 6/7  stale-namespace regression: ok"
 

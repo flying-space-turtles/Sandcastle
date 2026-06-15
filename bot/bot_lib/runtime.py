@@ -72,12 +72,26 @@ def discover_capabilities(my_team: Optional[int]) -> frozenset:
     return frozenset(caps)
 
 
-def call_service_control(host: str, method: str, path: str) -> dict:
+def call_service_control(
+    host: str,
+    method: str,
+    path: str,
+    body: dict[str, object] | None = None,
+) -> dict:
     """Call the team-local service-control API. Raises on error."""
     url = f"http://{host}:{SERVICE_CONTROL_PORT}{path}"
-    req = urllib.request.Request(url, method=method)
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(
+        url,
+        data=data,
+        method=method,
+        headers={"Content-Type": "application/json"} if data is not None else {},
+    )
+    token = os.environ.get("DEFENSE_TOKEN") or os.environ.get("SERVICE_CONTROL_TOKEN")
+    if token:
+        req.add_header("X-Sandcastle-Defense-Token", token)
     if method == "POST":
-        req.data = b""
+        req.data = data if data is not None else b""
     with urllib.request.urlopen(req, timeout=5) as resp:
         return json.loads(resp.read())
 

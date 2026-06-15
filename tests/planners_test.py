@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bot"))
 
 from bot_lib.config import BotConfig
+import bot_lib.planners as planners
 from bot_lib.planners import BotTask, load_planner, planner_catalog
 from bot_lib.runtime import BotContext
 
@@ -84,6 +85,19 @@ class PlannerTest(unittest.TestCase):
             planner = load_planner(f"{module.__name__}:ExternalPlanner")
 
         self.assertIsInstance(planner, ExternalPlanner)
+
+    def test_model_planner_is_cached_per_process(self) -> None:
+        sentinel = object()
+        with (
+            patch.object(planners, "_MODEL_PLANNER", None),
+            patch(
+                "bot_lib.model_planner.make_model_planner",
+                return_value=sentinel,
+            ) as make,
+        ):
+            self.assertIs(load_planner("model"), sentinel)
+            self.assertIs(load_planner("model"), sentinel)
+        self.assertEqual(make.call_count, 1)
 
     def test_catalog_and_unknown_planner_are_explicit(self) -> None:
         ids = {entry["id"] for entry in planner_catalog()}

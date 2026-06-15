@@ -9,6 +9,12 @@ export default defineConfig({
     fs: {
       allow: [path.resolve(__dirname, '..')],
     },
+    proxy: {
+      '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+    },
   },
   preview: {
     port: 4173,

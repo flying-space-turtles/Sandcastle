@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT / "bot"))
 
 from bot_lib.actions import (
     CommandInjectionAction,
+    DefenseApplyPatchAction,
     HealthCheckAction,
     PathTraversalAction,
     PlantProbeAction,
@@ -92,6 +93,29 @@ class ActionTest(unittest.TestCase):
                 call("10.10.1.3", "GET", "/service/health"),
                 call("10.10.1.3", "POST", "/service/restart"),
             ],
+        )
+
+    def test_attack_defense_actions_are_deployable(self) -> None:
+        context = _context(frozenset({"service.control.local"}))
+
+        catalog_ids = {entry["id"] for entry in action_catalog()}
+        self.assertIn("attack.exploit", catalog_ids)
+        self.assertIn("defend.apply_patch", catalog_ids)
+
+        with patch(
+            "bot_lib.actions.call_service_control",
+            return_value={"status": "committed", "error": ""},
+        ) as service_control:
+            result = DefenseApplyPatchAction().run(
+                context,
+                1,
+                {"diff": "--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n-a\n+b\n"},
+            )
+
+        self.assertEqual(result.status, "ok")
+        service_control.assert_called_once()
+        self.assertEqual(
+            service_control.call_args.args[:3], ("10.10.1.3", "POST", "/defense/patch")
         )
 
     def test_catalog_exposes_unique_actions_and_capabilities(self) -> None:

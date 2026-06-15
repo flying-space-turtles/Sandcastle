@@ -26,6 +26,23 @@ arena_config_require_cpu_limit() {
     fi
 }
 
+arena_config_require_decimal() {
+    local name="$1"
+    local min="$2"
+    local max="$3"
+    local value="${!name:-}"
+
+    if [[ -z "${value}" || ! "${value}" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+        arena_config_error "${name} must be a non-negative decimal number, got '${value}'"
+        return 1
+    fi
+    if ! awk -v value="${value}" -v min="${min}" -v max="${max}" \
+        'BEGIN { exit !(value >= min && value <= max) }'; then
+        arena_config_error "${name} must be between ${min} and ${max}, got ${value}"
+        return 1
+    fi
+}
+
 arena_config_require_int() {
     local name="$1"
     local min="$2"
@@ -190,6 +207,22 @@ arena_config_load() {
     ARENA_ISOLATION_MODE="${ARENA_ISOLATION_MODE:-trusted}"
     ARENA_SSH_BIND_HOST="${ARENA_SSH_BIND_HOST:-127.0.0.1}"
     ARENA_DIND_DNS_SERVERS="${ARENA_DIND_DNS_SERVERS:-1.1.1.1,8.8.8.8}"
+    ARENA_AGENT_PROVIDER="${ARENA_AGENT_PROVIDER:-fake}"
+    ARENA_AGENT_MODEL="${ARENA_AGENT_MODEL:-}"
+    ARENA_AGENT_FALLBACK_PROVIDER="${ARENA_AGENT_FALLBACK_PROVIDER:-fake}"
+    ARENA_AGENT_MAX_CALLS_PER_ROUND="${ARENA_AGENT_MAX_CALLS_PER_ROUND:-2}"
+    ARENA_AGENT_MAX_CALLS_PER_MATCH="${ARENA_AGENT_MAX_CALLS_PER_MATCH:-30}"
+    ARENA_AGENT_MAX_INPUT_CHARS="${ARENA_AGENT_MAX_INPUT_CHARS:-20000}"
+    ARENA_AGENT_MAX_OUTPUT_TOKENS="${ARENA_AGENT_MAX_OUTPUT_TOKENS:-500}"
+    ARENA_AGENT_MAX_COST_USD_PER_CALL="${ARENA_AGENT_MAX_COST_USD_PER_CALL:-0.05}"
+    ARENA_AGENT_MAX_COST_USD_PER_MATCH="${ARENA_AGENT_MAX_COST_USD_PER_MATCH:-0.50}"
+    ARENA_AGENT_MAX_COST_USD_PER_DAY="${ARENA_AGENT_MAX_COST_USD_PER_DAY:-1.00}"
+    ARENA_AGENT_TIMEOUT_SECONDS="${ARENA_AGENT_TIMEOUT_SECONDS:-15}"
+    ARENA_AGENT_MAX_RETRIES="${ARENA_AGENT_MAX_RETRIES:-1}"
+    ARENA_OPENAI_INPUT_COST_PER_MTOK="${ARENA_OPENAI_INPUT_COST_PER_MTOK:-0.75}"
+    ARENA_OPENAI_OUTPUT_COST_PER_MTOK="${ARENA_OPENAI_OUTPUT_COST_PER_MTOK:-4.50}"
+    ARENA_CHALLENGE_MAX_ATTEMPTS="${ARENA_CHALLENGE_MAX_ATTEMPTS:-3}"
+    ARENA_CHALLENGE_MAX_COST_USD="${ARENA_CHALLENGE_MAX_COST_USD:-0.25}"
 
     for name in "${required[@]}"; do
         if [[ -z "${!name:-}" ]]; then
@@ -221,6 +254,28 @@ arena_config_load() {
     arena_config_require_int ARENA_SCORE_ATTACK_POINTS 0 100000 || return 1
     arena_config_require_int ARENA_SCORE_DEFENSE_POINTS 0 100000 || return 1
     arena_config_require_int ARENA_SCORE_SLA_POINTS 0 100000 || return 1
+    arena_config_require_int ARENA_AGENT_MAX_CALLS_PER_ROUND 1 100 || return 1
+    arena_config_require_int ARENA_AGENT_MAX_CALLS_PER_MATCH 1 10000 || return 1
+    arena_config_require_int ARENA_AGENT_MAX_INPUT_CHARS 1000 1000000 || return 1
+    arena_config_require_int ARENA_AGENT_MAX_OUTPUT_TOKENS 1 100000 || return 1
+    arena_config_require_decimal ARENA_AGENT_MAX_COST_USD_PER_CALL 0.000001 1000 || return 1
+    arena_config_require_decimal ARENA_AGENT_MAX_COST_USD_PER_MATCH 0.000001 10000 || return 1
+    arena_config_require_decimal ARENA_AGENT_MAX_COST_USD_PER_DAY 0.000001 100000 || return 1
+    arena_config_require_decimal ARENA_AGENT_TIMEOUT_SECONDS 0.1 300 || return 1
+    arena_config_require_int ARENA_AGENT_MAX_RETRIES 0 3 || return 1
+    arena_config_require_decimal ARENA_OPENAI_INPUT_COST_PER_MTOK 0 1000 || return 1
+    arena_config_require_decimal ARENA_OPENAI_OUTPUT_COST_PER_MTOK 0 1000 || return 1
+    arena_config_require_int ARENA_CHALLENGE_MAX_ATTEMPTS 1 20 || return 1
+    arena_config_require_decimal ARENA_CHALLENGE_MAX_COST_USD 0.000001 10000 || return 1
+
+    if ! awk -v call_cost="${ARENA_AGENT_MAX_COST_USD_PER_CALL}" \
+        -v match_cost="${ARENA_AGENT_MAX_COST_USD_PER_MATCH}" \
+        -v day="${ARENA_AGENT_MAX_COST_USD_PER_DAY}" \
+        'BEGIN { exit !(call_cost <= match_cost && match_cost <= day) }'; then
+        arena_config_error \
+            "agent cost limits must satisfy per-call <= per-match <= per-day"
+        return 1
+    fi
 
     arena_config_require_mem_limit ARENA_TEAM_VULN_MEM_LIMIT || return 1
     arena_config_require_cpu_limit ARENA_TEAM_VULN_CPU_LIMIT || return 1
@@ -257,6 +312,22 @@ arena_config_load() {
         *)
             arena_config_error \
                 "ARENA_ISOLATION_MODE must be 'trusted', 'isolated' or 'dind', got '${ARENA_ISOLATION_MODE}'"
+            return 1
+            ;;
+    esac
+
+    case "${ARENA_AGENT_PROVIDER}" in
+        fake|openai|ollama|gemini) ;;
+        *)
+            arena_config_error "ARENA_AGENT_PROVIDER is unsupported: ${ARENA_AGENT_PROVIDER}"
+            return 1
+            ;;
+    esac
+    case "${ARENA_AGENT_FALLBACK_PROVIDER}" in
+        fake|openai|ollama|gemini) ;;
+        *)
+            arena_config_error \
+                "ARENA_AGENT_FALLBACK_PROVIDER is unsupported: ${ARENA_AGENT_FALLBACK_PROVIDER}"
             return 1
             ;;
     esac
@@ -364,6 +435,22 @@ arena_config_load() {
         ARENA_CHECKER_SECRET \
         ARENA_ISOLATION_MODE \
         ARENA_DIND_DNS_SERVERS \
+        ARENA_AGENT_PROVIDER \
+        ARENA_AGENT_MODEL \
+        ARENA_AGENT_FALLBACK_PROVIDER \
+        ARENA_AGENT_MAX_CALLS_PER_ROUND \
+        ARENA_AGENT_MAX_CALLS_PER_MATCH \
+        ARENA_AGENT_MAX_INPUT_CHARS \
+        ARENA_AGENT_MAX_OUTPUT_TOKENS \
+        ARENA_AGENT_MAX_COST_USD_PER_CALL \
+        ARENA_AGENT_MAX_COST_USD_PER_MATCH \
+        ARENA_AGENT_MAX_COST_USD_PER_DAY \
+        ARENA_AGENT_TIMEOUT_SECONDS \
+        ARENA_AGENT_MAX_RETRIES \
+        ARENA_OPENAI_INPUT_COST_PER_MTOK \
+        ARENA_OPENAI_OUTPUT_COST_PER_MTOK \
+        ARENA_CHALLENGE_MAX_ATTEMPTS \
+        ARENA_CHALLENGE_MAX_COST_USD \
         ARENA_TEAM_VULN_MEM_LIMIT \
         ARENA_TEAM_VULN_CPU_LIMIT \
         ARENA_TEAM_VULN_PIDS_LIMIT \

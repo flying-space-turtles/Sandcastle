@@ -8,6 +8,13 @@ MODE="local"
 STAGING_DEPLOY_TMP_DIR=""
 
 STAGING_SSH_PORT="${STAGING_SSH_PORT:-22}"
+STAGING_SSH_HOST="${STAGING_SSH_HOST:-}"
+STAGING_SSH_USER="${STAGING_SSH_USER:-}"
+STAGING_SSH_PRIVATE_KEY="${STAGING_SSH_PRIVATE_KEY:-}"
+STAGING_SSH_KNOWN_HOSTS="${STAGING_SSH_KNOWN_HOSTS:-}"
+STAGING_OPERATOR_TOKEN="${STAGING_OPERATOR_TOKEN:-}"
+STAGING_CHECKER_SECRET="${STAGING_CHECKER_SECRET:-}"
+STAGING_TEAM_TOKEN_PATTERN="${STAGING_TEAM_TOKEN_PATTERN:-}"
 STAGING_DEPLOY_PATH="${STAGING_DEPLOY_PATH:-/opt/sandcastle-staging}"
 SANDCASTLE_STAGING_TEAMS="${SANDCASTLE_STAGING_TEAMS:-2}"
 SANDCASTLE_STAGING_TIMEOUT="${SANDCASTLE_STAGING_TIMEOUT:-240}"
@@ -212,7 +219,7 @@ remote_run() {
 
 local_deploy() {
     local key_file known_hosts_file remote deploy_path_q ssh_remote_cmd
-    local ssh_cmd
+    local ssh_cmd staging_ssh_host
 
     validate_common
     require_env STAGING_SSH_HOST
@@ -237,8 +244,9 @@ local_deploy() {
     chmod 0600 "${key_file}"
     printf '%s\n' "${STAGING_SSH_KNOWN_HOSTS}" > "${known_hosts_file}"
 
-    remote="${STAGING_SSH_USER}@${STAGING_SSH_HOST}"
-    ssh_cmd="ssh -i ${key_file} -p ${STAGING_SSH_PORT} -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${known_hosts_file}"
+    staging_ssh_host="${STAGING_SSH_HOST}"
+    remote="${STAGING_SSH_USER}@${staging_ssh_host}"
+    ssh_cmd="ssh -i ${key_file} -p ${STAGING_SSH_PORT} -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${known_hosts_file} -o ServerAliveInterval=30 -o ServerAliveCountMax=6 -o ConnectTimeout=30"
     deploy_path_q="$(shell_quote "${STAGING_DEPLOY_PATH}")"
 
     echo "[*] Preparing remote staging path ${STAGING_DEPLOY_PATH}..."
@@ -249,6 +257,9 @@ local_deploy() {
         -o IdentitiesOnly=yes \
         -o StrictHostKeyChecking=yes \
         -o UserKnownHostsFile="${known_hosts_file}" \
+        -o ServerAliveInterval=30 \
+        -o ServerAliveCountMax=6 \
+        -o ConnectTimeout=30 \
         "${remote}" \
         "mkdir -p ${deploy_path_q}"
 
@@ -287,6 +298,9 @@ local_deploy() {
         -o IdentitiesOnly=yes \
         -o StrictHostKeyChecking=yes \
         -o UserKnownHostsFile="${known_hosts_file}" \
+        -o ServerAliveInterval=30 \
+        -o ServerAliveCountMax=6 \
+        -o ConnectTimeout=30 \
         "${remote}" \
         "${ssh_remote_cmd}"
 }

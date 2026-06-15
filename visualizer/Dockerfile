@@ -20,5 +20,6 @@ RUN cd visualizer && npm run build
 FROM nginx:1.27-alpine
 
 COPY --from=build /app/visualizer/dist /usr/share/nginx/html
+COPY visualizer/nginx.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 80

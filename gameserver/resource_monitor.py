@@ -131,23 +131,29 @@ def violations(statuses: list[ContainerStatus]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for s in statuses:
         if s.oom_killed:
-            out.append({
-                "container": s.name,
-                "type": OOM_KILL_EVENT,
-                "restart_count": s.restart_count,
-                "mem_limit_bytes": s.mem_limit_bytes,
-            })
+            out.append(
+                {
+                    "container": s.name,
+                    "type": OOM_KILL_EVENT,
+                    "restart_count": s.restart_count,
+                    "mem_limit_bytes": s.mem_limit_bytes,
+                }
+            )
         elif s.is_restart_loop:
-            out.append({
-                "container": s.name,
-                "type": RESTART_LOOP_EVENT,
-                "restart_count": s.restart_count,
-            })
+            out.append(
+                {
+                    "container": s.name,
+                    "type": RESTART_LOOP_EVENT,
+                    "restart_count": s.restart_count,
+                }
+            )
         if s.disk_used_pct is not None and s.disk_used_pct >= DISK_PRESSURE_THRESHOLD_PCT:
-            out.append({
-                "container": s.name,
-                "type": DISK_PRESSURE_EVENT,
-                "disk_used_pct": s.disk_used_pct,
-                "disk_available_bytes": s.disk_available_bytes,
-            })
+            out.append(
+                {
+                    "container": s.name,
+                    "type": DISK_PRESSURE_EVENT,
+                    "disk_used_pct": s.disk_used_pct,
+                    "disk_available_bytes": s.disk_available_bytes,
+                }
+            )
     return out

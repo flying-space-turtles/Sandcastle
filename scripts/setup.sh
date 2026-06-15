@@ -363,8 +363,7 @@ services:
       network: host
     image: sandcastle/team${team_num}-vuln-app:latest
     container_name: team${team_num}-vuln-app
-    ports:
-      - "${ARENA_SERVICE_PORT}:${ARENA_SERVICE_PORT}"
+    network_mode: host
 EOF
         IFS=',' read -r -a dind_dns_servers <<< "${ARENA_DIND_DNS_SERVERS}"
         if ((${#dind_dns_servers[@]} > 0)); then
@@ -493,6 +492,11 @@ x-sandcastle-arena:
   visualizer_cpu_limit: ${ARENA_VISUALIZER_CPU_LIMIT}
   log_max_size: ${ARENA_LOG_MAX_SIZE}
   log_max_files: ${ARENA_LOG_MAX_FILES}
+  agent_provider: ${ARENA_AGENT_PROVIDER}
+  agent_model: ${ARENA_AGENT_MODEL:-disabled}
+  agent_max_calls_per_round: ${ARENA_AGENT_MAX_CALLS_PER_ROUND}
+  agent_max_calls_per_match: ${ARENA_AGENT_MAX_CALLS_PER_MATCH}
+  agent_max_cost_usd_per_match: ${ARENA_AGENT_MAX_COST_USD_PER_MATCH}
 
 networks:
   ctf-network:
@@ -501,16 +505,9 @@ networks:
       config:
         - subnet: ${ARENA_CTF_SUBNET}
           gateway: ${ARENA_CTF_GATEWAY}
-EOF
-
-    if [[ "${ARENA_ISOLATION_MODE}" == "dind" ]]; then
-        for ((i = 1; i <= teams; i++)); do
-            cat >> "${COMPOSE_FILE}" <<EOF
-  team${i}-dind-network:
+  control-plane:
     driver: bridge
 EOF
-        done
-    fi
 
     cat >> "${COMPOSE_FILE}" <<EOF
 
@@ -566,8 +563,8 @@ EOF
   team${i}-dind:
     image: docker:27-dind
     container_name: team${i}-dind
-    hostname: team${i}-dind
     privileged: true
+    network_mode: "service:team${i}-vuln"
     command:
       - dockerd
       - --host=unix:///var/run/docker.sock
@@ -580,8 +577,6 @@ EOF
             cat >> "${COMPOSE_FILE}" <<EOF
     environment:
       DOCKER_TLS_CERTDIR: ""
-    networks:
-      - team${i}-dind-network
     volumes:
       - team${i}-dind-data:/var/lib/docker
       - team${i}-dind-run:/var/run
@@ -602,19 +597,15 @@ EOF
             vuln_networks="      ctf-network:
         ipv4_address: ${ARENA_NETWORK_PREFIX}.${i}.3"
         elif [[ "${ARENA_ISOLATION_MODE}" == "dind" ]]; then
-            vuln_depends="
-    depends_on:
-      - team${i}-dind"
+            vuln_depends=""
             vuln_docker_mount="      - team${i}-dind-run:/var/run/dind"
             vuln_environment="
     environment:
       DOCKER_HOST: \"unix:///var/run/dind/docker.sock\"
       ARENA_ISOLATION_MODE: \"dind\"
-      ARENA_SERVICE_PORT: \"${ARENA_SERVICE_PORT}\"
-      SANDCASTLE_DIND_TARGET: \"team${i}-dind\""
+      ARENA_SERVICE_PORT: \"${ARENA_SERVICE_PORT}\""
             vuln_networks="      ctf-network:
-        ipv4_address: ${ARENA_NETWORK_PREFIX}.${i}.3
-      team${i}-dind-network: {}"
+        ipv4_address: ${ARENA_NETWORK_PREFIX}.${i}.3"
         else
             vuln_depends=""
             vuln_docker_mount="      - /var/run/docker.sock:/var/run/docker.sock"
@@ -641,6 +632,7 @@ EOF
 ${vuln_networks}
     volumes:
 ${vuln_docker_mount}
+      - ./config/arena.env:/tmp/arena.env:ro
       - ./teams/generated/team${i}/example-vuln:/home/${username}/example-vuln
       - ./services/example-vuln:/srv/example-vuln:ro
     cap_add:
@@ -712,6 +704,7 @@ EOF
     network_mode: host
     environment:
       CTF_NETWORK: "${ARENA_CTF_SUBNET}"
+      CTF_GATEWAY: "${ARENA_CTF_GATEWAY}"
       WS_PORT: "${ARENA_FIREWALL_WS_PORT}"
       PROXY_PORT: "${ARENA_FIREWALL_PROXY_PORT}"
       EVENT_QUEUE_SIZE: "${ARENA_FIREWALL_EVENT_QUEUE_SIZE}"
@@ -744,6 +737,7 @@ EOF
     networks:
       ctf-network:
         ipv4_address: ${ARENA_NETWORK_PREFIX}.0.2
+      control-plane: {}
     ports:
       - "${ARENA_GAMESERVER_PORT}:8000"
     volumes:
@@ -773,14 +767,21 @@ EOF
     image: sandcastle/bot-controller:latest
     container_name: sandcastle-bot-controller
     hostname: sandcastle-bot-controller
+    networks:
+      ctf-network:
+        ipv4_address: ${ARENA_NETWORK_PREFIX}.0.4
     ports:
       - "127.0.0.1:${ARENA_BOT_API_PORT}:${ARENA_BOT_API_PORT}"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./config/arena.env:/app/config/arena.env:ro
+      - ./challenges:/app/challenges
       - bot-controller-data:/data
     environment:
       ARENA_BOT_API_PORT: "${ARENA_BOT_API_PORT}"
+      CHALLENGE_VALIDATION_NETWORK: "sandcastle_ctf-network"
+      OPENAI_API_KEY: "\${OPENAI_API_KEY:-}"
+      GEMINI_API_KEY: "\${GEMINI_API_KEY:-}"
     labels:
       sandcastle.role: "bot-controller"
       sandcastle.visualizer.hidden: "true"
@@ -803,6 +804,8 @@ EOF
     image: sandcastle/visualizer:latest
     container_name: sandcastle-visualizer
     hostname: sandcastle-visualizer
+    networks:
+      - control-plane
     ports:
       - "${ARENA_VISUALIZER_BIND_HOST}:${ARENA_VISUALIZER_PORT}:80"
     labels:

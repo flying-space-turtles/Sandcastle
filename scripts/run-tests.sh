@@ -86,6 +86,10 @@ step "Bot configuration tests"
 python3 -B "${ROOT}/tests/bot_config_test.py"
 
 # ---------------------------------------------------------------------------
+step "AI agent contract and configuration tests"
+python3 -B "${ROOT}/tests/agent_contracts_test.py"
+
+# ---------------------------------------------------------------------------
 step "Bot planner tests"
 python3 -B "${ROOT}/tests/planners_test.py"
 
@@ -104,6 +108,54 @@ python3 -B "${ROOT}/tests/bot_test.py"
 # ---------------------------------------------------------------------------
 step "Model-backed planner tests"
 python3 -B "${ROOT}/tests/model_planner_test.py"
+
+# ---------------------------------------------------------------------------
+step "Provider-neutral model gateway tests"
+python3 -B "${ROOT}/tests/model_gateway_test.py"
+
+# ---------------------------------------------------------------------------
+step "Persistent model budget tests"
+python3 -B "${ROOT}/tests/model_budget_test.py"
+
+# ---------------------------------------------------------------------------
+step "OpenAI provider contract tests"
+python3 -B "${ROOT}/tests/openai_provider_test.py"
+
+# ---------------------------------------------------------------------------
+step "Authenticated agent planning API tests"
+python3 -B "${ROOT}/tests/agent_plan_api_test.py"
+
+# ---------------------------------------------------------------------------
+step "Agent runs and identity tests (AI-006)"
+python3 -B "${ROOT}/tests/agent_runs_test.py"
+
+# ---------------------------------------------------------------------------
+step "Agent memory and telemetry tests (AI-007)"
+python3 -B "${ROOT}/tests/agent_memory_test.py"
+
+# ---------------------------------------------------------------------------
+step "Challenge renderer and spec tests (AI-008)"
+python3 -B "${ROOT}/tests/challenge_renderer_test.py"
+
+# ---------------------------------------------------------------------------
+step "Challenge validator and registry tests (AI-009 / AI-010)"
+python3 -B "${ROOT}/tests/challenge_validator_test.py"
+
+# ---------------------------------------------------------------------------
+step "ChallengeGeneratorAgent tests (AI-011)"
+python3 -B "${ROOT}/tests/challenge_generator_agent_test.py"
+
+# ---------------------------------------------------------------------------
+step "Defensive tools and patch workflow tests (AI-012 / AI-013)"
+python3 -B "${ROOT}/tests/defensive_tools_test.py"
+
+# ---------------------------------------------------------------------------
+step "AttackDefenseAgent tests (AI-014)"
+python3 -B "${ROOT}/tests/attack_defense_agent_test.py"
+
+# ---------------------------------------------------------------------------
+step "Two-agent end-to-end deterministic test (AI-016)"
+python3 -B "${ROOT}/tests/two_agent_e2e_test.py"
 
 # ---------------------------------------------------------------------------
 step "Firewall unit tests"

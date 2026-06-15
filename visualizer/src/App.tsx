@@ -4,6 +4,7 @@ import sshDockerfile from '../../docker/ssh/Dockerfile?raw';
 import vulnMachineDockerfile from '../../docker/vuln/Dockerfile?raw';
 import firewallDockerfile from '../../firewall/Dockerfile?raw';
 import vulnDockerfile from '../../services/example-vuln/Dockerfile?raw';
+import AgentsPanel from './components/AgentsPanel';
 import BotPanel from './components/BotPanel';
 import DetailsPanel from './components/DetailsPanel';
 import DockerCanvas from './components/DockerCanvas';
@@ -118,6 +119,7 @@ const App = () => {
       )}
 
       {mode === 'bot' && <BotPanel />}
+      {mode === 'agents' && <AgentsPanel />}
       </div>
     </div>
   );
