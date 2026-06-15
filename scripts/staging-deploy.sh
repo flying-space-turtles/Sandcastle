@@ -238,7 +238,7 @@ local_deploy() {
     printf '%s\n' "${STAGING_SSH_KNOWN_HOSTS}" > "${known_hosts_file}"
 
     remote="${STAGING_SSH_USER}@${STAGING_SSH_HOST}"
-    ssh_cmd="ssh -i ${key_file} -p ${STAGING_SSH_PORT} -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${known_hosts_file}"
+    ssh_cmd="ssh -i ${key_file} -p ${STAGING_SSH_PORT} -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=${known_hosts_file} -o ServerAliveInterval=30 -o ServerAliveCountMax=6 -o ConnectTimeout=30"
     deploy_path_q="$(shell_quote "${STAGING_DEPLOY_PATH}")"
 
     echo "[*] Preparing remote staging path ${STAGING_DEPLOY_PATH}..."
@@ -249,6 +249,9 @@ local_deploy() {
         -o IdentitiesOnly=yes \
         -o StrictHostKeyChecking=yes \
         -o UserKnownHostsFile="${known_hosts_file}" \
+        -o ServerAliveInterval=30 \
+        -o ServerAliveCountMax=6 \
+        -o ConnectTimeout=30 \
         "${remote}" \
         "mkdir -p ${deploy_path_q}"
 
@@ -287,6 +290,9 @@ local_deploy() {
         -o IdentitiesOnly=yes \
         -o StrictHostKeyChecking=yes \
         -o UserKnownHostsFile="${known_hosts_file}" \
+        -o ServerAliveInterval=30 \
+        -o ServerAliveCountMax=6 \
+        -o ConnectTimeout=30 \
         "${remote}" \
         "${ssh_remote_cmd}"
 }
