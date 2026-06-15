@@ -41,6 +41,8 @@ networks:
       config:
         - subnet: 10.10.0.0/16
           gateway: 10.10.0.1
+  control-plane:
+    driver: bridge
 
 services:
   team1-vuln:
@@ -236,6 +238,7 @@ services:
     networks:
       ctf-network:
         ipv4_address: 10.10.0.2
+      control-plane: {}
     ports:
       - "8000:8000"
     volumes:
@@ -295,6 +298,8 @@ services:
     image: sandcastle/visualizer:latest
     container_name: sandcastle-visualizer
     hostname: sandcastle-visualizer
+    networks:
+      - control-plane
     ports:
       - "127.0.0.1:4173:80"
     labels:

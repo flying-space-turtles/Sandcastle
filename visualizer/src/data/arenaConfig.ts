@@ -53,4 +53,4 @@ export const ARENA_CONFIG = {
 
 export const botApiUrl = `http://${ARENA_CONFIG.botApiHost}:${ARENA_CONFIG.botApiPort}`;
 export const firewallWsUrl = `ws://localhost:${ARENA_CONFIG.firewallWsPort}`;
-export const gameserverApiUrl = `http://localhost:${ARENA_CONFIG.gameserverPort}`;
+export const gameserverApiUrl = (import.meta.env.VITE_GAMESERVER_API_URL || '').replace(/\/+$/, '');
