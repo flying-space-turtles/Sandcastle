@@ -586,8 +586,9 @@ run_docker_tests() {
         die "arena.sh restart failed after team1-vuln stop/start"
 
     # Confirm team1's team-local service path is back and healthy. In DinD
-    # mode arena.sh verifies the nested app before the parent TCP forwarder is
-    # necessarily accepting connections, so this check must tolerate that gap.
+    # mode arena.sh verifies the nested app before the shared team-facing
+    # service path is necessarily accepting connections, so this check must
+    # tolerate that gap.
     wait_for_team_local_health 1 "${SC005_TIMEOUT}" ||
         die "team1 app /health failed after restart"
     log_ok "[docker] 6/7  stale-namespace regression: ok"

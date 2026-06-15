@@ -238,17 +238,11 @@ dind_app_diagnostics() {
             "cd '${service_dir}' && docker compose ps || true"
         docker exec "${machine}" sh -lc \
             "cd '${service_dir}' && docker compose logs --no-color --tail=120 || true"
-        echo "--- team${team_id} DinD service forwarder diagnostics ---"
-        docker exec "${machine}" sh -lc \
-            "getent hosts 'team${team_id}-dind' || true"
-        docker exec "${machine}" sh -lc \
-            "ps -ef | grep '[s]ocat' || true"
+        echo "--- team${team_id} DinD service path diagnostics ---"
         docker exec "${machine}" sh -lc \
             "ss -lntp || true"
         docker exec "${machine}" sh -lc \
             "curl -sv --max-time 5 'http://127.0.0.1:${ARENA_SERVICE_PORT}/health' 2>&1 || true"
-        docker exec "${machine}" sh -lc \
-            "curl -sv --max-time 5 'http://team${team_id}-dind:${ARENA_SERVICE_PORT}/health' 2>&1 || true"
     } >&2 || true
 }
 
@@ -283,7 +277,7 @@ app_is_healthy() {
     if [[ "${ARENA_ISOLATION_MODE}" == "dind" ]]; then
         # In DinD mode the app runs inside the nested Docker daemon.
         # Probe the app container directly so arena startup does not depend on
-        # the team machine's TCP forwarder being ready before the app is.
+        # the team machine's shared network service path before the app is.
         docker exec "${machine}" \
             docker exec "${app}" \
             python3 -c "import json, sys, urllib.request; data = json.load(urllib.request.urlopen('http://127.0.0.1:${ARENA_SERVICE_PORT}/health', timeout=2)); sys.exit(0 if data.get('status') == 'ok' else 1)" \
@@ -295,7 +289,7 @@ app_is_healthy() {
     fi
 }
 
-dind_forwarder_is_healthy() {
+dind_service_path_is_healthy() {
     local team_id="$1"
     local machine="team${team_id}-vuln"
 
@@ -307,18 +301,7 @@ dind_forwarder_is_healthy() {
         > /dev/null 2>&1
 }
 
-refresh_dind_forwarders() {
-    local id
-
-    [[ "${ARENA_ISOLATION_MODE}" == "dind" ]] || return 0
-    echo "[*] Refreshing DinD service forwarders..."
-    for ((id = 1; id <= ARENA_TEAM_COUNT; id++)); do
-        docker exec "team${id}-vuln" sh -lc \
-            "pkill -x socat >/dev/null 2>&1 || true"
-    done
-}
-
-wait_for_dind_forwarders() {
+wait_for_dind_service_paths() {
     local timeout="$1"
     local attempts=$((timeout / HEALTH_POLL_SECONDS + 1))
     local attempt id
@@ -329,8 +312,8 @@ wait_for_dind_forwarders() {
     for ((attempt = 1; attempt <= attempts; attempt++)); do
         pending=()
         for ((id = 1; id <= ARENA_TEAM_COUNT; id++)); do
-            if ! dind_forwarder_is_healthy "${id}"; then
-                pending+=("team${id}-vuln-forwarder")
+            if ! dind_service_path_is_healthy "${id}"; then
+                pending+=("team${id}-vuln-service-path")
             fi
         done
 
@@ -338,7 +321,7 @@ wait_for_dind_forwarders() {
         ((attempt < attempts)) && sleep "${HEALTH_POLL_SECONDS}"
     done
 
-    echo "arena.sh: DinD service forwarder timeout after ${timeout}s: ${pending[*]}" >&2
+    echo "arena.sh: DinD service path timeout after ${timeout}s: ${pending[*]}" >&2
     return 1
 }
 
@@ -700,8 +683,7 @@ up_arena() {
         fi
         die "one or more vulnerable apps failed health checks"
     }
-    refresh_dind_forwarders
-    wait_for_dind_forwarders "${timeout}" || {
+    wait_for_dind_service_paths "${timeout}" || {
         STATUS_FORMAT="text"
         print_status || true
         if [[ "${ARENA_ISOLATION_MODE}" == "dind" ]]; then
@@ -710,7 +692,7 @@ up_arena() {
                 dind_app_diagnostics "${id}"
             done
         fi
-        die "one or more DinD service forwarders failed health checks"
+        die "one or more DinD service paths failed health checks"
     }
     verify_network_path
 

@@ -29,9 +29,10 @@ Three isolation mechanisms were considered:
 The filter proxy remains useful because it preserves
 `network_mode: container:teamN-vuln`, which is the simplest way for the
 challenge app to share the vuln machine's IP address. DinD uses a different
-shape: the app runs inside the team daemon on that nested daemon's host
-network, and `teamN-vuln` forwards `10.10.N.3:SERVICE_PORT` to the
-team-local DinD sidecar.
+shape: the team-local DinD sidecar shares `teamN-vuln`'s network namespace, and
+the app runs inside the team daemon on that shared host network. The service is
+therefore available directly at `10.10.N.3:SERVICE_PORT` without a published
+port or TCP forwarder.
 
 ---
 
@@ -90,7 +91,9 @@ For Docker-in-Docker production testing, run:
 `setup.sh --dind` persists `ARENA_ISOLATION_MODE=dind`, generates one
 `teamN-dind` service per team from the official `docker:27-dind` image, and
 mounts that daemon's Unix socket into `teamN-vuln` as the team's only Docker
-API. The host Docker socket is not mounted into the vulnerable machine.
+API. The sidecar shares the vulnerable machine's network namespace so nested
+apps bind directly to the team's service IP. The host Docker socket is not
+mounted into the vulnerable machine.
 
 ---
 

@@ -345,26 +345,29 @@ if grep -Fq "network-smoke" "${LOG_FILE}"; then
 fi
 assert_log "docker exec team1-vuln docker exec team1-vuln-app python3 -c"
 assert_log "docker exec team1-vuln curl -fsS --max-time 2 http://127.0.0.1:8080/health"
-assert_log "docker exec team1-vuln sh -lc pkill -x socat"
 if grep -Fq "docker exec team1-vuln docker exec team1-vuln-app curl" "${LOG_FILE}"; then
     echo "DinD health checks should not require curl inside the app container" >&2
+    exit 1
+fi
+if grep -Fq "socat" "${LOG_FILE}"; then
+    echo "DinD startup should not use a TCP service forwarder" >&2
     exit 1
 fi
 
 : > "${LOG_FILE}"
 set +e
-dind_forwarder_failure="$(
+dind_service_path_failure="$(
     ARENA_TEST_SMOKE_FAIL=1 run_arena dind-forward-fail up --timeout 1 2>&1
 )"
-dind_forwarder_rc=$?
+dind_service_path_rc=$?
 set -e
-((dind_forwarder_rc != 0)) || {
-    echo "Startup should fail when the DinD service forwarder is not healthy" >&2
+((dind_service_path_rc != 0)) || {
+    echo "Startup should fail when the DinD shared service path is not healthy" >&2
     exit 1
 }
-grep -Fq "DinD service forwarder timeout" <<< "${dind_forwarder_failure}"
-grep -Fq "one or more DinD service forwarders failed health checks" <<< "${dind_forwarder_failure}"
-grep -Fq "DinD service forwarder diagnostics" <<< "${dind_forwarder_failure}"
+grep -Fq "DinD service path timeout" <<< "${dind_service_path_failure}"
+grep -Fq "one or more DinD service paths failed health checks" <<< "${dind_service_path_failure}"
+grep -Fq "DinD service path diagnostics" <<< "${dind_service_path_failure}"
 
 : > "${LOG_FILE}"
 set +e

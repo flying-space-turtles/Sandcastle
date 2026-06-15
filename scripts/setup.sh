@@ -509,15 +509,6 @@ networks:
     driver: bridge
 EOF
 
-    if [[ "${ARENA_ISOLATION_MODE}" == "dind" ]]; then
-        for ((i = 1; i <= teams; i++)); do
-            cat >> "${COMPOSE_FILE}" <<EOF
-  team${i}-dind-network:
-    driver: bridge
-EOF
-        done
-    fi
-
     cat >> "${COMPOSE_FILE}" <<EOF
 
 services:
@@ -572,8 +563,8 @@ EOF
   team${i}-dind:
     image: docker:27-dind
     container_name: team${i}-dind
-    hostname: team${i}-dind
     privileged: true
+    network_mode: "service:team${i}-vuln"
     command:
       - dockerd
       - --host=unix:///var/run/docker.sock
@@ -586,8 +577,6 @@ EOF
             cat >> "${COMPOSE_FILE}" <<EOF
     environment:
       DOCKER_TLS_CERTDIR: ""
-    networks:
-      - team${i}-dind-network
     volumes:
       - team${i}-dind-data:/var/lib/docker
       - team${i}-dind-run:/var/run
@@ -608,19 +597,15 @@ EOF
             vuln_networks="      ctf-network:
         ipv4_address: ${ARENA_NETWORK_PREFIX}.${i}.3"
         elif [[ "${ARENA_ISOLATION_MODE}" == "dind" ]]; then
-            vuln_depends="
-    depends_on:
-      - team${i}-dind"
+            vuln_depends=""
             vuln_docker_mount="      - team${i}-dind-run:/var/run/dind"
             vuln_environment="
     environment:
       DOCKER_HOST: \"unix:///var/run/dind/docker.sock\"
       ARENA_ISOLATION_MODE: \"dind\"
-      ARENA_SERVICE_PORT: \"${ARENA_SERVICE_PORT}\"
-      SANDCASTLE_DIND_TARGET: \"team${i}-dind\""
+      ARENA_SERVICE_PORT: \"${ARENA_SERVICE_PORT}\""
             vuln_networks="      ctf-network:
-        ipv4_address: ${ARENA_NETWORK_PREFIX}.${i}.3
-      team${i}-dind-network: {}"
+        ipv4_address: ${ARENA_NETWORK_PREFIX}.${i}.3"
         else
             vuln_depends=""
             vuln_docker_mount="      - /var/run/docker.sock:/var/run/docker.sock"
