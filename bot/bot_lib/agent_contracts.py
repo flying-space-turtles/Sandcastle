@@ -145,9 +145,9 @@ class BudgetPolicy:
     max_calls_per_match: int = 30
     max_input_chars: int = 20_000
     max_output_tokens: int = 500
-    max_cost_usd_per_call: float = 0.05
-    max_cost_usd_per_match: float = 0.50
-    max_cost_usd_per_day: float = 1.00
+    max_cost_usd_per_call: float = 0.25
+    max_cost_usd_per_match: float = 5.00
+    max_cost_usd_per_day: float = 25.00
     timeout_seconds: float = 15.0
     max_retries: int = 1
 

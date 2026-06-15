@@ -15,9 +15,9 @@ from bot_lib.openai_provider import OpenAIProvider
 
 
 def main() -> int:
-    max_cost = float(os.environ.get("ARENA_AGENT_MAX_COST_USD_PER_CALL", "0.02"))
-    if max_cost > 0.02:
-        print("smoke test refuses cost limits above $0.02", file=sys.stderr)
+    max_cost = float(os.environ.get("ARENA_AGENT_MAX_COST_USD_PER_CALL", "0.10"))
+    if max_cost > 0.10:
+        print("smoke test refuses cost limits above $0.10", file=sys.stderr)
         return 2
     api_key = os.environ.get("OPENAI_API_KEY", "")
     if not api_key:

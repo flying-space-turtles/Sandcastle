@@ -35,6 +35,14 @@ def _request() -> ModelRequest:
                 "id": "recon.health",
                 "description": "Check health",
                 "scope": "target",
+                "parameters": {
+                    "target_team": {"type": "integer"},
+                    "vuln_type": {
+                        "type": "string",
+                        "enum": ["path_traversal", "command_injection"],
+                    },
+                },
+                "required": ["target_team"],
             }
         ],
         budget=BudgetPolicy(max_output_tokens=100),
@@ -80,6 +88,24 @@ class StubResponse:
         return False
 
 
+def _assert_strict_object_schemas(test: unittest.TestCase, schema: dict) -> None:
+    if schema.get("type") == "object":
+        properties = schema.get("properties", {})
+        test.assertIsInstance(properties, dict)
+        test.assertEqual(sorted(schema.get("required", [])), sorted(properties))
+        test.assertFalse(schema.get("additionalProperties"))
+    if isinstance(schema.get("properties"), dict):
+        for nested in schema["properties"].values():
+            if isinstance(nested, dict):
+                _assert_strict_object_schemas(test, nested)
+    if isinstance(schema.get("items"), dict):
+        _assert_strict_object_schemas(test, schema["items"])
+    if isinstance(schema.get("anyOf"), list):
+        for nested in schema["anyOf"]:
+            if isinstance(nested, dict):
+                _assert_strict_object_schemas(test, nested)
+
+
 class OpenAIProviderTest(unittest.TestCase):
     def setUp(self) -> None:
         self.provider = OpenAIProvider(
@@ -101,16 +127,39 @@ class OpenAIProviderTest(unittest.TestCase):
         self.assertEqual(body["text"]["format"]["type"], "json_schema")
         self.assertTrue(body["text"]["format"]["strict"])
         schema = body["text"]["format"]["schema"]
-        tool_enum = schema["properties"]["tool_calls"]["items"]["properties"]["tool_id"]["enum"]
+        _assert_strict_object_schemas(self, schema)
+        item_schema = schema["properties"]["tool_calls"]["items"]["anyOf"][0]
+        tool_enum = item_schema["properties"]["tool_id"]["enum"]
         self.assertEqual(tool_enum, ["recon.health"])
+        arguments = item_schema["properties"]["arguments"]
+        self.assertEqual(arguments["required"], ["target_team", "vuln_type"])
+        self.assertEqual(arguments["properties"]["target_team"]["type"], "integer")
+        self.assertEqual(arguments["properties"]["vuln_type"]["type"], ["string", "null"])
+        self.assertEqual(
+            arguments["properties"]["vuln_type"]["enum"],
+            ["path_traversal", "command_injection", None],
+        )
 
     def test_parses_tool_calls_usage_request_id_and_cost(self) -> None:
         with patch(
             "urllib.request.urlopen",
-            return_value=StubResponse(_response_payload()),
+            return_value=StubResponse(
+                _response_payload(
+                    {
+                        "tool_calls": [
+                            {
+                                "call_id": "call-1",
+                                "tool_id": "recon.health",
+                                "arguments": {"target_team": 2, "vuln_type": None},
+                            }
+                        ]
+                    }
+                )
+            ),
         ):
             response = self.provider.complete(_request(), timeout=2.0)
         self.assertEqual(response.tool_calls[0].tool_id, "recon.health")
+        self.assertEqual(response.tool_calls[0].arguments, {"target_team": 2})
         self.assertEqual(response.usage.provider_request_id, "req_123")
         self.assertEqual(response.usage.total_tokens, 120)
         self.assertAlmostEqual(response.usage.cost_usd or 0, 0.000165)

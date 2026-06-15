@@ -197,7 +197,7 @@ class BudgetedGatewayTest(unittest.TestCase):
                 )
             summary = ledger.summary(run_id="run-1")
             self.assertEqual(summary["statuses"]["FAILED"]["calls"], 1)
-            self.assertAlmostEqual(summary["total_cost_usd"], 0.05)
+            self.assertAlmostEqual(summary["total_cost_usd"], 0.25)
 
     def test_fake_provider_attempt_is_counted_without_cost(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

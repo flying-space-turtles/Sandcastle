@@ -23,7 +23,7 @@ from challenge.validator import ChallengeValidator
 
 # Default limits (overridden by arena config)
 _DEFAULT_MAX_ATTEMPTS = 3
-_DEFAULT_MAX_COST_USD = 0.25
+_DEFAULT_MAX_COST_USD = 3.00
 
 # Tool IDs
 _TOOL_CREATE = "challenge.spec.create"
