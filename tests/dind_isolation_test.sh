@@ -176,8 +176,8 @@ else
 fi
 
 for team in 1 2; do
-    target="http://${ARENA_NETWORK_PREFIX}.${team}.3:${ARENA_SERVICE_PORT}/health"
-    if wait_for_service_health "team${team}-vuln" "${ARENA_NETWORK_PREFIX}.${team}.3"; then
+    target="http://127.0.0.1:${ARENA_SERVICE_PORT}/health"
+    if wait_for_service_health "team${team}-vuln" "127.0.0.1"; then
         pass "team${team} service is reachable from its own vulnerable machine at ${target}"
     else
         fail "team${team} service is not reachable from its own vulnerable machine at ${target}"
