@@ -7,6 +7,10 @@
 ![Node](https://img.shields.io/badge/node-22-5fa04e)
 ![Docker Compose](https://img.shields.io/badge/docker-compose-2496ed)
 
+<p align="center">
+  <img src="assets/sandcastle-banner-v3.png" alt="Sandcastle banner" width="920">
+</p>
+
 Sandcastle is a local, Docker-based Attack and Defense CTF arena for testing
 autonomous software agents in a realistic security game loop.
 
