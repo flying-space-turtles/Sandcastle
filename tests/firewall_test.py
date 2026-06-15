@@ -74,6 +74,38 @@ class FirewallTest(unittest.TestCase):
         self.assertEqual(event["maskedSrcIp"], "10.10.0.1")
         self.assertEqual(event["type"], "http")
 
+    def test_proxy_input_rule_accepts_only_redirected_ctf_proxy_traffic(self):
+        rule = firewall._proxy_input_rule_spec()
+
+        self.assertIn("filter", rule)
+        self.assertIn("INPUT", rule)
+        self.assertIn("10.10.0.0/16", rule)
+        self.assertIn("15000", rule)
+        self.assertIn("conntrack", rule)
+        self.assertIn("DNAT", rule)
+        self.assertIn(firewall.INPUT_RULE_COMMENT, rule)
+
+    def test_install_and_remove_manage_redirect_and_input_rules(self):
+        calls = []
+
+        def fake_run(args, check=True):
+            calls.append((args, check))
+            return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        original_run = firewall._run_iptables
+        try:
+            firewall._run_iptables = fake_run
+            firewall.install_redirect_rule()
+            firewall.remove_redirect_rule()
+        finally:
+            firewall._run_iptables = original_run
+
+        install_calls = [args for args, _ in calls if "-I" in args or "-A" in args]
+        self.assertIn(firewall._proxy_input_rule_spec(), install_calls)
+        self.assertIn(firewall._rule_spec(), install_calls)
+        inspected = [args for args, _ in calls if args[:3] == ["-t", "filter", "-S"]]
+        self.assertTrue(inspected)
+
 
 class FirewallParsingTest(unittest.TestCase):
     @staticmethod

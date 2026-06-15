@@ -857,7 +857,7 @@ check_app_health() {
 }
 
 check_firewall() {
-    local bridge_value rules listing rule_line packets
+    local bridge_value rules input_rules listing rule_line packets
 
     ((DOCKER_DAEMON)) || return
     if [[ "$(container_state_get sandcastle-firewall absent)" != "running" ]]; then
@@ -896,6 +896,18 @@ check_firewall() {
         return
     fi
     report PASS firewall.rule "The Sandcastle PREROUTING redirect rule exists."
+
+    input_rules="$(
+        docker exec sandcastle-firewall \
+            iptables -t filter -S INPUT 2>/dev/null || true
+    )"
+    if [[ "${input_rules}" != *"sandcastle-firewall-proxy-input"* ]]; then
+        report FAIL firewall.input-rule \
+            "The Sandcastle INPUT allow rule for redirected proxy traffic is missing." \
+            "Inspect docker compose logs firewall and restart the firewall service."
+        return
+    fi
+    report PASS firewall.input-rule "The Sandcastle INPUT allow rule for redirected proxy traffic exists."
 
     listing="$(
         docker exec sandcastle-firewall \

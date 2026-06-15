@@ -88,6 +88,7 @@ failure_report() {
     docker compose -f "${ROOT}/docker-compose.yml" logs --no-color --tail=30 || true
     nested_dind_report
     staging_phase_report
+    dind_isolation_log_report
     echo "::endgroup::"
 }
 
@@ -97,6 +98,14 @@ staging_phase_report() {
     [[ -n "${phase_file}" && -f "${phase_file}" ]] || return 0
     echo "--- staging smoke phase ---"
     printf 'staging smoke phase: %s\n' "$(<"${phase_file}")"
+}
+
+dind_isolation_log_report() {
+    local log_file="${SANDCASTLE_DIND_ISOLATION_LOG_FILE:-}"
+
+    [[ -n "${log_file}" && -f "${log_file}" ]] || return 0
+    echo "--- DinD isolation test log tail ---"
+    tail -n 200 "${log_file}" || true
 }
 
 nested_dind_report() {
@@ -140,7 +149,7 @@ nested_dind_report() {
 }
 
 remote_run() {
-    local phase_file
+    local phase_file dind_isolation_log_file
 
     validate_common
     if [[ "${STAGING_DEPLOY_READ_STDIN:-0}" == "1" ]]; then
@@ -165,8 +174,11 @@ remote_run() {
     cd "${ROOT}"
     mkdir -p "${ROOT}/tmp"
     phase_file="${ROOT}/tmp/staging-smoke-phase"
+    dind_isolation_log_file="${ROOT}/tmp/dind-isolation.log"
     rm -f "${phase_file}"
+    rm -f "${dind_isolation_log_file}"
     export SANDCASTLE_STAGING_PHASE_FILE="${phase_file}"
+    export SANDCASTLE_DIND_ISOLATION_LOG_FILE="${dind_isolation_log_file}"
 
     echo "[*] Removing previous Sandcastle staging deployment..."
     ./scripts/cleanup.sh --remove-generated

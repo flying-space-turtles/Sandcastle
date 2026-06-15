@@ -80,6 +80,10 @@ case "${1:-}" in
             echo "-A PREROUTING -s 10.10.0.0/16 -d 10.10.0.0/16 -p tcp -m comment --comment sandcastle-firewall-transparent-proxy -j REDIRECT --to-ports 15000"
             exit 0
         fi
+        if [[ "${container}" == "sandcastle-firewall" && "$*" == *"-S INPUT"* ]]; then
+            echo "-A INPUT -s 10.10.0.0/16 -p tcp -m tcp --dport 15000 -m conntrack --ctstate DNAT -m comment --comment sandcastle-firewall-proxy-input -j ACCEPT"
+            exit 0
+        fi
         if [[ "${container}" == "sandcastle-firewall" && "$*" == *"-L PREROUTING"* ]]; then
             packets=7
             [[ "${scenario}" == "firewall-zero" ]] && packets=0

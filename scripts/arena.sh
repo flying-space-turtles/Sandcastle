@@ -148,6 +148,15 @@ verify_firewall_runtime() {
             --comment sandcastle-firewall-transparent-proxy \
             -j REDIRECT \
             --to-ports "$PROXY_PORT"
+        iptables -t filter -C INPUT \
+            -s "$CTF_NETWORK" \
+            -p tcp \
+            --dport "$PROXY_PORT" \
+            -m conntrack \
+            --ctstate DNAT \
+            -m comment \
+            --comment sandcastle-firewall-proxy-input \
+            -j ACCEPT
         ss -lnt | grep -Eq "[:.]${PROXY_PORT}[[:space:]]"
         ss -lnt | grep -Eq "[:.]${WS_PORT}[[:space:]]"
     ' >/dev/null ||

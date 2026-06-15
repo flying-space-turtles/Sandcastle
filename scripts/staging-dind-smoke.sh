@@ -8,6 +8,7 @@ TEAMS="${SANDCASTLE_STAGING_TEAMS:-2}"
 TIMEOUT="${SANDCASTLE_STAGING_TIMEOUT:-240}"
 PHASE="initializing"
 PHASE_FILE="${SANDCASTLE_STAGING_PHASE_FILE:-}"
+DIND_ISOLATION_LOG_FILE="${SANDCASTLE_DIND_ISOLATION_LOG_FILE:-}"
 
 set_phase() {
     PHASE="$1"
@@ -88,7 +89,12 @@ echo "[*] [staging-smoke] Starting disposable DinD arena..."
 "${ROOT}/scripts/arena.sh" reset --timeout "${TIMEOUT}"
 set_phase "running DinD isolation test"
 echo "[*] [staging-smoke] Running DinD isolation test..."
-"${ROOT}/tests/dind_isolation_test.sh"
+if [[ -n "${DIND_ISOLATION_LOG_FILE}" ]]; then
+    mkdir -p "$(dirname "${DIND_ISOLATION_LOG_FILE}")"
+    "${ROOT}/tests/dind_isolation_test.sh" 2>&1 | tee "${DIND_ISOLATION_LOG_FILE}"
+else
+    "${ROOT}/tests/dind_isolation_test.sh"
+fi
 set_phase "running full integration test"
 echo "[*] [staging-smoke] Running full integration test..."
 "${ROOT}/tests/integration_test.sh"
