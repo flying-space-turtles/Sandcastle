@@ -6,6 +6,24 @@ set -euo pipefail
 ROOT="${SANDCASTLE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 TEAMS="${SANDCASTLE_STAGING_TEAMS:-2}"
 TIMEOUT="${SANDCASTLE_STAGING_TIMEOUT:-240}"
+PHASE="initializing"
+PHASE_FILE="${SANDCASTLE_STAGING_PHASE_FILE:-}"
+DIND_ISOLATION_LOG_FILE="${SANDCASTLE_DIND_ISOLATION_LOG_FILE:-}"
+INTEGRATION_LOG_FILE="${SANDCASTLE_INTEGRATION_LOG_FILE:-}"
+
+set_phase() {
+    PHASE="$1"
+    if [[ -n "${PHASE_FILE}" ]]; then
+        printf '%s\n' "${PHASE}" > "${PHASE_FILE}"
+    fi
+}
+
+report_failure_phase() {
+    local rc=$?
+    ((rc == 0)) && return
+    echo "[!] [staging-smoke] FAILED during: ${PHASE}" >&2
+}
+trap report_failure_phase EXIT
 
 usage() {
     cat <<'EOF'
@@ -58,9 +76,34 @@ while (($#)); do
     esac
 done
 
-"${ROOT}/scripts/firewall-preflight.sh" --check
-"${ROOT}/scripts/doctor.sh"
+set_phase "generating DinD topology"
+echo "[*] [staging-smoke] Generating DinD topology..."
 "${ROOT}/scripts/setup.sh" --teams "${TEAMS}" --dind --remove-orphan-containers
+set_phase "checking firewall preflight"
+echo "[*] [staging-smoke] Checking firewall preflight..."
+"${ROOT}/scripts/firewall-preflight.sh" --check
+set_phase "running doctor before startup"
+echo "[*] [staging-smoke] Running doctor before startup..."
+"${ROOT}/scripts/doctor.sh"
+set_phase "starting disposable DinD arena"
+echo "[*] [staging-smoke] Starting disposable DinD arena..."
 "${ROOT}/scripts/arena.sh" reset --timeout "${TIMEOUT}"
-"${ROOT}/tests/dind_isolation_test.sh"
-"${ROOT}/tests/integration_test.sh"
+set_phase "running DinD isolation test"
+echo "[*] [staging-smoke] Running DinD isolation test..."
+if [[ -n "${DIND_ISOLATION_LOG_FILE}" ]]; then
+    mkdir -p "$(dirname "${DIND_ISOLATION_LOG_FILE}")"
+    "${ROOT}/tests/dind_isolation_test.sh" 2>&1 | tee "${DIND_ISOLATION_LOG_FILE}"
+else
+    "${ROOT}/tests/dind_isolation_test.sh"
+fi
+set_phase "running full integration test"
+echo "[*] [staging-smoke] Running full integration test..."
+if [[ -n "${INTEGRATION_LOG_FILE}" ]]; then
+    mkdir -p "$(dirname "${INTEGRATION_LOG_FILE}")"
+    "${ROOT}/tests/integration_test.sh" 2>&1 | tee "${INTEGRATION_LOG_FILE}"
+else
+    "${ROOT}/tests/integration_test.sh"
+fi
+set_phase "starting final DinD staging arena"
+echo "[*] [staging-smoke] Starting final DinD staging arena..."
+"${ROOT}/scripts/arena.sh" reset --timeout "${TIMEOUT}"

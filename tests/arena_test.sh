@@ -111,7 +111,31 @@ case "${1:-}" in
         ;;
     exec)
         machine="${2:-}"
+        if [[ "$*" == *"docker inspect --format"* ]]; then
+            echo "running"
+            exit 0
+        fi
+        if [[ "$*" == *"docker compose up"* ]]; then
+            if [[ "${scenario}" == "dind-compose-fail" ]]; then
+                exit 1
+            fi
+            exit 0
+        fi
+        if [[ "$*" == *"docker compose ps"* ]]; then
+            echo "nested compose ps"
+            exit 0
+        fi
+        if [[ "$*" == *"docker compose logs"* ]]; then
+            echo "nested compose logs"
+            exit 0
+        fi
         if [[ "${scenario}" == "health-fail" && "${machine}" == "team2-vuln" ]]; then
+            exit 1
+        fi
+        if [[ "${scenario}" == "final-status-fail" && "${machine}" == "sandcastle-bot-controller" ]]; then
+            exit 1
+        fi
+        if [[ "${scenario}" == "visualizer-fail" && "${machine}" == "sandcastle-visualizer" ]]; then
             exit 1
         fi
         if [[ "${scenario}" == "firewall-runtime-fail" && "${machine}" == "sandcastle-firewall" ]]; then
@@ -198,10 +222,15 @@ up_line="$(
     exit 1
 }
 
+: > "${LOG_FILE}"
+final_status_output="$(run_arena final-status-fail up --teams 2 --timeout 2)"
+grep -Fq "Complete arena is healthy" <<< "${final_status_output}"
+
 status_output="$(run_arena healthy status --format tsv)"
 grep -Fq $'team1\tgateway\trunning\t-' <<< "${status_output}"
 grep -Fq $'team2\tapp\trunning\thealthy' <<< "${status_output}"
 grep -Fq -- $'-\tfirewall\trunning\t-' <<< "${status_output}"
+grep -Fq -- $'-\tvisualizer\trunning\thealthy' <<< "${status_output}"
 
 set +e
 missing_output="$(run_arena missing-app status --format tsv)"
@@ -212,6 +241,16 @@ set -e
     exit 1
 }
 grep -Fq $'team2\tapp\tabsent\tnot-running' <<< "${missing_output}"
+
+set +e
+visualizer_output="$(run_arena visualizer-fail status --format tsv)"
+visualizer_rc=$?
+set -e
+((visualizer_rc != 0)) || {
+    echo "Status should fail when the visualizer health check fails" >&2
+    exit 1
+}
+grep -Fq -- $'-\tvisualizer\trunning\tunhealthy' <<< "${visualizer_output}"
 
 : > "${LOG_FILE}"
 run_arena healthy down >/dev/null
@@ -292,5 +331,29 @@ set -e
     exit 1
 }
 grep -Fq "firewall network smoke test failed" <<< "${smoke_failure}"
+
+printf '\nARENA_ISOLATION_MODE=dind\n' >> "${FIXTURE}/config/arena.env"
+
+: > "${LOG_FILE}"
+ARENA_TEST_SMOKE_FAIL=1 run_arena healthy up --timeout 1 >/dev/null
+if grep -Fq "network-smoke" "${LOG_FILE}"; then
+    echo "DinD startup should skip the legacy firewall network smoke" >&2
+    exit 1
+fi
+
+: > "${LOG_FILE}"
+set +e
+dind_failure="$(
+    run_arena dind-compose-fail up --timeout 1 2>&1
+)"
+dind_rc=$?
+set -e
+((dind_rc != 0)) || {
+    echo "Startup should fail when nested DinD compose fails" >&2
+    exit 1
+}
+grep -Fq "nested DinD compose failed for team1" <<< "${dind_failure}"
+grep -Fq "nested compose ps" <<< "${dind_failure}"
+grep -Fq "nested compose logs" <<< "${dind_failure}"
 
 echo "arena lifecycle tests: ok"

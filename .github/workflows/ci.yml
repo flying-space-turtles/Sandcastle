@@ -5,6 +5,8 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    types: [opened, labeled, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -239,6 +241,10 @@ jobs:
             command: ./tests/setup_test.sh
           - layer: lifecycle
             command: ./tests/arena_test.sh
+          - layer: staging-dind-smoke
+            command: ./tests/staging_dind_smoke_test.sh
+          - layer: staging-deploy
+            command: ./tests/staging_deploy_test.sh
     steps:
       - uses: actions/checkout@v4
 
@@ -382,3 +388,47 @@ jobs:
           name: full-integration-logs
           path: sc005-logs/
           if-no-files-found: ignore
+
+  deploy-staging:
+    name: Deploy staging VPS
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'pull_request' &&
+      contains(github.event.pull_request.labels.*.name, 'deploy:staging') &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.draft == false
+    needs:
+      - python-quality
+      - shell-quality
+      - bot-tests
+      - firewall-tests
+      - checker-tests
+      - gameserver-tests
+      - infrastructure-tests
+      - compose-validation
+      - dockerfile-validation
+      - visualizer-build
+      - reduced-end-to-end
+    environment: staging
+    concurrency:
+      group: staging
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Deploy PR head to staging
+        run: ./scripts/staging-deploy.sh
+        env:
+          STAGING_SSH_HOST: ${{ secrets.STAGING_SSH_HOST }}
+          STAGING_SSH_USER: ${{ secrets.STAGING_SSH_USER }}
+          STAGING_SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+          STAGING_SSH_KNOWN_HOSTS: ${{ secrets.STAGING_SSH_KNOWN_HOSTS }}
+          STAGING_OPERATOR_TOKEN: ${{ secrets.STAGING_OPERATOR_TOKEN }}
+          STAGING_CHECKER_SECRET: ${{ secrets.STAGING_CHECKER_SECRET }}
+          STAGING_TEAM_TOKEN_PATTERN: ${{ secrets.STAGING_TEAM_TOKEN_PATTERN }}
+          STAGING_SSH_PORT: ${{ vars.STAGING_SSH_PORT || 22 }}
+          STAGING_DEPLOY_PATH: ${{ vars.STAGING_DEPLOY_PATH || '/opt/sandcastle-staging' }}
+          SANDCASTLE_STAGING_TEAMS: ${{ vars.SANDCASTLE_STAGING_TEAMS || 2 }}
+          SANDCASTLE_STAGING_TIMEOUT: ${{ vars.SANDCASTLE_STAGING_TIMEOUT || 240 }}

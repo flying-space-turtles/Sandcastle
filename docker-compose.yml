@@ -7,11 +7,13 @@ x-sandcastle-arena:
   team_count: 2
   service_port: 8080
   ssh_base_port: 2200
+  ssh_bind_host: 127.0.0.1
   startup_timeout_seconds: 120
   round_duration_seconds: 120
   flag_expiry_rounds: 5
   checker_max_concurrency: 8
   gameserver_port: 8000
+  visualizer_port: 4173
   submission_rate_limit: 60
   submission_rate_window_seconds: 60
   score_attack_points: 10
@@ -27,6 +29,8 @@ x-sandcastle-arena:
   team_app_cpu_limit: 0.50
   team_app_pids_limit: 100
   team_max_restarts: 5
+  visualizer_mem_limit: 128m
+  visualizer_cpu_limit: 0.25
   log_max_size: 50m
   log_max_files: 3
 
@@ -58,6 +62,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./teams/generated/team1/example-vuln:/home/team1/example-vuln
+      - ./services/example-vuln:/srv/example-vuln:ro
     cap_add:
       - NET_ADMIN
     labels:
@@ -95,7 +100,7 @@ services:
       ctf-network:
         ipv4_address: 10.10.1.2
     ports:
-      - "2201:22"
+      - "127.0.0.1:2201:22"
     cap_add:
       - NET_ADMIN
     labels:
@@ -133,6 +138,7 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./teams/generated/team2/example-vuln:/home/team2/example-vuln
+      - ./services/example-vuln:/srv/example-vuln:ro
     cap_add:
       - NET_ADMIN
     labels:
@@ -170,7 +176,7 @@ services:
       ctf-network:
         ipv4_address: 10.10.2.2
     ports:
-      - "2202:22"
+      - "127.0.0.1:2202:22"
     cap_add:
       - NET_ADMIN
     labels:
@@ -275,6 +281,29 @@ services:
         limits:
           memory: 256m
           cpus: '0.50'
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
+    restart: unless-stopped
+
+  visualizer:
+    build:
+      context: .
+      dockerfile: visualizer/Dockerfile
+    image: sandcastle/visualizer:latest
+    container_name: sandcastle-visualizer
+    hostname: sandcastle-visualizer
+    ports:
+      - "127.0.0.1:4173:80"
+    labels:
+      sandcastle.role: "visualizer"
+    deploy:
+      resources:
+        limits:
+          memory: 128m
+          cpus: '0.25'
     logging:
       driver: json-file
       options:

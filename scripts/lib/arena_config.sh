@@ -65,8 +65,9 @@ arena_config_validate_port_layout() {
         "${ARENA_FIREWALL_PROXY_PORT}"
         "${ARENA_BOT_API_PORT}"
         "${ARENA_GAMESERVER_PORT}"
+        "${ARENA_VISUALIZER_PORT}"
     )
-    local port
+    local port index other_index
 
     if ((ssh_last_port > 65535)); then
         arena_config_error \
@@ -81,15 +82,15 @@ arena_config_validate_port_layout() {
             return 1
         fi
     done
-    if [[ "${ARENA_FIREWALL_WS_PORT}" == "${ARENA_FIREWALL_PROXY_PORT}" ||
-          "${ARENA_FIREWALL_WS_PORT}" == "${ARENA_BOT_API_PORT}" ||
-          "${ARENA_FIREWALL_WS_PORT}" == "${ARENA_GAMESERVER_PORT}" ||
-          "${ARENA_FIREWALL_PROXY_PORT}" == "${ARENA_BOT_API_PORT}" ||
-          "${ARENA_FIREWALL_PROXY_PORT}" == "${ARENA_GAMESERVER_PORT}" ||
-          "${ARENA_BOT_API_PORT}" == "${ARENA_GAMESERVER_PORT}" ]]; then
-        arena_config_error "firewall, gameserver and bot API host ports must be distinct"
-        return 1
-    fi
+    for index in "${!host_ports[@]}"; do
+        for other_index in "${!host_ports[@]}"; do
+            ((other_index > index)) || continue
+            if [[ "${host_ports[${index}]}" == "${host_ports[${other_index}]}" ]]; then
+                arena_config_error "firewall, gameserver, bot API and visualizer host ports must be distinct"
+                return 1
+            fi
+        done
+    done
     if [[ "${ARENA_FIREWALL_PROBE_PORT}" == "${ARENA_SERVICE_PORT}" ||
           "${ARENA_FIREWALL_PROBE_PORT}" == "22" ]]; then
         arena_config_error \
@@ -167,6 +168,10 @@ arena_config_load() {
     ARENA_GAMESERVER_CPU_LIMIT="${ARENA_GAMESERVER_CPU_LIMIT:-1.00}"
     ARENA_BOT_MEM_LIMIT="${ARENA_BOT_MEM_LIMIT:-256m}"
     ARENA_BOT_CPU_LIMIT="${ARENA_BOT_CPU_LIMIT:-0.50}"
+    ARENA_VISUALIZER_BIND_HOST="${ARENA_VISUALIZER_BIND_HOST:-127.0.0.1}"
+    ARENA_VISUALIZER_PORT="${ARENA_VISUALIZER_PORT:-4173}"
+    ARENA_VISUALIZER_MEM_LIMIT="${ARENA_VISUALIZER_MEM_LIMIT:-128m}"
+    ARENA_VISUALIZER_CPU_LIMIT="${ARENA_VISUALIZER_CPU_LIMIT:-0.25}"
     ARENA_FIREWALL_MEM_LIMIT="${ARENA_FIREWALL_MEM_LIMIT:-128m}"
     ARENA_FIREWALL_CPU_LIMIT="${ARENA_FIREWALL_CPU_LIMIT:-0.50}"
     ARENA_LOG_MAX_SIZE="${ARENA_LOG_MAX_SIZE:-50m}"
@@ -183,6 +188,8 @@ arena_config_load() {
     ARENA_SCORE_SLA_POINTS="${ARENA_SCORE_SLA_POINTS:-1}"
     ARENA_CHECKER_SECRET="${ARENA_CHECKER_SECRET:-sandcastle-local-checker-secret-change-me}"
     ARENA_ISOLATION_MODE="${ARENA_ISOLATION_MODE:-trusted}"
+    ARENA_SSH_BIND_HOST="${ARENA_SSH_BIND_HOST:-127.0.0.1}"
+    ARENA_DIND_DNS_SERVERS="${ARENA_DIND_DNS_SERVERS:-1.1.1.1,8.8.8.8}"
 
     for name in "${required[@]}"; do
         if [[ -z "${!name:-}" ]]; then
@@ -202,6 +209,7 @@ arena_config_load() {
     arena_config_require_int ARENA_FIREWALL_CAPTURE_RCVBUF_BYTES 65536 268435456 || return 1
     arena_config_require_int ARENA_FIREWALL_RECENT_ICMP_LIMIT 1 1000000 || return 1
     arena_config_require_int ARENA_BOT_API_PORT 1 65535 || return 1
+    arena_config_require_int ARENA_VISUALIZER_PORT 1 65535 || return 1
     arena_config_require_int ARENA_BOT_LOOP_SECONDS 0 86400 || return 1
     arena_config_require_int ARENA_STARTUP_TIMEOUT_SECONDS 1 86400 || return 1
     arena_config_require_int ARENA_ROUND_DURATION_SECONDS 1 86400 || return 1
@@ -228,6 +236,8 @@ arena_config_load() {
     arena_config_require_cpu_limit ARENA_GAMESERVER_CPU_LIMIT || return 1
     arena_config_require_mem_limit ARENA_BOT_MEM_LIMIT || return 1
     arena_config_require_cpu_limit ARENA_BOT_CPU_LIMIT || return 1
+    arena_config_require_mem_limit ARENA_VISUALIZER_MEM_LIMIT || return 1
+    arena_config_require_cpu_limit ARENA_VISUALIZER_CPU_LIMIT || return 1
     arena_config_require_mem_limit ARENA_FIREWALL_MEM_LIMIT || return 1
     arena_config_require_cpu_limit ARENA_FIREWALL_CPU_LIMIT || return 1
     arena_config_require_mem_limit ARENA_LOG_MAX_SIZE || return 1
@@ -285,6 +295,19 @@ arena_config_load() {
         arena_config_error "ARENA_BOT_API_HOST contains unsupported characters"
         return 1
     fi
+    if [[ ! "${ARENA_SSH_BIND_HOST}" =~ ^[a-zA-Z0-9_.:-]+$ ]]; then
+        arena_config_error "ARENA_SSH_BIND_HOST contains unsupported characters"
+        return 1
+    fi
+    if [[ ! "${ARENA_VISUALIZER_BIND_HOST}" =~ ^[a-zA-Z0-9_.:-]+$ ]]; then
+        arena_config_error "ARENA_VISUALIZER_BIND_HOST contains unsupported characters"
+        return 1
+    fi
+    if [[ -n "${ARENA_DIND_DNS_SERVERS}" &&
+          ! "${ARENA_DIND_DNS_SERVERS}" =~ ^[a-zA-Z0-9_.:-]+(,[a-zA-Z0-9_.:-]+)*$ ]]; then
+        arena_config_error "ARENA_DIND_DNS_SERVERS must be a comma-separated list of DNS server addresses"
+        return 1
+    fi
 
     arena_config_validate_port_layout || return 1
 
@@ -307,6 +330,7 @@ arena_config_load() {
         ARENA_CTF_GATEWAY \
         ARENA_NETWORK_PREFIX \
         ARENA_SSH_BASE_PORT \
+        ARENA_SSH_BIND_HOST \
         ARENA_SERVICE_PORT \
         ARENA_SERVICE_IP_PATTERN \
         ARENA_TEAM_USERNAME_PATTERN \
@@ -324,6 +348,8 @@ arena_config_load() {
         ARENA_BOT_API_HOST \
         ARENA_BOT_API_PORT \
         ARENA_BOT_LOOP_SECONDS \
+        ARENA_VISUALIZER_BIND_HOST \
+        ARENA_VISUALIZER_PORT \
         ARENA_STARTUP_TIMEOUT_SECONDS \
         ARENA_ROUND_DURATION_SECONDS \
         ARENA_FLAG_EXPIRY_ROUNDS \
@@ -337,6 +363,7 @@ arena_config_load() {
         ARENA_SCORE_SLA_POINTS \
         ARENA_CHECKER_SECRET \
         ARENA_ISOLATION_MODE \
+        ARENA_DIND_DNS_SERVERS \
         ARENA_TEAM_VULN_MEM_LIMIT \
         ARENA_TEAM_VULN_CPU_LIMIT \
         ARENA_TEAM_VULN_PIDS_LIMIT \
@@ -351,6 +378,8 @@ arena_config_load() {
         ARENA_GAMESERVER_CPU_LIMIT \
         ARENA_BOT_MEM_LIMIT \
         ARENA_BOT_CPU_LIMIT \
+        ARENA_VISUALIZER_MEM_LIMIT \
+        ARENA_VISUALIZER_CPU_LIMIT \
         ARENA_FIREWALL_MEM_LIMIT \
         ARENA_FIREWALL_CPU_LIMIT \
         ARENA_LOG_MAX_SIZE \
@@ -378,6 +407,58 @@ arena_config_copy_file_mode() {
         return
     fi
     chmod 0644 "${target}"
+}
+
+arena_config_validate_simple_value() {
+    local name="$1"
+    local value="$2"
+
+    if [[ -z "${value}" ]]; then
+        arena_config_error "${name} must not be empty"
+        return 1
+    fi
+    if [[ "${value}" == *$'\n'* || "${value}" == *$'\r'* ]]; then
+        arena_config_error "${name} must be a single-line value"
+        return 1
+    fi
+    if [[ ! "${value}" =~ ^[a-zA-Z0-9_.{}:@%+=,/-]+$ ]]; then
+        arena_config_error "${name} contains unsupported characters for arena.env"
+        return 1
+    fi
+}
+
+arena_config_set_key() {
+    local config_file="$1"
+    local key="$2"
+    local value="$3"
+    local temp_file
+
+    [[ "${key}" =~ ^[A-Z][A-Z0-9_]*$ ]] || {
+        arena_config_error "invalid arena config key: ${key}"
+        return 1
+    }
+    arena_config_validate_simple_value "${key}" "${value}" || return 1
+
+    temp_file="$(mktemp "${config_file}.tmp.XXXXXX")" || return 1
+    awk -v key="${key}" -v value="${value}" '
+        BEGIN { updated = 0 }
+        $0 ~ "^" key "=" {
+            print key "=" value
+            updated = 1
+            next
+        }
+        { print }
+        END {
+            if (!updated) {
+                print key "=" value
+            }
+        }
+    ' "${config_file}" > "${temp_file}" || {
+        rm -f "${temp_file}"
+        return 1
+    }
+    arena_config_copy_file_mode "${config_file}" "${temp_file}"
+    mv "${temp_file}" "${config_file}"
 }
 
 arena_config_set_team_count() {
