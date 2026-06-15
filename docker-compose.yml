@@ -37,7 +37,7 @@ x-sandcastle-arena:
   agent_model: gpt-5.4-mini
   agent_max_calls_per_round: 2
   agent_max_calls_per_match: 30
-  agent_max_cost_usd_per_match: 5.00
+  agent_max_cost_usd_per_match: 0.50
 
 networks:
   ctf-network:
