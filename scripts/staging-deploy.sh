@@ -18,6 +18,8 @@ STAGING_TEAM_TOKEN_PATTERN="${STAGING_TEAM_TOKEN_PATTERN:-}"
 STAGING_DEPLOY_PATH="${STAGING_DEPLOY_PATH:-/opt/sandcastle-staging}"
 SANDCASTLE_STAGING_TEAMS="${SANDCASTLE_STAGING_TEAMS:-2}"
 SANDCASTLE_STAGING_TIMEOUT="${SANDCASTLE_STAGING_TIMEOUT:-240}"
+OPENAI_API_KEY="${OPENAI_API_KEY:-}"
+GEMINI_API_KEY="${GEMINI_API_KEY:-}"
 
 usage() {
     cat <<'EOF'
@@ -40,6 +42,8 @@ Optional environment:
   STAGING_DEPLOY_PATH         Default: /opt/sandcastle-staging
   SANDCASTLE_STAGING_TEAMS    Default: 2
   SANDCASTLE_STAGING_TIMEOUT  Default: 240
+  OPENAI_API_KEY              Enables OpenAI-backed agents/challenges
+  GEMINI_API_KEY              Enables Gemini-backed agents/challenges
 EOF
 }
 
@@ -291,6 +295,8 @@ local_deploy() {
         printf 'STAGING_DEPLOY_PATH=%s\n' "$(shell_quote "${STAGING_DEPLOY_PATH}")"
         printf 'SANDCASTLE_STAGING_TEAMS=%s\n' "$(shell_quote "${SANDCASTLE_STAGING_TEAMS}")"
         printf 'SANDCASTLE_STAGING_TIMEOUT=%s\n' "$(shell_quote "${SANDCASTLE_STAGING_TIMEOUT}")"
+        printf 'OPENAI_API_KEY=%s\n' "$(shell_quote "${OPENAI_API_KEY}")"
+        printf 'GEMINI_API_KEY=%s\n' "$(shell_quote "${GEMINI_API_KEY}")"
     } | ssh \
         -i "${key_file}" \
         -p "${STAGING_SSH_PORT}" \

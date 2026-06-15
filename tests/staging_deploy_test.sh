@@ -93,6 +93,8 @@ assert_file_contains "${workflow}" "types: [opened, labeled, synchronize, reopen
 assert_file_contains "${workflow}" "contains(github.event.pull_request.labels.*.name, 'deploy:staging')"
 assert_file_contains "${workflow}" "github.event.pull_request.head.repo.full_name == github.repository"
 assert_file_contains "${workflow}" "ref: \${{ github.event.pull_request.head.sha }}"
+assert_file_contains "${workflow}" "OPENAI_API_KEY: \${{ secrets.OPENAI_API_KEY }}"
+assert_file_contains "${workflow}" "GEMINI_API_KEY: \${{ secrets.GEMINI_API_KEY }}"
 
 : > "${LOG_FILE}"
 PATH="${MOCK_BIN}:${PATH}" \
@@ -105,6 +107,8 @@ PATH="${MOCK_BIN}:${PATH}" \
     STAGING_OPERATOR_TOKEN="operator-token-1234567890abcdef" \
     STAGING_CHECKER_SECRET="checker-secret-1234567890" \
     STAGING_TEAM_TOKEN_PATTERN="team-{team}-token-1234567890abcdef" \
+    OPENAI_API_KEY="sk-test-openai-key-1234567890" \
+    GEMINI_API_KEY="gemini-test-key-1234567890" \
     STAGING_DEPLOY_PATH="/srv/sandcastle-staging" \
     SANDCASTLE_STAGING_TEAMS="3" \
     SANDCASTLE_STAGING_TIMEOUT="321" \
@@ -119,7 +123,11 @@ assert_file_contains "${LOG_FILE}" "deploy@staging.example.test:/srv/sandcastle-
 assert_file_contains "${LOG_FILE}" "STAGING_DEPLOY_READ_STDIN=1 ./scripts/staging-deploy.sh --remote-run"
 assert_file_contains "${PAYLOAD_FILE}" "SANDCASTLE_STAGING_TEAMS='3'"
 assert_file_contains "${PAYLOAD_FILE}" "SANDCASTLE_STAGING_TIMEOUT='321'"
+assert_file_contains "${PAYLOAD_FILE}" "OPENAI_API_KEY='sk-test-openai-key-1234567890'"
+assert_file_contains "${PAYLOAD_FILE}" "GEMINI_API_KEY='gemini-test-key-1234567890'"
 assert_file_not_contains "${LOG_FILE}" "operator-token-1234567890abcdef"
+assert_file_not_contains "${LOG_FILE}" "sk-test-openai-key-1234567890"
+assert_file_not_contains "${LOG_FILE}" "gemini-test-key-1234567890"
 
 config_fixture="${TMP_ROOT}/config-fixture"
 mkdir -p "${config_fixture}/config" "${config_fixture}/scripts/lib" "${config_fixture}/scripts" "${config_fixture}/services/example-vuln"
