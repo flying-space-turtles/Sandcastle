@@ -507,6 +507,10 @@ networks:
           gateway: ${ARENA_CTF_GATEWAY}
   control-plane:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+          gateway: 172.30.0.1
 EOF
 
     cat >> "${COMPOSE_FILE}" <<EOF
@@ -808,7 +812,7 @@ EOF
     networks:
       - control-plane
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - "host.docker.internal:172.30.0.1"
     ports:
       - "${ARENA_VISUALIZER_BIND_HOST}:${ARENA_VISUALIZER_PORT}:80"
     labels:
