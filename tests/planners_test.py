@@ -88,10 +88,13 @@ class PlannerTest(unittest.TestCase):
 
     def test_model_planner_is_cached_per_process(self) -> None:
         sentinel = object()
-        with patch.object(planners, "_MODEL_PLANNER", None), patch(
-            "bot_lib.model_planner.make_model_planner",
-            return_value=sentinel,
-        ) as make:
+        with (
+            patch.object(planners, "_MODEL_PLANNER", None),
+            patch(
+                "bot_lib.model_planner.make_model_planner",
+                return_value=sentinel,
+            ) as make,
+        ):
             self.assertIs(load_planner("model"), sentinel)
             self.assertIs(load_planner("model"), sentinel)
         self.assertEqual(make.call_count, 1)

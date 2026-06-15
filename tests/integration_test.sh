@@ -501,6 +501,7 @@ run_docker_tests() {
     log_info "[docker] 3/7  SSH gateway reachability"
     for team in 1 2; do
         ssh_port="$((ARENA_SSH_BASE_PORT + team))"
+        # shellcheck disable=SC2016
         timeout 10 bash -c '
             host="$1"
             port="$2"

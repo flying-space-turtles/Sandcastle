@@ -116,12 +116,14 @@ class ChallengeRegistry:
             rm = entry / "registry_manifest.json"
             if rm.exists():
                 data = json.loads(rm.read_text())
-                results.append({
-                    "challenge_id": data.get("challenge_id", entry.name),
-                    "published_at": data.get("published_at", ""),
-                    "vulnerability": data.get("vulnerability", ""),
-                    "difficulty": data.get("difficulty", ""),
-                })
+                results.append(
+                    {
+                        "challenge_id": data.get("challenge_id", entry.name),
+                        "published_at": data.get("published_at", ""),
+                        "vulnerability": data.get("vulnerability", ""),
+                        "difficulty": data.get("difficulty", ""),
+                    }
+                )
         return results
 
     # ------------------------------------------------------------------
@@ -162,6 +164,10 @@ class ChallengeRegistry:
     def _dir_digest(directory: Path) -> str:
         h = hashlib.sha256()
         for path in sorted(directory.rglob("*")):
-            if path.is_file() and path.name not in ("manifest.json", "registry_manifest.json", "validation_report.json"):
+            if path.is_file() and path.name not in (
+                "manifest.json",
+                "registry_manifest.json",
+                "validation_report.json",
+            ):
                 h.update(path.read_bytes())
         return h.hexdigest()

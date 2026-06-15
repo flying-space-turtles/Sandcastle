@@ -340,6 +340,11 @@ if grep -Fq "network-smoke" "${LOG_FILE}"; then
     echo "DinD startup should skip the legacy firewall network smoke" >&2
     exit 1
 fi
+assert_log "docker exec team1-vuln curl -fsS --max-time 2 http://127.0.0.1:8080/health"
+if grep -Fq "docker exec team1-vuln docker exec team1-vuln-app curl" "${LOG_FILE}"; then
+    echo "DinD health checks should not require curl inside the app container" >&2
+    exit 1
+fi
 
 : > "${LOG_FILE}"
 set +e

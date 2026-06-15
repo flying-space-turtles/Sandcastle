@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests for AI-011: ChallengeGeneratorAgent iterative tool loop."""
+
 from __future__ import annotations
 import sys
 import tempfile
@@ -60,9 +61,13 @@ class AgentToolTests(unittest.TestCase):
 
     def test_create_spec_succeeds(self):
         state = self._start()
-        result = self.agent.execute_tool(state, _call("challenge.spec.create", {
-            "seed": 10, "vulnerability": "path_traversal", "difficulty": "easy"
-        }))
+        result = self.agent.execute_tool(
+            state,
+            _call(
+                "challenge.spec.create",
+                {"seed": 10, "vulnerability": "path_traversal", "difficulty": "easy"},
+            ),
+        )
         self.assertEqual(result.status, "ok")
         self.assertIsNotNone(state.current_spec)
 
@@ -78,9 +83,13 @@ class AgentToolTests(unittest.TestCase):
 
     def test_validate_without_render_raises(self):
         state = self._start()
-        self.agent.execute_tool(state, _call("challenge.spec.create", {
-            "seed": 11, "vulnerability": "sql_injection", "difficulty": "easy"
-        }))
+        self.agent.execute_tool(
+            state,
+            _call(
+                "challenge.spec.create",
+                {"seed": 11, "vulnerability": "sql_injection", "difficulty": "easy"},
+            ),
+        )
         with self.assertRaises(ToolRejectedError):
             self.agent.execute_tool(state, _call("challenge.validate"))
 
@@ -91,9 +100,13 @@ class AgentToolTests(unittest.TestCase):
 
     def test_tool_results_stored_in_memory(self):
         state = self._start()
-        self.agent.execute_tool(state, _call("challenge.spec.create", {
-            "seed": 12, "vulnerability": "command_injection", "difficulty": "easy"
-        }))
+        self.agent.execute_tool(
+            state,
+            _call(
+                "challenge.spec.create",
+                {"seed": 12, "vulnerability": "command_injection", "difficulty": "easy"},
+            ),
+        )
         entries = self.memory.recent(state.run_id)
         tool_entries = [e for e in entries if e.kind == "tool_result"]
         self.assertGreaterEqual(len(tool_entries), 1)
@@ -101,9 +114,13 @@ class AgentToolTests(unittest.TestCase):
 
     def test_tool_history_grows_with_calls(self):
         state = self._start()
-        self.agent.execute_tool(state, _call("challenge.spec.create", {
-            "seed": 13, "vulnerability": "path_traversal", "difficulty": "easy"
-        }))
+        self.agent.execute_tool(
+            state,
+            _call(
+                "challenge.spec.create",
+                {"seed": 13, "vulnerability": "path_traversal", "difficulty": "easy"},
+            ),
+        )
         self.agent.execute_tool(state, _call("challenge.render"))
         self.assertEqual(len(state.tool_history), 2)
 
@@ -112,9 +129,13 @@ class AgentToolTests(unittest.TestCase):
         state = self._start()
 
         # Create spec
-        r = self.agent.execute_tool(state, _call("challenge.spec.create", {
-            "seed": 20, "vulnerability": "path_traversal", "difficulty": "easy"
-        }))
+        r = self.agent.execute_tool(
+            state,
+            _call(
+                "challenge.spec.create",
+                {"seed": 20, "vulnerability": "path_traversal", "difficulty": "easy"},
+            ),
+        )
         self.assertEqual(r.status, "ok")
 
         # Render
@@ -145,9 +166,13 @@ class AgentToolTests(unittest.TestCase):
 
     def test_discard_clears_render(self):
         state = self._start()
-        self.agent.execute_tool(state, _call("challenge.spec.create", {
-            "seed": 21, "vulnerability": "sql_injection", "difficulty": "easy"
-        }))
+        self.agent.execute_tool(
+            state,
+            _call(
+                "challenge.spec.create",
+                {"seed": 21, "vulnerability": "sql_injection", "difficulty": "easy"},
+            ),
+        )
         self.agent.execute_tool(state, _call("challenge.render"))
         self.assertIsNotNone(state.last_render_id)
         self.agent.execute_tool(state, _call("challenge.discard"))
@@ -155,6 +180,7 @@ class AgentToolTests(unittest.TestCase):
 
     def test_observation_is_bounded(self):
         import json
+
         state = self._start()
         obs = self.agent.build_observation(state)
         self.assertLessEqual(len(json.dumps(obs)), 10000)
@@ -167,9 +193,13 @@ class AgentToolTests(unittest.TestCase):
 
     def test_revise_changes_spec(self):
         state = self._start()
-        self.agent.execute_tool(state, _call("challenge.spec.create", {
-            "seed": 30, "vulnerability": "path_traversal", "difficulty": "easy"
-        }))
+        self.agent.execute_tool(
+            state,
+            _call(
+                "challenge.spec.create",
+                {"seed": 30, "vulnerability": "path_traversal", "difficulty": "easy"},
+            ),
+        )
         original_seed = state.current_spec["seed"]
         self.agent.execute_tool(state, _call("challenge.spec.revise", {"seed": 99}))
         self.assertEqual(state.current_spec["seed"], 99)
@@ -177,14 +207,19 @@ class AgentToolTests(unittest.TestCase):
 
     def test_allowed_tools_match_schema(self):
         from challenge.agent import TOOL_SCHEMAS
+
         schema_ids = {s["id"] for s in TOOL_SCHEMAS}
         self.assertEqual(schema_ids, ALLOWED_TOOL_IDS)
 
     def test_memory_entries_do_not_contain_api_keys(self):
         state = self._start()
-        self.agent.execute_tool(state, _call("challenge.spec.create", {
-            "seed": 40, "vulnerability": "path_traversal", "difficulty": "easy"
-        }))
+        self.agent.execute_tool(
+            state,
+            _call(
+                "challenge.spec.create",
+                {"seed": 40, "vulnerability": "path_traversal", "difficulty": "easy"},
+            ),
+        )
         entries = self.memory.recent(state.run_id)
         for entry in entries:
             for secret in ("OPENAI_API_KEY", "GEMINI_API_KEY", "sk-", "AIza"):

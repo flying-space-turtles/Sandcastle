@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Tests for AI-009: validator and AI-010: registry."""
+
 from __future__ import annotations
 import json
 import sys
@@ -104,9 +105,17 @@ class ValidatorFixtureTests(unittest.TestCase):
         validator = ChallengeValidator(docker=False)
         report = validator.validate(c.staging_dir, c.render_id, "d")
         d = report.as_dict()
-        for key in ("render_id", "status", "steps", "vulnerable_exploit_succeeded",
-                    "patched_exploit_failed", "checker_passed_before_patch",
-                    "checker_passed_after_patch", "artifact_digest", "created_at"):
+        for key in (
+            "render_id",
+            "status",
+            "steps",
+            "vulnerable_exploit_succeeded",
+            "patched_exploit_failed",
+            "checker_passed_before_patch",
+            "checker_passed_after_patch",
+            "artifact_digest",
+            "created_at",
+        ):
             self.assertIn(key, d, f"missing key: {key}")
 
     def test_fixture_sets_flags_true(self):
@@ -121,6 +130,7 @@ class ValidatorFixtureTests(unittest.TestCase):
 
     def test_missing_manifest_fails_validation(self):
         import os
+
         spec = ChallengeSpec(seed=14, vulnerability="path_traversal")
         c = render(spec, staging_root=self.staging)
         os.remove(c.staging_dir / "manifest.json")

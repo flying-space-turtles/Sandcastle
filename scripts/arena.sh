@@ -264,11 +264,10 @@ app_is_healthy() {
 
     if [[ "${ARENA_ISOLATION_MODE}" == "dind" ]]; then
         # In DinD mode the app runs inside the nested Docker daemon.
-        # network_mode: container:teamN-vuln refers to the *inner* teamN-vuln
-        # container, so the app is reachable on 127.0.0.1 only from within
-        # that inner network namespace — reached via a nested docker exec.
+        # The parent vulnerable machine forwards its service port to the
+        # nested daemon's published app port, which is the same path teams,
+        # checkers, and other arena components use.
         docker exec "${machine}" \
-            docker exec "${app}" \
             curl -fsS --max-time 2 "http://127.0.0.1:${ARENA_SERVICE_PORT}/health" \
             > /dev/null 2>&1
     else

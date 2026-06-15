@@ -172,7 +172,7 @@ container_state_set() {
 
     for index in "${!CONTAINER_STATE_KEYS[@]}"; do
         if [[ "${CONTAINER_STATE_KEYS[${index}]}" == "${key}" ]]; then
-            CONTAINER_STATE_VALUES[${index}]="${value}"
+            CONTAINER_STATE_VALUES[index]="${value}"
             return
         fi
     done
@@ -205,7 +205,7 @@ required_port_owner_set() {
 
     for index in "${!REQUIRED_PORT_OWNER_KEYS[@]}"; do
         if [[ "${REQUIRED_PORT_OWNER_KEYS[${index}]}" == "${key}" ]]; then
-            REQUIRED_PORT_OWNER_VALUES[${index}]="${value}"
+            REQUIRED_PORT_OWNER_VALUES[index]="${value}"
             return
         fi
     done
