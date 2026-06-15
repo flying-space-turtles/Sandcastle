@@ -83,6 +83,7 @@ doctor
 arena reset --timeout 321
 dind-isolation
 integration
+arena reset --timeout 321
 EOF
 )"
 actual="$(cat "${LOG_FILE}")"
@@ -98,7 +99,7 @@ if [[ "${actual}" != "${expected}" ]]; then
     echo "${actual}" >&2
     exit 1
 fi
-if [[ "${phase}" != "running full integration test" ]]; then
+if [[ "${phase}" != "starting final DinD staging arena" ]]; then
     echo "Unexpected final smoke phase: ${phase}" >&2
     exit 1
 fi
@@ -117,7 +118,8 @@ for marker in \
     "[*] [staging-smoke] Running doctor before startup..." \
     "[*] [staging-smoke] Starting disposable DinD arena..." \
     "[*] [staging-smoke] Running DinD isolation test..." \
-    "[*] [staging-smoke] Running full integration test..."
+    "[*] [staging-smoke] Running full integration test..." \
+    "[*] [staging-smoke] Starting final DinD staging arena..."
 do
     if ! grep -Fq "${marker}" <<< "${smoke_output}"; then
         echo "Missing smoke marker: ${marker}" >&2

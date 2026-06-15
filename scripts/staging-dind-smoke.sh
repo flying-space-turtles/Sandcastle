@@ -104,3 +104,6 @@ if [[ -n "${INTEGRATION_LOG_FILE}" ]]; then
 else
     "${ROOT}/tests/integration_test.sh"
 fi
+set_phase "starting final DinD staging arena"
+echo "[*] [staging-smoke] Starting final DinD staging arena..."
+"${ROOT}/scripts/arena.sh" reset --timeout "${TIMEOUT}"
