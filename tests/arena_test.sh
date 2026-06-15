@@ -129,6 +129,9 @@ case "${1:-}" in
             echo "nested compose logs"
             exit 0
         fi
+        if [[ "${scenario}" == "dind-forward-fail" && "$*" == *"curl -fsS --max-time 2 http://127.0.0.1:8080/health"* ]]; then
+            exit 1
+        fi
         if [[ "${scenario}" == "health-fail" && "${machine}" == "team2-vuln" ]]; then
             exit 1
         fi
@@ -340,9 +343,21 @@ if grep -Fq "network-smoke" "${LOG_FILE}"; then
     echo "DinD startup should skip the legacy firewall network smoke" >&2
     exit 1
 fi
-assert_log "docker exec team1-vuln curl -fsS --max-time 2 http://127.0.0.1:8080/health"
+assert_log "docker exec team1-vuln docker exec team1-vuln-app python3 -c"
+if grep -Fq "docker exec team1-vuln curl -fsS --max-time 2 http://127.0.0.1:8080/health" "${LOG_FILE}"; then
+    echo "DinD app readiness should not depend on the team machine TCP forwarder" >&2
+    exit 1
+fi
 if grep -Fq "docker exec team1-vuln docker exec team1-vuln-app curl" "${LOG_FILE}"; then
     echo "DinD health checks should not require curl inside the app container" >&2
+    exit 1
+fi
+
+: > "${LOG_FILE}"
+ARENA_TEST_SMOKE_FAIL=1 run_arena dind-forward-fail up --timeout 1 >/dev/null
+assert_log "docker exec team1-vuln docker exec team1-vuln-app python3 -c"
+if grep -Fq "app health timeout" "${LOG_FILE}"; then
+    echo "DinD startup should not fail when the parent forwarder is not ready" >&2
     exit 1
 fi
 

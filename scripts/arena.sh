@@ -264,11 +264,11 @@ app_is_healthy() {
 
     if [[ "${ARENA_ISOLATION_MODE}" == "dind" ]]; then
         # In DinD mode the app runs inside the nested Docker daemon.
-        # The parent vulnerable machine forwards its service port to the
-        # nested daemon's published app port, which is the same path teams,
-        # checkers, and other arena components use.
+        # Probe the app container directly so arena startup does not depend on
+        # the team machine's TCP forwarder being ready before the app is.
         docker exec "${machine}" \
-            curl -fsS --max-time 2 "http://127.0.0.1:${ARENA_SERVICE_PORT}/health" \
+            docker exec "${app}" \
+            python3 -c "import json, sys, urllib.request; data = json.load(urllib.request.urlopen('http://127.0.0.1:${ARENA_SERVICE_PORT}/health', timeout=2)); sys.exit(0 if data.get('status') == 'ok' else 1)" \
             > /dev/null 2>&1
     else
         docker exec "${machine}" \

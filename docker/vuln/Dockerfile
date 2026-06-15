@@ -127,9 +127,14 @@ fi
 if [[ "${ARENA_ISOLATION_MODE:-}" == "dind" ]]; then
     service_port="${ARENA_SERVICE_PORT:-8080}"
     dind_target="${SANDCASTLE_DIND_TARGET:-team${TEAM_ID}-dind}"
-    socat \
-        "TCP-LISTEN:${service_port},fork,reuseaddr,bind=0.0.0.0" \
-        "TCP:${dind_target}:${service_port}" &
+    (
+        while true; do
+            socat \
+                "TCP-LISTEN:${service_port},fork,reuseaddr,bind=0.0.0.0" \
+                "TCP:${dind_target}:${service_port}" || true
+            sleep 1
+        done
+    ) &
 fi
 
 python3 /usr/local/bin/sandcastle-service-control &
