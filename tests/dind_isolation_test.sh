@@ -10,11 +10,16 @@ source "${ROOT}/scripts/lib/arena_config.sh"
 
 PASS=0
 FAIL=0
+FAILED_CHECKS=()
 HEALTH_TIMEOUT="${ARENA_DIND_ISOLATION_HEALTH_TIMEOUT_SECONDS:-30}"
 HEALTH_POLL_SECONDS="${ARENA_DIND_ISOLATION_POLL_SECONDS:-1}"
 
 pass() { printf '[PASS] %s\n' "$1"; ((PASS++)) || true; }
-fail() { printf '[FAIL] %s\n' "$1"; ((FAIL++)) || true; }
+fail() {
+    printf '[FAIL] %s\n' "$1"
+    FAILED_CHECKS+=("$1")
+    ((FAIL++)) || true
+}
 
 container_state() {
     docker inspect --format '{{.State.Status}}' "$1" 2>/dev/null || true
@@ -67,6 +72,7 @@ expect_running() {
 service_diagnostics() {
     local source_container="$1"
     local target="$2"
+    local target_container="${3:-${source_container}}"
 
     {
         echo "--- DinD service reachability diagnostics ---"
@@ -78,9 +84,14 @@ service_diagnostics() {
         echo "--- ${source_container}: curl target ---"
         docker exec "${source_container}" curl -v --max-time 5 \
             "http://${target}:${ARENA_SERVICE_PORT}/health" || true
-        echo "--- team2-vuln: listeners ---"
-        docker exec team2-vuln sh -lc \
+        echo "--- ${source_container}: listeners ---"
+        docker exec "${source_container}" sh -lc \
             "ss -lntp || true"
+        if [[ "${target_container}" != "${source_container}" ]]; then
+            echo "--- ${target_container}: listeners ---"
+            docker exec "${target_container}" sh -lc \
+                "ss -lntp || true"
+        fi
         echo "--- sandcastle-firewall logs ---"
         docker logs --tail=120 sandcastle-firewall || true
     } >&2
@@ -89,6 +100,7 @@ service_diagnostics() {
 wait_for_service_health() {
     local source_container="$1"
     local target="$2"
+    local target_container="${3:-${source_container}}"
     local attempts=$((HEALTH_TIMEOUT / HEALTH_POLL_SECONDS + 1))
     local attempt
 
@@ -100,7 +112,7 @@ wait_for_service_health() {
         ((attempt < attempts)) && sleep "${HEALTH_POLL_SECONDS}"
     done
 
-    service_diagnostics "${source_container}" "${target}"
+    service_diagnostics "${source_container}" "${target}" "${target_container}"
     return 1
 }
 
@@ -177,7 +189,7 @@ fi
 
 for team in 1 2; do
     target="http://127.0.0.1:${ARENA_SERVICE_PORT}/health"
-    if wait_for_service_health "team${team}-vuln" "127.0.0.1"; then
+    if wait_for_service_health "team${team}-vuln" "127.0.0.1" "team${team}-vuln"; then
         pass "team${team} service is reachable from its own vulnerable machine at ${target}"
     else
         fail "team${team} service is not reachable from its own vulnerable machine at ${target}"
@@ -185,7 +197,7 @@ for team in 1 2; do
 done
 
 target="http://${ARENA_NETWORK_PREFIX}.2.3:${ARENA_SERVICE_PORT}/health"
-if wait_for_service_health team1-vuln "${ARENA_NETWORK_PREFIX}.2.3"; then
+if wait_for_service_health team1-vuln "${ARENA_NETWORK_PREFIX}.2.3" team2-vuln; then
     pass "team1 can reach team2 service through the CTF network at ${target}"
 else
     fail "team1 cannot reach team2 service through the CTF network at ${target}"
@@ -204,5 +216,7 @@ echo "=== Results: ${PASS} passed, ${FAIL} failed ==="
 echo ""
 
 if ((FAIL > 0)); then
+    echo "Failed checks:" >&2
+    printf '  - %s\n' "${FAILED_CHECKS[@]}" >&2
     exit 1
 fi

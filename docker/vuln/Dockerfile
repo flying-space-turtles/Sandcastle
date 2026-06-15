@@ -26,6 +26,7 @@ RUN apt-get update \
         nano \
         net-tools \
         iproute2 \
+        procps \
         iputils-ping \
         dnsutils \
         nmap \

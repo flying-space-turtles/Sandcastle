@@ -284,6 +284,53 @@ app_is_healthy() {
     fi
 }
 
+dind_forwarder_is_healthy() {
+    local team_id="$1"
+    local machine="team${team_id}-vuln"
+
+    [[ "${ARENA_ISOLATION_MODE}" == "dind" ]] || return 0
+    [[ "$(container_state "${machine}")" == "running" ]] || return 1
+
+    docker exec "${machine}" \
+        curl -fsS --max-time 2 "http://127.0.0.1:${ARENA_SERVICE_PORT}/health" \
+        > /dev/null 2>&1
+}
+
+refresh_dind_forwarders() {
+    local id
+
+    [[ "${ARENA_ISOLATION_MODE}" == "dind" ]] || return 0
+    echo "[*] Refreshing DinD service forwarders..."
+    for ((id = 1; id <= ARENA_TEAM_COUNT; id++)); do
+        docker exec "team${id}-vuln" sh -lc \
+            "pkill -f 'socat.*TCP-LISTEN:${ARENA_SERVICE_PORT}.*team${id}-dind:${ARENA_SERVICE_PORT}' >/dev/null 2>&1 || true"
+    done
+}
+
+wait_for_dind_forwarders() {
+    local timeout="$1"
+    local attempts=$((timeout / HEALTH_POLL_SECONDS + 1))
+    local attempt id
+    local -a pending=()
+
+    [[ "${ARENA_ISOLATION_MODE}" == "dind" ]] || return 0
+
+    for ((attempt = 1; attempt <= attempts; attempt++)); do
+        pending=()
+        for ((id = 1; id <= ARENA_TEAM_COUNT; id++)); do
+            if ! dind_forwarder_is_healthy "${id}"; then
+                pending+=("team${id}-vuln-forwarder")
+            fi
+        done
+
+        ((${#pending[@]} == 0)) && return 0
+        ((attempt < attempts)) && sleep "${HEALTH_POLL_SECONDS}"
+    done
+
+    echo "arena.sh: DinD service forwarder timeout after ${timeout}s: ${pending[*]}" >&2
+    return 1
+}
+
 run_setup() {
     local -a args=(--remove-orphan-containers)
 
@@ -641,6 +688,12 @@ up_arena() {
             done
         fi
         die "one or more vulnerable apps failed health checks"
+    }
+    refresh_dind_forwarders
+    wait_for_dind_forwarders "${timeout}" || {
+        STATUS_FORMAT="text"
+        print_status || true
+        die "one or more DinD service forwarders failed health checks"
     }
     verify_network_path
 
