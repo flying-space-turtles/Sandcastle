@@ -19,7 +19,7 @@ import {
   X,
   XCircle,
 } from 'lucide-react';
-import { botApiUrl } from '../data/arenaConfig';
+import { botApiRequest } from '../data/operatorApi';
 import type { BotActionOption, BotConfig, BotPlannerOption } from '../types';
 import { DEFAULT_BOT_CONFIG } from '../types';
 
@@ -87,7 +87,7 @@ const FALLBACK_CATALOG: BotCatalog = {
 };
 
 async function apiFetch<T>(path: string, options?: RequestInit): Promise<T> {
-  const response = await fetch(`${botApiUrl}${path}`, options);
+  const response = await botApiRequest(path, options);
   const body = await response.json().catch(() => ({})) as T & { error?: string; output?: string };
   if (!response.ok) {
     const detail = body.error || body.output || `HTTP ${response.status}`;

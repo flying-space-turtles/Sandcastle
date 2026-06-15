@@ -3,7 +3,7 @@ import {
   Activity, Brain, CheckCircle2, FileCode2, FlaskConical,
   ListTree, Plus, RefreshCw, Rocket, ScrollText, ShieldCheck, Swords, Target, X,
 } from 'lucide-react';
-import { botApiUrl } from '../data/arenaConfig';
+import { botApiRequest } from '../data/operatorApi';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -98,7 +98,7 @@ interface ActivityEntry {
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 async function api<T>(path: string, opts?: RequestInit): Promise<T> {
-  const r = await fetch(`${botApiUrl}${path}`, opts);
+  const r = await botApiRequest(path, opts);
   const body = await r.json().catch(() => ({})) as T & { error?: string; output?: string };
   if (!r.ok) {
     const detail = body.error || body.output || `HTTP ${r.status}`;
@@ -117,6 +117,8 @@ function renderMd(md: string): string {
     .replace(/^---$/gm, '<hr/>')
     .replace(/^(?!<[h1-6p]|---)(.*\S.*)$/gm, '<p>$1</p>');
 }
+
+const errorMessage = (error: unknown) => error instanceof Error ? error.message : String(error);
 
 // ── Sub-components ───────────────────────────────────────────────────────────
 
@@ -184,7 +186,7 @@ function LogDrawer({ title, runId, endpoint, onClose }: {
   const timerRef = useRef<ReturnType<typeof setInterval>>();
 
   const load = useCallback(() => {
-    fetch(`${botApiUrl}${endpoint}?limit=150`)
+    botApiRequest(`${endpoint}?limit=150`)
       .then(r => r.text()).then(t => { setMd(t); setLoading(false); }).catch(() => {});
   }, [endpoint]);
 
@@ -442,12 +444,16 @@ function ChallengeLab({ providers }: { providers: Provider[] }) {
   const [notice, setNotice] = useState('');
 
   const load = useCallback(() => {
-    api<{ challenges: ChallengeRun[] }>('/challenges').then(d => setChallenges(d.challenges)).catch(() => {});
+    api<{ challenges: ChallengeRun[] }>('/challenges')
+      .then(d => setChallenges(d.challenges))
+      .catch(error => setNotice(errorMessage(error)));
   }, []);
 
   useEffect(() => {
     load();
-    api<ChallengeOptions>('/challenges/options').then(setOptions).catch(() => {});
+    api<ChallengeOptions>('/challenges/options')
+      .then(setOptions)
+      .catch(error => setNotice(errorMessage(error)));
     const t = setInterval(load, 5000);
     return () => clearInterval(t);
   }, [load]);
@@ -737,11 +743,11 @@ function AgentsSection({ providers }: { providers: Provider[] }) {
 
   const load = useCallback(() => {
     api<{ agent_runs: AgentRun[] }>('/agent-runs?agent_type=attack_defense')
-      .then(d => setRuns(d.agent_runs)).catch(() => {});
+      .then(d => setRuns(d.agent_runs)).catch(error => setNotice(errorMessage(error)));
     api<{ teams: { id: number; container_up: boolean }[] }>('/status')
-      .then(d => setTeams(d.teams)).catch(() => {});
+      .then(d => setTeams(d.teams)).catch(error => setNotice(errorMessage(error)));
     api<MatchPlan>('/match-plan')
-      .then(setPlan).catch(() => {});
+      .then(setPlan).catch(error => setNotice(errorMessage(error)));
   }, []);
 
   useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, [load]);
