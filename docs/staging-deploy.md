@@ -33,6 +33,8 @@ that environment:
 - `STAGING_OPERATOR_TOKEN`: organizer token for staging match controls
 - `STAGING_CHECKER_SECRET`: checker master secret for staging
 - `STAGING_TEAM_TOKEN_PATTERN`: team token pattern containing `{team}`
+- `OPENAI_API_KEY`: optional, enables OpenAI-backed agents and challenge generation
+- `GEMINI_API_KEY`: optional, enables Gemini-backed agents and challenge generation
 
 Optional environment variables:
 

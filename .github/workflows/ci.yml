@@ -428,6 +428,8 @@ jobs:
           STAGING_OPERATOR_TOKEN: ${{ secrets.STAGING_OPERATOR_TOKEN }}
           STAGING_CHECKER_SECRET: ${{ secrets.STAGING_CHECKER_SECRET }}
           STAGING_TEAM_TOKEN_PATTERN: ${{ secrets.STAGING_TEAM_TOKEN_PATTERN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           STAGING_SSH_PORT: ${{ vars.STAGING_SSH_PORT || 22 }}
           STAGING_DEPLOY_PATH: ${{ vars.STAGING_DEPLOY_PATH || '/opt/sandcastle-staging' }}
           SANDCASTLE_STAGING_TEAMS: ${{ vars.SANDCASTLE_STAGING_TEAMS || 2 }}

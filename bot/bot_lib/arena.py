@@ -151,13 +151,13 @@ def load_arena_defaults(path: Path | None = None) -> ArenaDefaults:
             values, "ARENA_AGENT_MAX_OUTPUT_TOKENS", 500, 1, 100000
         ),
         agent_max_cost_usd_per_call=_optional_float(
-            values, "ARENA_AGENT_MAX_COST_USD_PER_CALL", 0.05, 0.000001, 1000.0
+            values, "ARENA_AGENT_MAX_COST_USD_PER_CALL", 0.25, 0.000001, 1000.0
         ),
         agent_max_cost_usd_per_match=_optional_float(
-            values, "ARENA_AGENT_MAX_COST_USD_PER_MATCH", 0.50, 0.000001, 10000.0
+            values, "ARENA_AGENT_MAX_COST_USD_PER_MATCH", 5.00, 0.000001, 10000.0
         ),
         agent_max_cost_usd_per_day=_optional_float(
-            values, "ARENA_AGENT_MAX_COST_USD_PER_DAY", 1.00, 0.000001, 100000.0
+            values, "ARENA_AGENT_MAX_COST_USD_PER_DAY", 25.00, 0.000001, 100000.0
         ),
         agent_timeout_seconds=_optional_float(
             values, "ARENA_AGENT_TIMEOUT_SECONDS", 15.0, 0.1, 300.0

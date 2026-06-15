@@ -63,32 +63,68 @@ class OpenAIProvider:
         return sorted(set(tool_ids))
 
     @staticmethod
-    def _argument_schema(request: ModelRequest) -> dict[str, Any]:
-        """Build a conservative union of registered tool argument properties."""
+    def _argument_property_schema(raw_spec: dict[str, Any], *, required: bool) -> dict[str, Any]:
+        prop_type = str(raw_spec.get("type", "string"))
+        prop: dict[str, Any] = {
+            "type": prop_type if required else [prop_type, "null"],
+            "description": str(raw_spec.get("description", ""))[:300],
+        }
+        if isinstance(raw_spec.get("enum"), list):
+            enum_values = [str(item) for item in raw_spec["enum"]]
+            prop["enum"] = enum_values if required else [*enum_values, None]
+        if "minimum" in raw_spec:
+            prop["minimum"] = raw_spec["minimum"]
+        if "maximum" in raw_spec:
+            prop["maximum"] = raw_spec["maximum"]
+        return prop
+
+    @classmethod
+    def _argument_schema(cls, schema: dict[str, Any]) -> dict[str, Any]:
+        """Build an OpenAI strict-compatible argument schema for one tool."""
+        raw_params = schema.get("parameters", {})
+        if not isinstance(raw_params, dict):
+            raw_params = {}
+        required_params = schema.get("required", [])
+        if not isinstance(required_params, list):
+            required_params = []
+        required_names = {name for name in required_params if isinstance(name, str)}
         properties: dict[str, Any] = {}
-        for schema in request.tool_schemas:
-            raw_params = schema.get("parameters", {})
-            if not isinstance(raw_params, dict):
+        for name, raw_spec in raw_params.items():
+            if not isinstance(name, str) or not isinstance(raw_spec, dict):
                 continue
-            for name, raw_spec in raw_params.items():
-                if not isinstance(name, str) or not isinstance(raw_spec, dict):
-                    continue
-                prop: dict[str, Any] = {
-                    "type": str(raw_spec.get("type", "string")),
-                    "description": str(raw_spec.get("description", ""))[:300],
-                }
-                if isinstance(raw_spec.get("enum"), list):
-                    prop["enum"] = [str(item) for item in raw_spec["enum"]]
-                if "minimum" in raw_spec:
-                    prop["minimum"] = raw_spec["minimum"]
-                if "maximum" in raw_spec:
-                    prop["maximum"] = raw_spec["maximum"]
-                properties[name] = prop
+            properties[name] = cls._argument_property_schema(
+                raw_spec,
+                required=name in required_names,
+            )
         return {
             "type": "object",
             "properties": properties,
+            "required": sorted(properties),
             "additionalProperties": False,
         }
+
+    @classmethod
+    def _tool_call_item_schema(cls, request: ModelRequest) -> dict[str, Any]:
+        variants: list[dict[str, Any]] = []
+        for schema in request.tool_schemas:
+            tool_id = schema.get("id")
+            if not isinstance(tool_id, str) or not tool_id:
+                continue
+            variants.append(
+                {
+                    "type": "object",
+                    "properties": {
+                        "call_id": {"type": "string"},
+                        "tool_id": {"type": "string", "enum": [tool_id]},
+                        "arguments": cls._argument_schema(schema),
+                    },
+                    "required": ["call_id", "tool_id", "arguments"],
+                    "additionalProperties": False,
+                }
+            )
+        if not variants:
+            raise ModelGatewayResponseError("OpenAI request requires a tool schema")
+        return {"anyOf": variants}
 
     def _request_body(self, request: ModelRequest) -> dict[str, Any]:
         plan_schema = {
@@ -97,19 +133,7 @@ class OpenAIProvider:
                 "tool_calls": {
                     "type": "array",
                     "maxItems": request.budget.max_actions_per_round,
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "call_id": {"type": "string"},
-                            "tool_id": {
-                                "type": "string",
-                                "enum": self._tool_ids(request),
-                            },
-                            "arguments": self._argument_schema(request),
-                        },
-                        "required": ["call_id", "tool_id", "arguments"],
-                        "additionalProperties": False,
-                    },
+                    "items": self._tool_call_item_schema(request),
                 }
             },
             "required": ["tool_calls"],
@@ -121,8 +145,8 @@ class OpenAIProvider:
             "instruction": (
                 "Return only registered tool calls. For offensive tools, use target_team "
                 "from the allowed opponents. For organizer or defensive tools, provide "
-                "only the arguments defined by that tool schema. An empty tool_calls list "
-                "is valid."
+                "only the arguments defined by that tool schema. Use null for optional "
+                "arguments that are not relevant. An empty tool_calls list is valid."
             ),
         }
         return {
@@ -216,6 +240,11 @@ class OpenAIProvider:
             raise ModelGatewayResponseError("OpenAI structured output was not valid JSON") from exc
         if not isinstance(plan, dict):
             raise ModelGatewayResponseError("OpenAI structured output must be an object")
+        for item in plan.get("tool_calls") or []:
+            if isinstance(item, dict) and isinstance(item.get("arguments"), dict):
+                item["arguments"] = {
+                    key: value for key, value in item["arguments"].items() if value is not None
+                }
         return response_from_dict(
             {
                 "model_id": str(payload.get("model") or self.model_id),
