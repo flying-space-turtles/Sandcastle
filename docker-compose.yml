@@ -279,6 +279,7 @@ services:
     networks:
       ctf-network:
         ipv4_address: 10.10.0.4
+      control-plane: {}
     ports:
       - "127.0.0.1:7878:7878"
     volumes:
@@ -315,8 +316,13 @@ services:
     hostname: sandcastle-visualizer
     networks:
       - control-plane
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:4173:80"
+    environment:
+      ARENA_BOT_API_PORT: "7878"
+      ARENA_FIREWALL_WS_PORT: "6789"
     labels:
       sandcastle.role: "visualizer"
     deploy:

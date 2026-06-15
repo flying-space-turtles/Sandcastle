@@ -14,6 +14,15 @@ export default defineConfig({
         target: 'http://localhost:8000',
         changeOrigin: true,
       },
+      '/bot-api': {
+        target: 'http://localhost:7878',
+        changeOrigin: true,
+        rewrite: (urlPath) => urlPath.replace(/^\/bot-api/, ''),
+      },
+      '/firewall-ws': {
+        target: 'ws://localhost:6789',
+        ws: true,
+      },
     },
   },
   preview: {
