@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Activity, Brain, ChevronDown, CircleStop, FlaskConical,
-  Plus, RefreshCw, Rocket, ScrollText, Swords, X,
+  Activity, Brain, CheckCircle2, FileCode2, FlaskConical,
+  ListTree, Plus, RefreshCw, Rocket, ScrollText, ShieldCheck, Swords, Target, X,
 } from 'lucide-react';
 import { botApiUrl } from '../data/arenaConfig';
 
@@ -34,9 +34,30 @@ interface ChallengeRun {
   provider: string;
   model_id: string;
   deployed_at: string | null;
+  selected_at?: string | null;
+  is_selected?: boolean;
+  is_active?: boolean;
   error: string | null;
   created_at: string;
-  artifact?: { path: string; file_count: number; tree: string } | null;
+  artifact?: {
+    path: string;
+    file_count: number;
+    tree: string;
+    description?: string;
+    file_entries?: Array<{ path: string; size: number; role: string; language: string }>;
+    service?: { attack_path?: string; attack_parameter?: string; health_path?: string; port?: number };
+    validation?: {
+      status?: string;
+      vulnerable_exploit_succeeded?: boolean;
+      patched_exploit_failed?: boolean;
+      checker_passed_before_patch?: boolean;
+      checker_passed_after_patch?: boolean;
+      runtime_validated?: boolean;
+      contract_compatible?: boolean;
+      deployable?: boolean;
+      steps?: Array<{ name: string; status: string; output?: string; duration_ms?: number }>;
+    };
+  } | null;
 }
 
 interface AgentRun {
@@ -62,8 +83,16 @@ interface MatchAssignment {
 interface MatchPlan {
   assignments: MatchAssignment[];
   deployed_challenge: ChallengeRun | null;
+  selected_challenge: ChallengeRun | null;
   latest_published_challenge: ChallengeRun | null;
   instructions: string[];
+}
+
+interface ActivityEntry {
+  kind: string;
+  summary: string;
+  created_at: string;
+  data?: Record<string, unknown>;
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -80,11 +109,11 @@ async function api<T>(path: string, opts?: RequestInit): Promise<T> {
 
 function renderMd(md: string): string {
   return md
+    .replace(/```[\w]*\n([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
     .replace(/^## (.+)$/gm, '<h2>$1</h2>')
     .replace(/^# (.+)$/gm, '<h1>$1</h1>')
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/```[\w]*\n([\s\S]*?)```/g, '<pre><code>$1</code></pre>')
     .replace(/^---$/gm, '<hr/>')
     .replace(/^(?!<[h1-6p]|---)(.*\S.*)$/gm, '<p>$1</p>');
 }
@@ -206,6 +235,192 @@ function LogDrawer({ title, runId, endpoint, onClose }: {
   );
 }
 
+function ChallengeInspector({
+  challenge,
+  onClose,
+  onChanged,
+}: {
+  challenge: ChallengeRun;
+  onClose: () => void;
+  onChanged: (message: string) => void;
+}) {
+  const [tab, setTab] = useState<'overview' | 'files' | 'activity'>('overview');
+  const [activity, setActivity] = useState<ActivityEntry[]>([]);
+  const [selectedFile, setSelectedFile] = useState(challenge.artifact?.file_entries?.[0]?.path || '');
+  const [fileContent, setFileContent] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    api<{ entries: ActivityEntry[] }>(`/challenges/${challenge.id}/activity?limit=100`)
+      .then(body => setActivity(body.entries))
+      .catch(() => setActivity([]));
+  }, [challenge.id]);
+
+  useEffect(() => {
+    if (!selectedFile || tab !== 'files') return;
+    setFileContent('Loading...');
+    api<{ file: { content: string } }>(
+      `/challenges/${challenge.id}/files?path=${encodeURIComponent(selectedFile)}`,
+    )
+      .then(body => setFileContent(body.file.content))
+      .catch(err => setFileContent(err instanceof Error ? err.message : String(err)));
+  }, [challenge.id, selectedFile, tab]);
+
+  async function selectForMatch() {
+    setBusy(true); setError('');
+    try {
+      await api(`/challenges/${challenge.id}/select`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+      });
+      onChanged('Challenge selected for the next match.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deployNow() {
+    setBusy(true); setError('');
+    try {
+      const result = await api<{ output?: string }>(`/challenges/${challenge.id}/deploy`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+      });
+      onChanged(result.output || 'Challenge deployed and verified on every team.');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const validation = challenge.artifact?.validation;
+  const runtimeVerified = Boolean(validation?.runtime_validated);
+  const checks = [
+    ['Checker before patch', validation?.checker_passed_before_patch],
+    ['Exploit captures flag', validation?.vulnerable_exploit_succeeded],
+    ['Checker after patch', validation?.checker_passed_after_patch],
+    ['Exploit blocked by patch', validation?.patched_exploit_failed],
+  ] as const;
+
+  return (
+    <div className="drawer-backdrop" onMouseDown={onClose}>
+      <aside className="ops-drawer challenge-inspector" onMouseDown={event => event.stopPropagation()}>
+        <div className="drawer-heading">
+          <div>
+            <span className="section-icon"><FlaskConical size={17}/></span>
+            <div>
+              <h2>{challenge.vulnerability.replace(/_/g, ' ')}</h2>
+              <p>{challenge.challenge_id || challenge.id}</p>
+            </div>
+          </div>
+          <button className="icon-button" onClick={onClose} title="Close"><X size={17}/></button>
+        </div>
+
+        <div className="inspector-state">
+          <span className={challenge.is_active ? 'is-active' : ''}>
+            <Activity size={14}/> Arena {challenge.is_active ? 'active' : 'not active'}
+          </span>
+          <span className={challenge.is_selected ? 'is-selected' : ''}>
+            <Target size={14}/> {challenge.is_selected ? 'Selected for next match' : 'Not selected'}
+          </span>
+        </div>
+
+        <div className="inspector-tabs" role="tablist">
+          <button className={tab === 'overview' ? 'is-active' : ''} onClick={() => setTab('overview')}><ShieldCheck size={14}/>Overview</button>
+          <button className={tab === 'files' ? 'is-active' : ''} onClick={() => setTab('files')}><FileCode2 size={14}/>Files</button>
+          <button className={tab === 'activity' ? 'is-active' : ''} onClick={() => setTab('activity')}><ListTree size={14}/>Activity</button>
+        </div>
+
+        <div className="challenge-inspector__body">
+          {tab === 'overview' && (
+            <>
+              <section className="challenge-overview">
+                <p>{challenge.artifact?.description || 'Generated attack-defense service.'}</p>
+                <dl>
+                  <div><dt>Attack path</dt><dd><code>{challenge.artifact?.service?.attack_path || 'unknown'}</code></dd></div>
+                  <div><dt>Input</dt><dd><code>{challenge.artifact?.service?.attack_parameter || 'unknown'}</code></dd></div>
+                  <div><dt>Difficulty</dt><dd>{challenge.difficulty}</dd></div>
+                  <div><dt>Seed</dt><dd>{challenge.seed}</dd></div>
+                </dl>
+              </section>
+              <section className="validation-panel">
+                <div className="validation-panel__heading">
+                  <div><CheckCircle2 size={16}/><strong>Match readiness</strong></div>
+                  <span className={`validation-state validation-state--${validation?.status || 'unknown'}`}>{validation?.status || 'unknown'}</span>
+                </div>
+                <div className="validation-grid">
+                  {checks.map(([label, passed]) => (
+                    <span className={passed && runtimeVerified ? 'is-passed' : 'is-failed'} key={label}>
+                      <CheckCircle2 size={14}/>{label}<strong>{passed && runtimeVerified ? 'Passed' : 'Not verified'}</strong>
+                    </span>
+                  ))}
+                </div>
+                {!validation?.deployable && (
+                  <div className="validation-warning">
+                    This is a legacy or static-only artifact. Generate it again to receive live checker, exploit, and patch verification.
+                  </div>
+                )}
+              </section>
+            </>
+          )}
+
+          {tab === 'files' && (
+            <div className="artifact-browser">
+              <nav aria-label="Generated challenge files">
+                {(challenge.artifact?.file_entries || []).map(file => (
+                  <button
+                    className={selectedFile === file.path ? 'is-active' : ''}
+                    key={file.path}
+                    onClick={() => setSelectedFile(file.path)}
+                  >
+                    <FileCode2 size={13}/>
+                    <span><strong>{file.path}</strong><small>{file.role}</small></span>
+                  </button>
+                ))}
+              </nav>
+              <section>
+                <header><strong>{selectedFile || 'Select a file'}</strong></header>
+                <pre><code>{fileContent}</code></pre>
+              </section>
+            </div>
+          )}
+
+          {tab === 'activity' && (
+            <div className="activity-timeline">
+              {activity.map((entry, index) => (
+                <article key={`${entry.created_at}-${index}`}>
+                  <span className={`activity-dot activity-dot--${entry.kind}`}/>
+                  <div>
+                    <header><strong>{entry.kind.replace(/_/g, ' ')}</strong><time>{new Date(entry.created_at).toLocaleTimeString()}</time></header>
+                    <p>{entry.summary || 'Completed.'}</p>
+                  </div>
+                </article>
+              ))}
+              {activity.length === 0 && <p className="empty-state">No generation activity has been recorded.</p>}
+            </div>
+          )}
+
+          {error && <div className="inline-alert" role="alert">{error}</div>}
+        </div>
+
+        <div className="drawer-footer">
+          <span>{challenge.artifact?.file_count || 0} generated files</span>
+          <div className="drawer-footer__actions">
+            <button disabled={busy || challenge.status !== 'published' || !validation?.deployable} onClick={selectForMatch}>
+              <Target size={15}/>{challenge.is_selected ? 'Selected' : 'Use for next match'}
+            </button>
+            <button className="primary-button" disabled={busy || challenge.status !== 'published' || !validation?.deployable} onClick={deployNow}>
+              <Rocket size={15}/>{busy ? 'Working...' : challenge.is_active ? 'Redeploy and verify' : 'Deploy now'}
+            </button>
+          </div>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
 // ── Challenge Lab ─────────────────────────────────────────────────────────────
 
 function ChallengeLab({ providers }: { providers: Provider[] }) {
@@ -237,8 +452,12 @@ function ChallengeLab({ providers }: { providers: Provider[] }) {
     return () => clearInterval(t);
   }, [load]);
 
-  const visible = challenges.filter(c => filter === 'all' || c.status === 'running');
+  const visible = challenges.filter(
+    c => filter === 'all' || c.status === 'running' || c.is_selected || c.is_active,
+  );
   const inspectRun = challenges.find(c => c.id === inspectId);
+  const selectedChallenge = challenges.find(c => c.is_selected);
+  const activeChallenge = challenges.find(c => c.is_active);
   const vulnerabilityOptions = options?.vulnerabilities ?? [
     { id:'path_traversal', label:'Path Traversal', icon:'', description:'Directory traversal via /export' },
     { id:'sql_injection', label:'SQL Injection', icon:'', description:'Bypass login via SQLi' },
@@ -261,6 +480,21 @@ function ChallengeLab({ providers }: { providers: Provider[] }) {
       setNotice('Generation started — watch the log for progress.'); setCreateOpen(false); load();
     } catch (e) { setNotice(String(e)); }
     setBusy(false);
+  }
+
+  async function selectChallenge(id: string) {
+    setBusy(true); setNotice('');
+    try {
+      await api(`/challenges/${id}/select`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+      });
+      setNotice('Selected for the next match. Prepare Match will deploy this exact challenge.');
+      load();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -307,11 +541,29 @@ function ChallengeLab({ providers }: { providers: Provider[] }) {
         </button>
       </section>
 
+      <section className="challenge-match-setup" aria-label="Challenge selected for the match">
+        <div>
+          <span className="setup-icon"><Target size={17}/></span>
+          <p><span>Next match</span><strong>{selectedChallenge ? selectedChallenge.vulnerability.replace(/_/g, ' ') : 'No challenge selected'}</strong><small>{selectedChallenge ? `seed ${selectedChallenge.seed}` : 'Choose one published challenge below'}</small></p>
+        </div>
+        <div>
+          <span className="setup-icon"><Activity size={17}/></span>
+          <p><span>Active in arena</span><strong>{activeChallenge ? activeChallenge.vulnerability.replace(/_/g, ' ') : 'Default service'}</strong><small>{activeChallenge?.deployed_at ? `deployed ${new Date(activeChallenge.deployed_at).toLocaleTimeString()}` : 'not replaced yet'}</small></p>
+        </div>
+        <div className="challenge-match-setup__status">
+          {selectedChallenge?.id === activeChallenge?.id
+            ? <><CheckCircle2 size={16}/>Selected challenge is active</>
+            : selectedChallenge
+              ? <><Rocket size={16}/>Prepare Match will deploy and verify the selection</>
+              : <><Target size={16}/>Selection required before match preparation</>}
+        </div>
+      </section>
+
       {/* Stats */}
       <section className="fleet-pulse">
         <div><span className="pulse-icon is-violet"><FlaskConical size={17}/></span><p><span>Total</span><strong>{challenges.length}</strong></p></div>
         <div><span className="pulse-icon is-green"><Activity size={17}/></span><p><span>Published</span><strong>{challenges.filter(c=>c.status==='published').length}</strong></p></div>
-        <div><span className="pulse-icon is-amber"><Rocket size={17}/></span><p><span>Deployed</span><strong>{challenges.filter(c=>c.deployed_at).length}</strong></p></div>
+        <div><span className="pulse-icon is-amber"><Rocket size={17}/></span><p><span>Arena active</span><strong>{activeChallenge ? 1 : 0}</strong></p></div>
       </section>
 
       {/* Toolbar */}
@@ -326,10 +578,9 @@ function ChallengeLab({ providers }: { providers: Provider[] }) {
       {/* Cards */}
       <section className="deployment-grid">
         {visible.map(c => (
-          <button
+          <article
             key={c.id}
-            className={`deployment-card status-${c.status === 'published' ? 'running' : c.status === 'failed' ? 'failed' : 'deploying'}`}
-            onClick={() => setInspectId(c.id)}
+            className={`deployment-card challenge-card ${c.is_active ? 'is-arena-active' : ''} ${c.is_selected ? 'is-match-selected' : ''} status-${c.status === 'published' ? 'running' : c.status === 'failed' ? 'failed' : 'deploying'}`}
           >
             <div className="deployment-card__top">
               <span className="team-orb"><FlaskConical size={14}/></span>
@@ -337,11 +588,17 @@ function ChallengeLab({ providers }: { providers: Provider[] }) {
                 <strong>{c.vulnerability.replace(/_/g, ' ')}</strong>
                 <span>seed {c.seed} · {c.provider}{c.model_id ? ` / ${c.model_id}` : ''}</span>
               </div>
-              <StatusPill s={c.deployed_at ? 'deployed' : c.status}/>
+              <StatusPill s={c.is_active ? 'active' : c.is_selected ? 'selected' : c.status === 'published' ? 'ready' : c.status}/>
             </div>
             <div className="deployment-activity">
               <Activity size={14}/>
-              <span>{c.deployed_at ? `Deployed ${new Date(c.deployed_at).toLocaleTimeString()} for future rounds` : c.status === 'running' ? 'Generating and validating…' : c.error || c.status}</span>
+              <span>{c.is_active
+                ? 'Currently installed on every team'
+                : c.is_selected
+                  ? 'Will be installed during Match preparation'
+                  : c.status === 'running'
+                    ? 'Generating and validating...'
+                    : c.error || c.artifact?.description || 'Ready to inspect and select'}</span>
             </div>
             <div className="deployment-stats">
               <span><VulnBadge v={c.vulnerability}/></span>
@@ -349,7 +606,17 @@ function ChallengeLab({ providers }: { providers: Provider[] }) {
               {c.artifact && <span><b>{c.artifact.file_count}</b> files</span>}
               {c.decoy_endpoints > 0 && <span><b>{c.decoy_endpoints}</b> decoys</span>}
             </div>
-          </button>
+            <div className="challenge-card__actions">
+              <button onClick={() => setInspectId(c.id)}><FileCode2 size={14}/>Inspect</button>
+              <button
+                className={c.is_selected ? 'is-selected' : ''}
+                disabled={busy || c.status !== 'published' || c.is_selected || !c.artifact?.validation?.deployable}
+                onClick={() => void selectChallenge(c.id)}
+              >
+                <Target size={14}/>{c.is_selected ? 'Selected for match' : 'Use for next match'}
+              </button>
+            </div>
+          </article>
         ))}
         {visible.length === 0 && (
           <div className="fleet-empty">
@@ -361,7 +628,7 @@ function ChallengeLab({ providers }: { providers: Provider[] }) {
         )}
       </section>
 
-      {notice && <div className="sr-status" role="status" aria-live="polite">{notice}</div>}
+      {notice && <div className="challenge-notice" role="status" aria-live="polite">{notice}</div>}
 
       {/* Create drawer */}
       {createOpen && (
@@ -440,13 +707,12 @@ function ChallengeLab({ providers }: { providers: Provider[] }) {
         </div>
       )}
 
-      {/* Log / deploy drawer */}
+      {/* Challenge inspector */}
       {inspectId && inspectRun && (
-        <LogDrawer
-          title={`${inspectRun.vulnerability.replace(/_/g,' ')} · ${inspectRun.difficulty}`}
-          runId={inspectId}
-          endpoint={`/challenges/${inspectId}/log`}
+        <ChallengeInspector
+          challenge={inspectRun}
           onClose={() => setInspectId(null)}
+          onChanged={message => { setNotice(message); load(); }}
         />
       )}
     </div>
@@ -516,7 +782,7 @@ function AgentsSection({ providers }: { providers: Provider[] }) {
       const result = await api<{ deployments: AgentRun[]; output?: string; challenge_deployed?: boolean }>('/match-plan/prepare', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ deploy_latest_challenge: true, start_agents: true }),
+        body: JSON.stringify({ deploy_selected_challenge: true, start_agents: true }),
       });
       setNotice(`${result.deployments.length} assigned runtime${result.deployments.length===1?'':'s'} started${result.challenge_deployed ? ' after arena regeneration' : ''}.`);
       load();
@@ -559,7 +825,7 @@ function AgentsSection({ providers }: { providers: Provider[] }) {
       </section>
 
       <section className="fleet-pulse" style={{ marginTop: 14 }}>
-        <div><span className="pulse-icon is-violet"><FlaskConical size={17}/></span><p><span>Deployed challenge</span><strong>{plan?.deployed_challenge ? 'Ready' : 'None'}</strong><small>{plan?.deployed_challenge?.vulnerability?.replace(/_/g, ' ') || 'Deploy from Challenge Lab first'}</small></p></div>
+        <div><span className="pulse-icon is-violet"><FlaskConical size={17}/></span><p><span>Selected challenge</span><strong>{plan?.selected_challenge ? 'Ready' : 'Required'}</strong><small>{plan?.selected_challenge?.vulnerability?.replace(/_/g, ' ') || 'Select one in Challenge Lab'}</small></p></div>
         <div><span className="pulse-icon is-blue"><Swords size={17}/></span><p><span>Assigned teams</span><strong>{plan?.assignments.length ?? 0}</strong><small>queued for match start</small></p></div>
       </section>
 

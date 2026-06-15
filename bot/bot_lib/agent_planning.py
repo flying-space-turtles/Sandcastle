@@ -48,6 +48,8 @@ class PlanningIdentity:
     agent_id: str = ""
     run_id: str = ""
     agent_type: AgentType = AgentType.ATTACK_DEFENSE
+    provider: ModelProvider = ModelProvider.FAKE
+    model_id: str = ""
 
 
 class PlanningCredentialStore:
@@ -148,29 +150,70 @@ class PlanningCredentialStore:
 
 
 class DeterministicPlanningFakeProvider(FakeModelProvider):
-    """Offline provider that chooses the first allowed action and target."""
+    """Offline provider that chooses deterministic tool calls for product agents."""
 
     def complete(self, request: ModelRequest, timeout: float) -> ModelResponse:
         if self.script:
             return super().complete(request, timeout)
         self.call_count += 1
-        targets = request.observation.get("opponent_teams", [])
-        tool_id = request.tool_schemas[0]["id"] if request.tool_schemas else None
+
         calls = []
-        if tool_id and targets:
-            calls.append(
-                ToolCall(
-                    call_id=f"fake-{self.call_count}",
-                    tool_id=str(tool_id),
-                    arguments={"target_team": int(targets[0])},
-                )
-            )
+        if request.agent_type is AgentType.CHALLENGE_GENERATOR:
+            calls = self._challenge_calls(request)
+        else:
+            calls = self._attack_defense_calls(request)
         return ModelResponse(
             provider=ModelProvider.FAKE,
             model_id=self.model_id,
             tool_calls=calls,
             usage=ModelUsage(input_tokens=0, output_tokens=0, cost_usd=0.0),
         )
+
+    def _challenge_calls(self, request: ModelRequest) -> list[ToolCall]:
+        schema_ids = {str(schema.get("id")) for schema in request.tool_schemas}
+        observation = request.observation
+        call_id = f"fake-{self.call_count}"
+        if not observation.get("current_spec") and "challenge.spec.create" in schema_ids:
+            return [
+                ToolCall(
+                    call_id=call_id,
+                    tool_id="challenge.spec.create",
+                    arguments={
+                        "vulnerability": str(
+                            observation.get("requested_vulnerability") or "path_traversal"
+                        ),
+                        "difficulty": str(observation.get("requested_difficulty") or "easy"),
+                        "seed": int(observation.get("requested_seed") or 0),
+                        "decoy_endpoints": int(observation.get("requested_decoy_endpoints") or 0),
+                    },
+                )
+            ]
+        if not observation.get("last_render_id") and "challenge.render" in schema_ids:
+            return [ToolCall(call_id=call_id, tool_id="challenge.render", arguments={})]
+        validation = observation.get("last_validation")
+        validation_status = validation.get("status") if isinstance(validation, dict) else None
+        if validation_status != "passed" and "challenge.validate" in schema_ids:
+            return [ToolCall(call_id=call_id, tool_id="challenge.validate", arguments={})]
+        if "challenge.publish" in schema_ids:
+            return [ToolCall(call_id=call_id, tool_id="challenge.publish", arguments={})]
+        return []
+
+    def _attack_defense_calls(self, request: ModelRequest) -> list[ToolCall]:
+        targets = request.observation.get("opponent_teams", [])
+        for schema in request.tool_schemas:
+            tool_id = str(schema.get("id", ""))
+            scope = str(schema.get("scope", ""))
+            if scope in {"self", "defensive"}:
+                return [ToolCall(call_id=f"fake-{self.call_count}", tool_id=tool_id, arguments={})]
+            if targets:
+                return [
+                    ToolCall(
+                        call_id=f"fake-{self.call_count}",
+                        tool_id=tool_id,
+                        arguments={"target_team": int(targets[0])},
+                    )
+                ]
+        return []
 
 
 class AgentPlanningService:
@@ -232,6 +275,12 @@ class AgentPlanningService:
                     "label": str(schema.get("label", ""))[:160],
                     "description": str(schema.get("description", ""))[:500],
                     "scope": str(schema.get("scope", ""))[:32],
+                    "parameters": schema.get("parameters", {})
+                    if isinstance(schema.get("parameters", {}), dict)
+                    else {},
+                    "required": schema.get("required", [])
+                    if isinstance(schema.get("required", []), list)
+                    else [],
                 }
             )
 
@@ -280,13 +329,25 @@ class AgentPlanningService:
         )
 
         tasks: list[dict[str, object]] = []
+        schema_by_id = {str(schema["id"]): schema for schema in schemas}
         for call in result.response.tool_calls:
             if call.tool_id not in identity.allowed_actions:
                 raise PlanningRequestError("provider selected a disallowed action")
-            target_team = call.arguments.get("target_team")
-            if not isinstance(target_team, int) or target_team not in identity.allowed_targets:
-                raise PlanningRequestError("provider selected a disallowed target")
-            tasks.append({"target_team": target_team, "action_id": call.tool_id})
+            schema = schema_by_id.get(call.tool_id, {})
+            scope = str(schema.get("scope", "target"))
+            if scope in {"target", "offensive"}:
+                target_team = call.arguments.get("target_team")
+                if not isinstance(target_team, int) or target_team not in identity.allowed_targets:
+                    raise PlanningRequestError("provider selected a disallowed target")
+            else:
+                target_team = identity.team_id
+            task: dict[str, object] = {"target_team": target_team, "action_id": call.tool_id}
+            task_arguments = {
+                key: value for key, value in call.arguments.items() if key != "target_team"
+            }
+            if task_arguments:
+                task["arguments"] = task_arguments
+            tasks.append(task)
 
         # Persist tool-call memory entries so future plans observe real outcomes.
         if self._memory is not None:
@@ -314,6 +375,7 @@ class AgentPlanningService:
 
         return {
             "tasks": tasks,
+            "tool_calls": [call.as_dict() for call in result.response.tool_calls],
             "tokens_used": result.response.usage.total_tokens,
             "cost_usd": result.response.usage.cost_usd,
             "model_id": result.response.model_id,

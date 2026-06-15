@@ -45,6 +45,7 @@ LOOP_INTERVAL=${LOOP_INTERVAL:-${ARENA_BOT_LOOP_SECONDS}}
 WATCHDOG=${WATCHDOG:-false}          # also monitor own service (true/false)
 PLAN_ENDPOINT=${PLAN_ENDPOINT:-}
 PLAN_TOKEN=${PLAN_TOKEN:-}
+DEFENSE_TOKEN=${DEFENSE_TOKEN:-}
 
 # Extra bot.py CLI args assembled from --service-port / --flag-re / etc.
 EXTRA_BOT_ARGS=""
@@ -112,6 +113,11 @@ start_bot() {
             --env "PLAN_TIMEOUT_SECONDS=${ARENA_AGENT_TIMEOUT_SECONDS}"
             --env "PLAN_MAX_COST_USD=${ARENA_AGENT_MAX_COST_USD_PER_CALL}"
         )
+    fi
+    if [[ -n "${DEFENSE_TOKEN}" ]]; then
+        docker exec "team${team_id}-vuln" sh -lc \
+            "umask 077; mkdir -p /run; printf '%s' '${DEFENSE_TOKEN}' > /run/sandcastle-defense-token" || true
+        docker_env_args+=(--env "DEFENSE_TOKEN=${DEFENSE_TOKEN}")
     fi
 
     log_info "Starting bot in ${cname} (interval=${LOOP_INTERVAL}s, watchdog=${WATCHDOG}) …"

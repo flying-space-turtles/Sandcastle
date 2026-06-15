@@ -59,6 +59,7 @@ RUN useradd -m -u "${TEAM_UID}" -s /bin/bash "${TEAM_USER}" \
     && chown -R "${TEAM_USER}:${TEAM_USER}" "/home/${TEAM_USER}/example-vuln"
 
 COPY bot/service_control.py /usr/local/bin/sandcastle-service-control
+COPY bot/bot_lib /usr/local/lib/sandcastle-bot/bot_lib
 
 RUN mkdir -p /run/sshd \
     && sed -i 's/#PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config \

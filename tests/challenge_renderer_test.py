@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Tests for AI-008: ChallengeSpec validation and renderer determinism."""
+
 from __future__ import annotations
 import sys
 import tempfile
 import unittest
+import subprocess
+import shutil
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -49,6 +52,7 @@ class ChallengeSpecValidationTests(unittest.TestCase):
 
     def test_as_dict_round_trips_through_json(self):
         import json
+
         s = _spec()
         d = s.as_dict()
         self.assertEqual(json.loads(json.dumps(d)), d)
@@ -99,6 +103,7 @@ class RendererTests(unittest.TestCase):
     def test_manifest_contains_digests(self):
         c = render(_spec(), staging_root=self.staging)
         import json
+
         manifest = json.loads((c.staging_dir / "manifest.json").read_text())
         self.assertIn("file_digests", manifest)
         self.assertGreater(len(manifest["file_digests"]), 0)
@@ -141,8 +146,43 @@ class RendererTests(unittest.TestCase):
                 source = (c.staging_dir / "app" / "app.py").read_text()
                 compile(source, str(c.staging_dir / "app" / "app.py"), "exec")
 
+    def test_generated_attack_surfaces_match_arena_actions(self):
+        expected = {
+            "path_traversal": ('@app.get("/export")', 'request.args.get("file")'),
+            "command_injection": ('@app.route("/admin/diagnostics"', 'request.form.get("host")'),
+            "sql_injection": ('@app.route("/login"', '@app.get("/notes")'),
+        }
+        for vuln, markers in expected.items():
+            with self.subTest(vulnerability=vuln):
+                c = render(_spec(vulnerability=vuln), staging_root=self.staging)
+                app = (c.staging_dir / "app" / "app.py").read_text()
+                for marker in markers:
+                    self.assertIn(marker, app)
+                self.assertIn('@app.get("/internal/retrieve")', app)
+
+    def test_reference_patch_applies_for_each_vuln(self):
+        for vuln in ("path_traversal", "command_injection", "sql_injection"):
+            with self.subTest(vulnerability=vuln):
+                c = render(_spec(vulnerability=vuln), staging_root=self.staging)
+                working = self.staging / f"patch-{vuln}"
+                shutil.copytree(c.staging_dir, working)
+                patch = working / "patches" / f"patch_{vuln}.diff"
+                result = subprocess.run(
+                    ["patch", "-p1", "--input", str(patch)],
+                    cwd=working,
+                    capture_output=True,
+                    text=True,
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                compile(
+                    (working / "app" / "app.py").read_text(),
+                    str(working / "app" / "app.py"),
+                    "exec",
+                )
+
     def test_no_provider_keys_in_any_file(self):
         import re
+
         c = render(_spec(), staging_root=self.staging)
         # Real OpenAI keys look like sk-proj-... or sk-...(48+ chars)
         key_pattern = re.compile(r"sk-[A-Za-z0-9_-]{20,}")

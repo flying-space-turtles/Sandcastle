@@ -62,6 +62,34 @@ class OpenAIProvider:
             raise ModelGatewayResponseError("OpenAI request requires a tool schema")
         return sorted(set(tool_ids))
 
+    @staticmethod
+    def _argument_schema(request: ModelRequest) -> dict[str, Any]:
+        """Build a conservative union of registered tool argument properties."""
+        properties: dict[str, Any] = {}
+        for schema in request.tool_schemas:
+            raw_params = schema.get("parameters", {})
+            if not isinstance(raw_params, dict):
+                continue
+            for name, raw_spec in raw_params.items():
+                if not isinstance(name, str) or not isinstance(raw_spec, dict):
+                    continue
+                prop: dict[str, Any] = {
+                    "type": str(raw_spec.get("type", "string")),
+                    "description": str(raw_spec.get("description", ""))[:300],
+                }
+                if isinstance(raw_spec.get("enum"), list):
+                    prop["enum"] = [str(item) for item in raw_spec["enum"]]
+                if "minimum" in raw_spec:
+                    prop["minimum"] = raw_spec["minimum"]
+                if "maximum" in raw_spec:
+                    prop["maximum"] = raw_spec["maximum"]
+                properties[name] = prop
+        return {
+            "type": "object",
+            "properties": properties,
+            "additionalProperties": False,
+        }
+
     def _request_body(self, request: ModelRequest) -> dict[str, Any]:
         plan_schema = {
             "type": "object",
@@ -77,12 +105,7 @@ class OpenAIProvider:
                                 "type": "string",
                                 "enum": self._tool_ids(request),
                             },
-                            "arguments": {
-                                "type": "object",
-                                "properties": {"target_team": {"type": "integer", "minimum": 1}},
-                                "required": ["target_team"],
-                                "additionalProperties": False,
-                            },
+                            "arguments": self._argument_schema(request),
                         },
                         "required": ["call_id", "tool_id", "arguments"],
                         "additionalProperties": False,
@@ -96,8 +119,10 @@ class OpenAIProvider:
             "observation": request.observation,
             "available_tools": request.tool_schemas,
             "instruction": (
-                "Return only registered tool calls. Use target_team from the allowed "
-                "opponents. An empty tool_calls list is valid."
+                "Return only registered tool calls. For offensive tools, use target_team "
+                "from the allowed opponents. For organizer or defensive tools, provide "
+                "only the arguments defined by that tool schema. An empty tool_calls list "
+                "is valid."
             ),
         }
         return {

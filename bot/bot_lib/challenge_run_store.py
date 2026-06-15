@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS challenge_runs (
     provider         TEXT,
     model_id         TEXT,
     max_attempts     INTEGER DEFAULT 3,
+    selected_at      TEXT,
     deployed_at      TEXT,
     error            TEXT,
     created_at       TEXT NOT NULL,
@@ -47,6 +48,22 @@ class ChallengeRunStore:
         self._db = str(db_path)
         with sqlite3.connect(self._db) as conn:
             conn.execute(_DDL)
+            columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(challenge_runs)").fetchall()
+            }
+            if "selected_at" not in columns:
+                conn.execute("ALTER TABLE challenge_runs ADD COLUMN selected_at TEXT")
+            now = _now()
+            conn.execute(
+                """
+                UPDATE challenge_runs
+                SET status = 'failed',
+                    error = 'controller restarted before generation completed',
+                    updated_at = ?
+                WHERE status = 'running'
+                """,
+                (now,),
+            )
             conn.commit()
 
     # ------------------------------------------------------------------
@@ -105,6 +122,22 @@ class ChallengeRunStore:
             )
             conn.commit()
 
+    def select(self, run_id: str) -> dict[str, Any] | None:
+        """Select exactly one published challenge for the next match."""
+        now = _now()
+        with sqlite3.connect(self._db) as conn:
+            conn.execute("UPDATE challenge_runs SET selected_at = NULL")
+            conn.execute(
+                """
+                UPDATE challenge_runs
+                SET selected_at = ?, updated_at = ?
+                WHERE id = ? AND status = 'published'
+                """,
+                (now, now, run_id),
+            )
+            conn.commit()
+        return self.get(run_id)
+
     # ------------------------------------------------------------------
     # Read
     # ------------------------------------------------------------------
@@ -133,6 +166,30 @@ class ChallengeRunStore:
                 "SELECT * FROM challenge_runs WHERE status = 'published' ORDER BY created_at DESC"
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def selected(self) -> dict[str, Any] | None:
+        with sqlite3.connect(self._db) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                """
+                SELECT * FROM challenge_runs
+                WHERE selected_at IS NOT NULL AND status = 'published'
+                ORDER BY selected_at DESC LIMIT 1
+                """
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def deployed(self) -> dict[str, Any] | None:
+        with sqlite3.connect(self._db) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                """
+                SELECT * FROM challenge_runs
+                WHERE deployed_at IS NOT NULL
+                ORDER BY deployed_at DESC LIMIT 1
+                """
+            ).fetchone()
+        return dict(row) if row is not None else None
 
     def active(self) -> list[dict[str, Any]]:
         with sqlite3.connect(self._db) as conn:
@@ -163,6 +220,7 @@ class ChallengeRunStore:
             "provider": row.get("provider"),
             "model_id": row.get("model_id"),
             "max_attempts": row.get("max_attempts", 3),
+            "selected_at": row.get("selected_at"),
             "deployed_at": row.get("deployed_at"),
             "error": row.get("error"),
             "created_at": row.get("created_at"),

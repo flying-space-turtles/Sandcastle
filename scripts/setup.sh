@@ -761,6 +761,7 @@ EOF
       - bot-controller-data:/data
     environment:
       ARENA_BOT_API_PORT: "${ARENA_BOT_API_PORT}"
+      CHALLENGE_VALIDATION_NETWORK: "sandcastle_ctf-network"
       OPENAI_API_KEY: "\${OPENAI_API_KEY:-}"
       GEMINI_API_KEY: "\${GEMINI_API_KEY:-}"
     labels:

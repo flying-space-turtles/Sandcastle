@@ -156,6 +156,25 @@ class BotAPIValidationTest(unittest.TestCase):
         sandbox = Path(_TEMP_DIR.name) / "deploy-root"
         root = sandbox / "challenges" / "published" / challenge_id
         root.mkdir(parents=True, exist_ok=True)
+        (root / "app").mkdir()
+        (root / "app" / "app.py").write_text(
+            '@app.post("/internal/plant")\n@app.get("/internal/retrieve")\n',
+            encoding="utf-8",
+        )
+        (root / "validation_report.json").write_text(
+            """
+            {
+              "status": "passed",
+              "steps": [
+                {"name": "checker_before_patch", "status": "passed"},
+                {"name": "exploit_before_patch", "status": "passed"},
+                {"name": "checker_after_patch", "status": "passed"},
+                {"name": "exploit_blocked_after_patch", "status": "passed"}
+              ]
+            }
+            """,
+            encoding="utf-8",
+        )
         calls: list[list[str]] = []
 
         def fake_run(cmd: list[str], timeout: int = 30, env: dict[str, str] | None = None):
@@ -171,6 +190,11 @@ class BotAPIValidationTest(unittest.TestCase):
             with (
                 patch.object(bot_api, "REPO_ROOT", sandbox),
                 patch.object(bot_api, "_run", side_effect=fake_run),
+                patch.object(
+                    bot_api,
+                    "_verify_deployed_challenge",
+                    return_value=(True, "team1: verified"),
+                ),
             ):
                 ok, output = bot_api._deploy_challenge_to_arena(challenge_id)
 
@@ -219,6 +243,7 @@ class BotAPIValidationTest(unittest.TestCase):
             patch.object(bot_api, "CHALLENGE_STORE", store),
             patch.object(bot_api, "AGENT_MEMORY", memory),
             patch.object(bot_api, "BUDGET_LEDGER", ledger),
+            patch.dict(os.environ, {"CHALLENGE_DOCKER_VALIDATION": "0"}),
         ):
             bot_api._generate_challenge_bg(
                 run_id,
@@ -244,9 +269,7 @@ class BotAPIValidationTest(unittest.TestCase):
         self.assertGreaterEqual(len(tool_entries), 4)
         self.assertEqual(plan_entries[0]["data"]["provider"], "fake")
         self.assertEqual(model_request_entries[0]["data"]["model_id"], "fake-v1")
-        self.assertTrue(
-            all(entry["agent_type"] == "challenge_generator" for entry in entries)
-        )
+        self.assertTrue(all(entry["agent_type"] == "challenge_generator" for entry in entries))
         with patch.object(bot_api, "AGENT_MEMORY", memory):
             markdown = bot_api._agent_log_markdown(
                 run_id,
@@ -259,7 +282,8 @@ class BotAPIValidationTest(unittest.TestCase):
     def test_prepare_match_plan_deploys_arena_before_starting_agents(self) -> None:
         order: list[str] = []
 
-        def fake_ensure():
+        def fake_ensure(challenge_run_id=None):
+            self.assertIsNone(challenge_run_id)
             order.append("deploy")
             return True, "arena ready", None, True
 
@@ -268,7 +292,7 @@ class BotAPIValidationTest(unittest.TestCase):
             return True, [{"id": "dep1", "status": "RUNNING"}], "agents ready"
 
         with (
-            patch.object(bot_api, "_ensure_latest_challenge_deployed", side_effect=fake_ensure),
+            patch.object(bot_api, "_ensure_selected_challenge_deployed", side_effect=fake_ensure),
             patch.object(bot_api, "_start_match_plan", side_effect=fake_start),
         ):
             ok, deployments, output, challenge, challenge_deployed = bot_api._prepare_match_plan()
@@ -279,6 +303,28 @@ class BotAPIValidationTest(unittest.TestCase):
         self.assertIn("arena ready", output)
         self.assertIsNone(challenge)
         self.assertTrue(challenge_deployed)
+
+    def test_challenge_store_selects_exactly_one_published_run(self) -> None:
+        db = Path(_TEMP_DIR.name) / "challenge-selection.db"
+        store = bot_api.ChallengeRunStore(db)
+        first = store.insert(
+            vulnerability="path_traversal",
+            difficulty="easy",
+            seed=1,
+        )
+        second = store.insert(
+            vulnerability="sql_injection",
+            difficulty="easy",
+            seed=2,
+        )
+        store.update(first, status="published", challenge_id="first")
+        store.update(second, status="published", challenge_id="second")
+
+        store.select(first)
+        self.assertEqual(store.selected()["id"], first)
+        store.select(second)
+        self.assertEqual(store.selected()["id"], second)
+        self.assertIsNone(store.get(first)["selected_at"])
 
 
 if __name__ == "__main__":

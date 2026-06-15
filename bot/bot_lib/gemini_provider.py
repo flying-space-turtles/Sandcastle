@@ -1,6 +1,6 @@
 """Gemini provider adapter for the Sandcastle model gateway.
 
-Cost-conscious: uses gemini-2.0-flash-lite by default (cheapest Gemini tier).
+Cost-conscious: uses gemini-2.5-flash-lite by default.
 Reads GEMINI_API_KEY from environment; never stores it.
 """
 
@@ -8,15 +8,22 @@ from __future__ import annotations
 
 import json
 import logging
+import socket
 import urllib.error
 import urllib.request
 from typing import Any
 
 from .agent_contracts import ModelProvider, ModelRequest, ModelResponse, ModelUsage, ToolCall
+from .model_gateway import (
+    ModelGatewayError,
+    ModelGatewayResponseError,
+    ModelGatewayTimeout,
+    safe_raw_response,
+)
 
 log = logging.getLogger("gemini_provider")
 
-_DEFAULT_MODEL = "gemini-2.0-flash-lite"
+_DEFAULT_MODEL = "gemini-2.5-flash-lite"
 _GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta/models"
 
 # Gemini pricing (per million tokens, USD) — update if Google changes rates
@@ -26,6 +33,19 @@ _DEFAULT_OUTPUT_COST_PER_M = 0.30
 
 def _gemini_url(model_id: str, api_key: str) -> str:
     return f"{_GEMINI_API_BASE}/{model_id}:generateContent?key={api_key}"
+
+
+def _gemini_error_message(body: str) -> str:
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return safe_raw_response(body, limit=800)
+    error = payload.get("error") if isinstance(payload, dict) else None
+    if isinstance(error, dict):
+        message = str(error.get("message") or error)
+        status = str(error.get("status") or "")
+        return f"{status}: {message}" if status else message
+    return safe_raw_response(payload, limit=800)
 
 
 def _build_tool_declarations(schemas: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -120,7 +140,7 @@ class GeminiProvider:
         self.call_count += 1
         schema_ids = [s["id"] for s in (request.tool_schemas or [])]
         payload: dict[str, Any] = {
-            "system_instruction": {"parts": [{"text": request.system_prompt}]},
+            "systemInstruction": {"parts": [{"text": request.system_prompt}]},
             "contents": [
                 {
                     "role": "user",
@@ -142,8 +162,8 @@ class GeminiProvider:
         }
         if schema_ids:
             decls = _build_tool_declarations(request.tool_schemas or [])
-            payload["tools"] = [{"function_declarations": decls}]
-            payload["tool_config"] = {"function_calling_config": {"mode": "ANY"}}
+            payload["tools"] = [{"functionDeclarations": decls}]
+            payload["toolConfig"] = {"functionCallingConfig": {"mode": "ANY"}}
 
         url = _gemini_url(self.model_id, self._api_key)
         data = json.dumps(payload).encode()
@@ -158,10 +178,19 @@ class GeminiProvider:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 body = json.loads(resp.read())
         except urllib.error.HTTPError as exc:
-            err_body = exc.read()[:1000].decode(errors="replace")
-            raise RuntimeError(f"Gemini API error {exc.code}: {err_body}") from exc
+            err_body = exc.read()[:4000].decode(errors="replace")
+            error = ModelGatewayError(
+                f"Gemini API error {exc.code}: {_gemini_error_message(err_body)}"
+            )
+            if 400 <= exc.code < 500 and exc.code != 429:
+                error.retryable = False  # type: ignore[attr-defined]
+            raise error from exc
         except urllib.error.URLError as exc:
-            raise RuntimeError(f"Gemini network error: {exc.reason}") from exc
+            raise ModelGatewayError(f"Gemini network error: {exc.reason}") from exc
+        except socket.timeout as exc:
+            raise ModelGatewayTimeout(f"Gemini request timed out after {timeout}s") from exc
+        except json.JSONDecodeError as exc:
+            raise ModelGatewayResponseError("Gemini response was not valid JSON") from exc
 
         candidates = body.get("candidates") or []
         tool_calls = _parse_tool_calls(candidates, schema_ids)

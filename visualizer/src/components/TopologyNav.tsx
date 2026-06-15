@@ -6,7 +6,7 @@ const MODES = [
   { id: 'topology' as Mode, label: 'Arena', icon: Boxes },
   { id: 'firewall' as Mode, label: 'Traffic', icon: RadioTower },
   { id: 'bot' as Mode, label: 'Bots', icon: Bot },
-  { id: 'agents' as Mode, label: 'Agents', icon: Brain },
+  { id: 'agents' as Mode, label: 'AI Lab', icon: Brain },
 ];
 
 const countLabel = (count: number, singular: string, plural = `${singular}s`) =>
@@ -81,7 +81,7 @@ const TopologyNav = ({
           )}
           {mode === 'scoreboard' && <span>Authoritative match operations</span>}
           {mode === 'bot' && <span>Automated team deployments</span>}
-          {mode === 'agents' && <span>AI agent runs — select provider and model</span>}
+          {mode === 'agents' && <span>Challenge generation and AI attack/defense agents</span>}
         </div>
       </header>
     </>

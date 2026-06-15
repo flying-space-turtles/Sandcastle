@@ -80,6 +80,7 @@ class AgentTelemetry:
 
         entry = AgentMemoryEntry(
             agent_id=self.agent_id,
+            agent_type=self.agent_type,
             run_id=self.run_id,
             kind="telemetry",
             summary=summary[:2000],

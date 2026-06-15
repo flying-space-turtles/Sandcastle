@@ -216,7 +216,7 @@ class AgentMemoryStore:
         with closing(self.connect()) as conn:
             rows = conn.execute(
                 """
-                SELECT agent_id, run_id, kind, summary, data_json, created_at, schema_version
+                SELECT agent_id, agent_type, run_id, kind, summary, data_json, created_at, schema_version
                 FROM agent_memory WHERE run_id = ?
                 ORDER BY id DESC LIMIT ?
                 """,
@@ -231,6 +231,7 @@ class AgentMemoryStore:
             entries.append(
                 AgentMemoryEntry(
                     agent_id=str(row["agent_id"]),
+                    agent_type=str(row["agent_type"]),
                     run_id=str(row["run_id"]),
                     kind=str(row["kind"]),
                     summary=str(row["summary"]),
@@ -263,6 +264,7 @@ def make_tool_result_entry(
     """Construct a ToolResult-shaped memory entry."""
     return AgentMemoryEntry(
         agent_id=agent_id,
+        agent_type=agent_type,
         run_id=run_id,
         kind="tool_result",
         summary=summary[:2000],

@@ -40,8 +40,12 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
         "description": "Create a new ChallengeSpec from difficulty, vulnerability kind, and seed.",
         "parameters": {
             "difficulty": {"type": "string", "enum": ["easy", "medium"]},
-            "vulnerability": {"type": "string", "enum": ["path_traversal", "command_injection", "sql_injection"]},
+            "vulnerability": {
+                "type": "string",
+                "enum": ["path_traversal", "command_injection", "sql_injection"],
+            },
             "seed": {"type": "integer", "minimum": 0},
+            "decoy_endpoints": {"type": "integer", "minimum": 0, "maximum": 5},
         },
         "required": ["difficulty", "vulnerability", "seed"],
     },
@@ -157,7 +161,7 @@ class ChallengeGeneratorAgent:
 
     def start(self, request: dict[str, Any]) -> AgentRunState:
         """Start a new challenge generation run from an organizer request."""
-        run_id = uuid.uuid4().hex[:12]
+        run_id = str(request.get("run_id") or uuid.uuid4().hex[:12])
         agent_id = "challenge-generator"
         state = AgentRunState(
             run_id=run_id,
@@ -166,7 +170,11 @@ class ChallengeGeneratorAgent:
             max_attempts=int(request.get("max_attempts", self.max_attempts)),
         )
         telem = self._telemetry(state)
-        telem.run_started(team_id=0, provider="pending", model_id="")
+        telem.run_started(
+            team_id=0,
+            provider=str(request.get("provider") or "pending"),
+            model_id=str(request.get("model_id") or ""),
+        )
         return state
 
     def execute_tool(self, state: AgentRunState, tool_call: ToolCall) -> ToolResult:
@@ -262,39 +270,62 @@ class ChallengeGeneratorAgent:
             seed=int(args.get("seed", 0)),
             vulnerability=str(args.get("vulnerability", "path_traversal")),
             difficulty=str(args.get("difficulty", "easy")),
+            decoy_endpoints=int(args.get("decoy_endpoints", 0)),
         )
         state.current_spec = spec.as_dict()
         state.last_render_id = None
         state.last_validation = None
-        return ToolResult(call_id=call.call_id, tool_id=call.tool_id, status="ok",
-                          summary=f"spec created: {spec.vulnerability} seed={spec.seed}")
+        return ToolResult(
+            call_id=call.call_id,
+            tool_id=call.tool_id,
+            status="ok",
+            summary=f"spec created: {spec.vulnerability} seed={spec.seed}",
+        )
 
     def _tool_revise(self, state: AgentRunState, call: ToolCall, args: dict) -> ToolResult:
         if not state.current_spec:
             raise ToolRejectedError("no spec to revise; call challenge.spec.create first")
         merged = {**state.current_spec, **{k: v for k, v in args.items() if v is not None}}
-        spec = ChallengeSpec(**{k: merged[k] for k in ChallengeSpec.__dataclass_fields__ if k in merged})
+        spec = ChallengeSpec(
+            **{k: merged[k] for k in ChallengeSpec.__dataclass_fields__ if k in merged}
+        )
         state.current_spec = spec.as_dict()
         state.last_render_id = None
         state.last_validation = None
-        return ToolResult(call_id=call.call_id, tool_id=call.tool_id, status="ok",
-                          summary=f"spec revised: {spec.vulnerability} seed={spec.seed}")
+        return ToolResult(
+            call_id=call.call_id,
+            tool_id=call.tool_id,
+            status="ok",
+            summary=f"spec revised: {spec.vulnerability} seed={spec.seed}",
+        )
 
     def _tool_render(self, state: AgentRunState, call: ToolCall) -> ToolResult:
         if not state.current_spec:
             raise ToolRejectedError("no spec; call challenge.spec.create first")
-        spec = ChallengeSpec(**{k: state.current_spec[k] for k in ChallengeSpec.__dataclass_fields__ if k in state.current_spec})
+        spec = ChallengeSpec(
+            **{
+                k: state.current_spec[k]
+                for k in ChallengeSpec.__dataclass_fields__
+                if k in state.current_spec
+            }
+        )
         candidate = render_spec(spec, staging_root=self.staging_root)
         state.last_render_id = candidate.render_id
         state.last_validation = None
-        return ToolResult(call_id=call.call_id, tool_id=call.tool_id, status="ok",
-                          summary=f"rendered to staging: {candidate.render_id}",
-                          data={"render_id": candidate.render_id})
+        return ToolResult(
+            call_id=call.call_id,
+            tool_id=call.tool_id,
+            status="ok",
+            summary=f"rendered to staging: {candidate.render_id}",
+            data={"render_id": candidate.render_id},
+        )
 
     def _tool_validate(self, state: AgentRunState, call: ToolCall) -> ToolResult:
         if not state.last_render_id:
             raise ToolRejectedError("no staged candidate; call challenge.render first")
-        staging_root = self.staging_root or (Path(__file__).resolve().parents[3] / "challenges" / "staging")
+        staging_root = self.staging_root or (
+            Path(__file__).resolve().parents[3] / "challenges" / "staging"
+        )
         candidate_dir = staging_root / state.last_render_id
         report = self.validator.validate(
             candidate_dir=candidate_dir,
@@ -313,18 +344,27 @@ class ChallengeGeneratorAgent:
 
     def _tool_inspect(self, state: AgentRunState, call: ToolCall) -> ToolResult:
         if not state.last_validation:
-            return ToolResult(call_id=call.call_id, tool_id=call.tool_id, status="ok",
-                              summary="no validation result yet")
+            return ToolResult(
+                call_id=call.call_id,
+                tool_id=call.tool_id,
+                status="ok",
+                summary="no validation result yet",
+            )
         error = (state.last_validation.get("error") or "no error detail")[:2000]
-        steps_failed = [s for s in state.last_validation.get("steps", []) if s.get("status") == "failed"]
+        steps_failed = [
+            s for s in state.last_validation.get("steps", []) if s.get("status") == "failed"
+        ]
         summary = f"status={state.last_validation.get('status')} error={error} failed_steps={len(steps_failed)}"
-        return ToolResult(call_id=call.call_id, tool_id=call.tool_id, status="ok",
-                          summary=summary[:2000])
+        return ToolResult(
+            call_id=call.call_id, tool_id=call.tool_id, status="ok", summary=summary[:2000]
+        )
 
     def _tool_publish(self, state: AgentRunState, call: ToolCall) -> ToolResult:
         if not state.last_validation or state.last_validation.get("status") != "passed":
             raise ToolRejectedError("cannot publish: validation has not passed")
-        staging_root = self.staging_root or (Path(__file__).resolve().parents[3] / "challenges" / "staging")
+        staging_root = self.staging_root or (
+            Path(__file__).resolve().parents[3] / "challenges" / "staging"
+        )
         candidate_dir = staging_root / state.last_render_id
         try:
             challenge_id = self.registry.publish(
@@ -337,23 +377,34 @@ class ChallengeGeneratorAgent:
         state.published_challenge_id = challenge_id
         state.status = "published"
         state.touch()
-        return ToolResult(call_id=call.call_id, tool_id=call.tool_id, status="ok",
-                          summary=f"published challenge_id={challenge_id}",
-                          data={"challenge_id": challenge_id})
+        return ToolResult(
+            call_id=call.call_id,
+            tool_id=call.tool_id,
+            status="ok",
+            summary=f"published challenge_id={challenge_id}",
+            data={"challenge_id": challenge_id},
+        )
 
     def _tool_discard(self, state: AgentRunState, call: ToolCall) -> ToolResult:
         self._cleanup_staging(state)
         state.last_render_id = None
         state.last_validation = None
         state.touch()
-        return ToolResult(call_id=call.call_id, tool_id=call.tool_id, status="ok",
-                          summary="staged candidate discarded")
+        return ToolResult(
+            call_id=call.call_id,
+            tool_id=call.tool_id,
+            status="ok",
+            summary="staged candidate discarded",
+        )
 
     def _cleanup_staging(self, state: AgentRunState) -> None:
         if not state.last_render_id:
             return
         import shutil
-        staging_root = self.staging_root or (Path(__file__).resolve().parents[3] / "challenges" / "staging")
+
+        staging_root = self.staging_root or (
+            Path(__file__).resolve().parents[3] / "challenges" / "staging"
+        )
         candidate_dir = staging_root / state.last_render_id
         if candidate_dir.exists():
             shutil.rmtree(str(candidate_dir), ignore_errors=True)

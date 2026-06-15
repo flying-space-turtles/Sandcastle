@@ -25,7 +25,13 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from bot_lib import ARENA_DEFAULTS, action_catalog, planner_catalog
-from bot_lib.agent_contracts import AgentMemoryEntry, AgentType, BudgetPolicy, ModelProvider, ModelRequest
+from bot_lib.agent_contracts import (
+    AgentMemoryEntry,
+    AgentType,
+    BudgetPolicy,
+    ModelProvider,
+    ModelRequest,
+)
 from bot_lib.agent_memory import AgentMemoryStore
 from bot_lib.agent_planning import (
     AgentPlanningService,
@@ -459,7 +465,13 @@ class MatchPlanStore:
                     config_json = excluded.config_json,
                     updated_at = excluded.updated_at
                 """,
-                (team_id, assignment_kind, json.dumps(config, sort_keys=True), timestamp, timestamp),
+                (
+                    team_id,
+                    assignment_kind,
+                    json.dumps(config, sort_keys=True),
+                    timestamp,
+                    timestamp,
+                ),
             )
 
     def delete(self, team_ids: list[int] | None = None) -> int:
@@ -700,38 +712,142 @@ def _challenge_artifact_summary(challenge_id: str | None) -> dict[str, Any] | No
     root = REPO_ROOT / "challenges" / "published" / challenge_id
     if not root.is_dir():
         return None
-    files = [
-        _safe_rel(path)
+    artifact_files = [
+        path
         for path in sorted(root.rglob("*"))
         if path.is_file() and "__pycache__" not in path.parts and not path.name.endswith(".pyc")
     ]
+    files = [_safe_rel(path) for path in artifact_files]
     tree, truncated = _artifact_tree(root)
     manifest: dict[str, Any] = {}
     registry_manifest: dict[str, Any] = {}
-    for name, target in (("manifest.json", manifest), ("registry_manifest.json", registry_manifest)):
+    validation: dict[str, Any] = {}
+    for name, target in (
+        ("manifest.json", manifest),
+        ("registry_manifest.json", registry_manifest),
+        ("validation_report.json", validation),
+    ):
         manifest_path = root / name
         if manifest_path.is_file():
             try:
                 target.update(json.loads(manifest_path.read_text(encoding="utf-8")))
             except (OSError, json.JSONDecodeError):
                 pass
+    spec = manifest.get("spec", {})
+    vulnerability = str(spec.get("vulnerability") or registry_manifest.get("vulnerability") or "")
+    file_roles = {
+        "app/app.py": "Team-owned vulnerable Flask service source",
+        "checker.py": "Trusted PUT, GET, and CHECK contract used by the gameserver",
+        "Dockerfile": "Container build for each team's service",
+        "docker-compose.yml": "Standalone validation compose definition",
+        "README.md": "Human-readable challenge and match contract",
+        "manifest.json": "Deterministic specification and file digests",
+        "registry_manifest.json": "Publication identity and source digest",
+        "validation_report.json": "Exploit, checker, and patch validation evidence",
+    }
+    file_entries = []
+    for path in artifact_files:
+        rel = str(path.relative_to(root))
+        role = file_roles.get(rel)
+        if role is None and rel.startswith("exploits/"):
+            role = "Reference opponent exploit that must capture the live flag"
+        elif role is None and rel.startswith("patches/"):
+            role = "Reference defensive patch that must preserve SLA and block the exploit"
+        elif role is None and rel.startswith("app/templates/"):
+            role = "Service user interface template"
+        elif role is None:
+            role = "Generated challenge support file"
+        file_entries.append(
+            {
+                "path": rel,
+                "size": path.stat().st_size,
+                "role": role,
+                "language": path.suffix.lstrip(".") or "text",
+            }
+        )
+    descriptions = {
+        "path_traversal": "An attacker escapes the intended notes directory and reads the rotating flag file.",
+        "command_injection": "An attacker injects a shell command into diagnostics and reads the rotating flag file.",
+        "sql_injection": "An attacker bypasses authentication, opens the admin notes, and extracts the rotating flag.",
+    }
+    app_source = ""
+    app_path = root / "app" / "app.py"
+    if app_path.is_file():
+        app_source = app_path.read_text(encoding="utf-8", errors="replace")
+    step_names = {
+        str(step.get("name"))
+        for step in validation.get("steps", [])
+        if isinstance(step, dict) and step.get("status") == "passed"
+    }
+    runtime_steps = {
+        "checker_before_patch",
+        "exploit_before_patch",
+        "checker_after_patch",
+        "exploit_blocked_after_patch",
+    }
+    validation = {
+        **validation,
+        "runtime_validated": runtime_steps.issubset(step_names),
+        "contract_compatible": (
+            '@app.post("/internal/plant")' in app_source
+            and '@app.get("/internal/retrieve")' in app_source
+        ),
+    }
+    validation["deployable"] = bool(
+        validation.get("status") == "passed"
+        and validation["runtime_validated"]
+        and validation["contract_compatible"]
+    )
     return {
         "challenge_id": challenge_id,
         "path": _safe_rel(root),
         "file_count": len(files),
         "files": files[:80],
+        "file_entries": file_entries[:80],
         "tree": "\n".join(tree),
         "tree_truncated": truncated,
         "service": manifest.get("service", {}),
-        "spec": manifest.get("spec", {}),
+        "spec": spec,
         "registry": registry_manifest,
+        "validation": validation,
+        "description": descriptions.get(vulnerability, "Generated attack-defense challenge."),
     }
 
 
-def _challenge_payload(row: dict[str, Any]) -> dict[str, Any]:
+def _challenge_payload(
+    row: dict[str, Any],
+    *,
+    include_artifact: bool = True,
+) -> dict[str, Any]:
     payload = ChallengeRunStore.payload(row)
-    payload["artifact"] = _challenge_artifact_summary(payload.get("challenge_id"))
+    artifact = _challenge_artifact_summary(payload.get("challenge_id"))
+    payload["deployable"] = bool(artifact and artifact.get("validation", {}).get("deployable"))
+    if include_artifact:
+        payload["artifact"] = artifact
+    selected = CHALLENGE_STORE.selected()
+    deployed = CHALLENGE_STORE.deployed()
+    payload["is_selected"] = bool(selected and selected.get("id") == payload.get("id"))
+    payload["is_active"] = bool(deployed and deployed.get("id") == payload.get("id"))
     return payload
+
+
+def _challenge_file(challenge_id: str, relative_path: str) -> dict[str, Any]:
+    root = (REPO_ROOT / "challenges" / "published" / challenge_id).resolve()
+    if not root.is_dir():
+        raise FileNotFoundError("published challenge directory not found")
+    clean = relative_path.strip().lstrip("/")
+    target = (root / clean).resolve()
+    if not clean or not target.is_file() or root not in target.parents:
+        raise FileNotFoundError("challenge file not found")
+    if target.stat().st_size > 128_000:
+        raise ValueError("challenge file is too large to display")
+    content = target.read_text(encoding="utf-8", errors="replace")
+    return {
+        "path": clean,
+        "size": target.stat().st_size,
+        "language": target.suffix.lstrip(".") or "text",
+        "content": content,
+    }
 
 
 def _record_challenge_artifact(run_id: str, challenge_id: str) -> None:
@@ -813,7 +929,8 @@ def _generate_challenge_bg(
         staging.mkdir(parents=True, exist_ok=True)
         published_root.mkdir(parents=True, exist_ok=True)
 
-        validator = ChallengeValidator(docker=False)
+        docker_validation = os.environ.get("CHALLENGE_DOCKER_VALIDATION", "1") != "0"
+        validator = ChallengeValidator(docker=docker_validation)
         registry = ChallengeRegistry(published_root)
         mem = AGENT_MEMORY  # shared store — run_id is the key
 
@@ -852,7 +969,14 @@ def _generate_challenge_bg(
                 "published_root": _safe_rel(published_root),
             },
         )
-        state = agent.start({**spec_dict, "run_id": run_id, "provider": selected_provider.value, "model_id": effective_model})
+        state = agent.start(
+            {
+                **spec_dict,
+                "run_id": run_id,
+                "provider": selected_provider.value,
+                "model_id": effective_model,
+            }
+        )
         max_steps = max(4, max_attempts * 4)
         system_prompt = (
             "You are Sandcastle's ChallengeGeneratorAgent. Create and publish one "
@@ -983,9 +1107,15 @@ def _generate_challenge_bg(
                     "published_challenge_id": state.published_challenge_id,
                     "last_validation": {
                         "status": (state.last_validation or {}).get("status"),
-                        "exploit_succeeded": (state.last_validation or {}).get("vulnerable_exploit_succeeded"),
-                        "checker_before": (state.last_validation or {}).get("checker_passed_before_patch"),
-                    } if state.last_validation else None,
+                        "exploit_succeeded": (state.last_validation or {}).get(
+                            "vulnerable_exploit_succeeded"
+                        ),
+                        "checker_before": (state.last_validation or {}).get(
+                            "checker_passed_before_patch"
+                        ),
+                    }
+                    if state.last_validation
+                    else None,
                 },
             )
 
@@ -1048,6 +1178,14 @@ def _deploy_challenge_to_arena(challenge_id: str) -> tuple[bool, str]:
     challenge_path = REPO_ROOT / "challenges" / "published" / challenge_id
     if not challenge_path.is_dir():
         return False, f"challenge directory not found: {challenge_path}"
+    artifact = _challenge_artifact_summary(challenge_id)
+    validation = artifact.get("validation", {}) if artifact else {}
+    if not validation.get("deployable"):
+        return (
+            False,
+            "Challenge is not runtime-verified with the current flag/checker/patch contract. "
+            "Generate a new challenge before selecting it for a match.",
+        )
 
     outputs: list[str] = []
     ok = True
@@ -1062,6 +1200,11 @@ def _deploy_challenge_to_arena(challenge_id: str) -> tuple[bool, str]:
         checker_ok, checker_output = _install_generated_checker(challenge_path)
         outputs.append(f"gameserver checker:\n{checker_output}")
         ok = checker_ok
+
+    if ok:
+        verify_ok, verify_output = _verify_deployed_challenge(challenge_path)
+        outputs.append(f"live validation:\n{verify_output}")
+        ok = verify_ok
 
     return ok, "\n\n".join(outputs)
 
@@ -1173,7 +1316,9 @@ def _deploy_challenge_to_team(team_id: int, challenge_path: Path) -> tuple[bool,
     if rc != 0:
         return False, "\n".join(part for part in outputs if part)
 
-    rc, out = _run(["docker", "cp", f"{challenge_path}/.", f"{container}:{service_dir}/"], timeout=60)
+    rc, out = _run(
+        ["docker", "cp", f"{challenge_path}/.", f"{container}:{service_dir}/"], timeout=60
+    )
     outputs.append(out)
     if rc != 0:
         return False, "\n".join(part for part in outputs if part)
@@ -1243,7 +1388,7 @@ def _deploy_challenge_to_team(team_id: int, challenge_path: Path) -> tuple[bool,
 
 
 def _generated_checker_wrapper() -> str:
-    return '''from __future__ import annotations
+    return """from __future__ import annotations
 
 import json
 import urllib.error
@@ -1292,10 +1437,28 @@ class GeneratedChallengeChecker:
             return CheckerOutcome(CheckerStatus.MUMBLE, f"flag plant failed: {type(exc).__name__}")
 
     def get(self, request: GetRequest) -> CheckerOutcome:
-        health = self._health(request)
-        if health.status is not CheckerStatus.UP:
-            return health
-        return CheckerOutcome(CheckerStatus.UP, "generated challenge is healthy after flag plant")
+        try:
+            req = urllib.request.Request(
+                self._url(request, "/internal/retrieve"),
+                headers={
+                    "X-Plant-Token": request.context.credentials.require("plant_token"),
+                },
+            )
+            with urllib.request.urlopen(req, timeout=request.context.timeout_seconds) as resp:
+                payload = json.loads(resp.read().decode("utf-8", errors="replace"))
+            if payload.get("flag") != request.flag:
+                return CheckerOutcome(
+                    CheckerStatus.CORRUPT,
+                    "previously planted flag is missing from the generated challenge",
+                )
+            return CheckerOutcome(
+                CheckerStatus.UP,
+                "previously planted flag was retrieved exactly",
+            )
+        except urllib.error.HTTPError as exc:
+            return CheckerOutcome(CheckerStatus.MUMBLE, f"flag retrieval returned HTTP {exc.code}")
+        except Exception as exc:
+            return CheckerOutcome(CheckerStatus.MUMBLE, f"flag retrieval failed: {type(exc).__name__}")
 
     def check(self, request: CheckRequest) -> CheckerOutcome:
         return self._health(request)
@@ -1319,7 +1482,73 @@ class GeneratedChallengeChecker:
 
 
 CHECKER = GeneratedChallengeChecker()
-'''
+"""
+
+
+def _verify_deployed_challenge(challenge_path: Path) -> tuple[bool, str]:
+    exploits = sorted((challenge_path / "exploits").glob("exploit_*.py"))
+    if len(exploits) != 1:
+        return False, f"expected exactly one reference exploit, found {len(exploits)}"
+
+    outputs: list[str] = []
+    probe_flag = "FLAG{0123456789abcdef0123456789abcdef}"
+    for team_id in range(1, ARENA_DEFAULTS.team_count + 1):
+        credentials = _checker_credentials(team_id)
+        container = f"team{team_id}-vuln"
+        plant_body = json.dumps({"flag": probe_flag})
+        rc, out = _run(
+            [
+                "docker",
+                "exec",
+                container,
+                "curl",
+                "-fsS",
+                "--max-time",
+                "5",
+                "-H",
+                "Content-Type: application/json",
+                "-H",
+                f"X-Plant-Token: {credentials['plant_token']}",
+                "-d",
+                plant_body,
+                f"http://127.0.0.1:{ARENA_DEFAULTS.service_port}/internal/plant",
+            ],
+            timeout=10,
+        )
+        if rc != 0 or "planted" not in out:
+            return False, f"team{team_id}: flag plant verification failed: {out}"
+
+        rc, out = _run(
+            [
+                "docker",
+                "exec",
+                container,
+                "curl",
+                "-fsS",
+                "--max-time",
+                "5",
+                "-H",
+                f"X-Plant-Token: {credentials['plant_token']}",
+                f"http://127.0.0.1:{ARENA_DEFAULTS.service_port}/internal/retrieve",
+            ],
+            timeout=10,
+        )
+        if rc != 0 or probe_flag not in out:
+            return False, f"team{team_id}: exact flag retrieval verification failed"
+
+        target_ip = ARENA_DEFAULTS.service_ip_pattern.replace("{team}", str(team_id))
+        rc, out = _run(
+            ["python3", str(exploits[0]), target_ip, str(ARENA_DEFAULTS.service_port)],
+            timeout=15,
+        )
+        if rc != 0 or probe_flag not in out:
+            return (
+                False,
+                f"team{team_id}: reference exploit did not capture the planted flag: {out}",
+            )
+        outputs.append(f"team{team_id}: checker retrieval and reference exploit passed")
+
+    return True, "\n".join(outputs)
 
 
 def _install_generated_checker(challenge_path: Path) -> tuple[bool, str]:
@@ -1327,7 +1556,10 @@ def _install_generated_checker(challenge_path: Path) -> tuple[bool, str]:
     container = "sandcastle-gameserver"
     rc, out = _run(["docker", "inspect", container], timeout=10)
     if rc != 0:
-        return False, "sandcastle-gameserver is not running; start the arena before deploying a challenge"
+        return (
+            False,
+            "sandcastle-gameserver is not running; start the arena before deploying a challenge",
+        )
 
     checker_path = ""
     try:
@@ -1362,7 +1594,25 @@ def _latest_published_challenge() -> dict[str, Any] | None:
 
 
 def _latest_deployed_challenge() -> dict[str, Any] | None:
-    return next((row for row in CHALLENGE_STORE.list(limit=100) if row.get("deployed_at")), None)
+    return CHALLENGE_STORE.deployed()
+
+
+def _selected_challenge() -> dict[str, Any] | None:
+    return CHALLENGE_STORE.selected()
+
+
+def _select_challenge_run(row: dict[str, Any]) -> dict[str, Any]:
+    if row.get("status") != "published":
+        raise ValueError(f"challenge is not published (status={row.get('status')})")
+    artifact = _challenge_artifact_summary(str(row.get("challenge_id") or ""))
+    if not artifact or not artifact.get("validation", {}).get("deployable"):
+        raise ValueError(
+            "challenge is not runtime-verified with the current arena contract; generate it again"
+        )
+    selected = CHALLENGE_STORE.select(str(row["id"]))
+    if selected is None or not selected.get("selected_at"):
+        raise ValueError("challenge could not be selected")
+    return selected
 
 
 def _deploy_challenge_run(row: dict[str, Any]) -> tuple[bool, str, dict[str, Any] | None]:
@@ -1371,26 +1621,38 @@ def _deploy_challenge_run(row: dict[str, Any]) -> tuple[bool, str, dict[str, Any
         return False, "no challenge_id - publish must complete first", row
     ok, output = _deploy_challenge_to_arena(str(challenge_id))
     if ok:
+        CHALLENGE_STORE.select(str(row["id"]))
         CHALLENGE_STORE.update(str(row["id"]), deployed_at=_now())
         row = CHALLENGE_STORE.get(str(row["id"]))
     return ok, output, row
 
 
-def _ensure_latest_challenge_deployed() -> tuple[bool, str, dict[str, Any] | None, bool]:
-    latest_published = _latest_published_challenge()
-    if latest_published is None:
-        return True, "No published challenge exists; keeping the current arena service.", None, False
+def _ensure_selected_challenge_deployed(
+    challenge_run_id: str | None = None,
+) -> tuple[bool, str, dict[str, Any] | None, bool]:
+    selected = CHALLENGE_STORE.get(challenge_run_id) if challenge_run_id else _selected_challenge()
+    if selected is None:
+        return (
+            False,
+            "No challenge is selected. Choose 'Use for next match' in Challenge Lab first.",
+            None,
+            False,
+        )
+    try:
+        selected = _select_challenge_run(selected)
+    except ValueError as exc:
+        return False, str(exc), selected, False
 
-    latest_deployed = _latest_deployed_challenge()
-    if latest_deployed and latest_deployed.get("id") == latest_published.get("id"):
+    active = _latest_deployed_challenge()
+    if active and active.get("id") == selected.get("id"):
         return (
             True,
-            f"Latest challenge already deployed: {latest_published.get('challenge_id')}",
-            latest_published,
+            f"Selected challenge is already active: {selected.get('challenge_id')}",
+            selected,
             False,
         )
 
-    ok, output, deployed = _deploy_challenge_run(latest_published)
+    ok, output, deployed = _deploy_challenge_run(selected)
     return ok, output, deployed, ok
 
 
@@ -1549,15 +1811,32 @@ def _assignment_payload(row: sqlite3.Row) -> dict[str, Any]:
 
 def _match_plan_payload() -> dict[str, Any]:
     rows = MATCH_PLAN.list()
+    published = CHALLENGE_STORE.list_published()
     latest_deployed = _latest_deployed_challenge()
     latest_published = _latest_published_challenge()
+    selected = _selected_challenge()
     return {
         "assignments": [_assignment_payload(row) for row in rows],
-        "deployed_challenge": _challenge_payload(latest_deployed) if latest_deployed else None,
-        "latest_published_challenge": _challenge_payload(latest_published) if latest_published else None,
+        "deployed_challenge": (
+            _challenge_payload(latest_deployed, include_artifact=False) if latest_deployed else None
+        ),
+        "selected_challenge": (
+            _challenge_payload(selected, include_artifact=False) if selected else None
+        ),
+        "latest_published_challenge": (
+            _challenge_payload(latest_published, include_artifact=False)
+            if latest_published
+            else None
+        ),
+        "published_challenges": [
+            payload
+            for row in published
+            if (payload := _challenge_payload(row, include_artifact=False)).get("deployable")
+        ],
         "instructions": [
-            "Generate a challenge in Challenge Lab.",
-            "Start the match from Match controls. The newest published challenge is copied into every team service workspace and the arena is restarted before round 1.",
+            "Generate and inspect a challenge in Challenge Lab.",
+            "Select exactly one published challenge for the next match.",
+            "Prepare the match to deploy that selected challenge to every team and verify its checker and exploit.",
             "Assign scripted bots or AI attack/defense agents to teams.",
             "Queued bots and AI attack/defense agents launch from the same Match controls flow.",
         ],
@@ -1622,14 +1901,19 @@ def _start_match_plan() -> tuple[bool, list[dict[str, Any]], str]:
 
 
 def _prepare_match_plan(
-    *, deploy_latest_challenge: bool = True, start_agents: bool = True
+    *,
+    deploy_selected_challenge: bool = True,
+    start_agents: bool = True,
+    challenge_run_id: str | None = None,
 ) -> tuple[bool, list[dict[str, Any]], str, dict[str, Any] | None, bool]:
     outputs: list[str] = []
     deployed_challenge: dict[str, Any] | None = None
     challenge_deployed = False
 
-    if deploy_latest_challenge:
-        ok, output, challenge_row, challenge_deployed = _ensure_latest_challenge_deployed()
+    if deploy_selected_challenge:
+        ok, output, challenge_row, challenge_deployed = _ensure_selected_challenge_deployed(
+            challenge_run_id
+        )
         if output:
             outputs.append(f"challenge:\n{output}")
         if challenge_row is not None:
@@ -1843,7 +2127,12 @@ def _deploy_one(team_id: int, public_config: dict[str, Any]) -> tuple[dict[str, 
 def _available_providers() -> list[dict[str, Any]]:
     """Return which providers are configured (no keys exposed)."""
     providers = [
-        {"id": "fake", "label": "Fake (no cost, offline)", "available": True, "models": ["fake-v1"]},
+        {
+            "id": "fake",
+            "label": "Fake (no cost, offline)",
+            "available": True,
+            "models": ["fake-v1"],
+        },
         {
             "id": "openai",
             "label": "OpenAI",
@@ -1935,8 +2224,9 @@ def _agent_log_markdown(run_id: str, limit: int = 100, title: str = "Agent Log")
         if display_data:
             try:
                 tree = display_data.pop("tree", "")
-                json_str = json.dumps(display_data, indent=2, ensure_ascii=False)
-                lines.append(f"```json\n{json_str[:2000]}\n```\n")
+                if display_data:
+                    json_str = json.dumps(display_data, indent=2, ensure_ascii=False)
+                    lines.append(f"```json\n{json_str[:2000]}\n```\n")
                 if tree:
                     lines.append("**Created file tree:**\n")
                     lines.append(f"```text\n{str(tree)[:4000]}\n```\n")
@@ -2139,6 +2429,32 @@ class BotAPIHandler(BaseHTTPRequestHandler):
         if path == "/challenges":
             rows = CHALLENGE_STORE.list(limit=100)
             self._json(200, {"challenges": [_challenge_payload(r) for r in rows]})
+            return
+
+        challenge_file_match = re.fullmatch(r"/challenges/([a-zA-Z0-9._-]+)/(files|activity)", path)
+        if challenge_file_match:
+            run_id = challenge_file_match.group(1)
+            resource = challenge_file_match.group(2)
+            row = CHALLENGE_STORE.get(run_id)
+            if row is None:
+                self._json(404, {"error": "challenge run not found"})
+                return
+            if resource == "activity":
+                query = parse_qs(parsed.query)
+                limit = min(200, max(1, int(query.get("limit", ["100"])[0])))
+                self._json(
+                    200,
+                    {"entries": AGENT_MEMORY.recent_as_dicts(run_id, limit=limit)},
+                )
+                return
+            relative_path = parse_qs(parsed.query).get("path", [""])[0]
+            challenge_id = str(row.get("challenge_id") or "")
+            try:
+                self._json(200, {"file": _challenge_file(challenge_id, relative_path)})
+            except FileNotFoundError as exc:
+                self._json(404, {"error": str(exc)})
+            except ValueError as exc:
+                self._json(400, {"error": str(exc)})
             return
 
         challenge_match = re.fullmatch(r"/challenges/([a-zA-Z0-9._-]+)(?:/(log|deploy))?", path)
@@ -2362,10 +2678,34 @@ class BotAPIHandler(BaseHTTPRequestHandler):
             )
             return
 
+        challenge_select_match = re.fullmatch(r"/challenges/([a-zA-Z0-9._-]+)/select", path)
+        if challenge_select_match:
+            run_id = challenge_select_match.group(1)
+            row = CHALLENGE_STORE.get(run_id)
+            if row is None:
+                self._json(404, {"error": "challenge run not found"})
+                return
+            try:
+                selected = _select_challenge_run(row)
+            except ValueError as exc:
+                self._json(409, {"error": str(exc)})
+                return
+            self._json(
+                200,
+                {
+                    "ok": True,
+                    "challenge": _challenge_payload(selected),
+                    **_match_plan_payload(),
+                },
+            )
+            return
+
         if path == "/match-plan/agents":
             try:
                 teams = _validate_teams(body.get("teams"))
-                assignment_kind = str(body.get("assignment_kind", body.get("kind", "attack_defense")))
+                assignment_kind = str(
+                    body.get("assignment_kind", body.get("kind", "attack_defense"))
+                )
                 if assignment_kind not in {"attack_defense", "scripted"}:
                     raise ValueError("assignment_kind must be attack_defense or scripted")
                 if assignment_kind == "attack_defense":
@@ -2411,8 +2751,16 @@ class BotAPIHandler(BaseHTTPRequestHandler):
 
         if path == "/match-plan/prepare":
             ok, deployments, output, challenge, challenge_deployed = _prepare_match_plan(
-                deploy_latest_challenge=bool(body.get("deploy_latest_challenge", True)),
+                deploy_selected_challenge=bool(
+                    body.get(
+                        "deploy_selected_challenge",
+                        body.get("deploy_latest_challenge", True),
+                    )
+                ),
                 start_agents=bool(body.get("start_agents", True)),
+                challenge_run_id=(
+                    str(body.get("challenge_run_id")) if body.get("challenge_run_id") else None
+                ),
             )
             self._json(
                 200 if ok else 500,

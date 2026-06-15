@@ -61,8 +61,16 @@ interface DashboardSnapshot {
 
 interface MatchPlanSnapshot {
   assignments: Array<{ team_id: number; assignment_kind: string }>;
-  deployed_challenge: { vulnerability?: string; challenge_id?: string } | null;
-  latest_published_challenge: { id?: string; vulnerability?: string; challenge_id?: string; deployed_at?: string | null } | null;
+  deployed_challenge: { id?: string; vulnerability?: string; challenge_id?: string } | null;
+  selected_challenge: { id?: string; vulnerability?: string; challenge_id?: string } | null;
+  latest_published_challenge: { id?: string; vulnerability?: string; challenge_id?: string } | null;
+  published_challenges: Array<{
+    id: string;
+    vulnerability?: string;
+    difficulty?: string;
+    seed?: number;
+    challenge_id?: string;
+  }>;
 }
 
 const POLL_INTERVAL_MS = 2500;
@@ -84,7 +92,8 @@ const Scoreboard = () => {
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [controlsOpen, setControlsOpen] = useState(false);
   const [startQueuedAgents, setStartQueuedAgents] = useState(true);
-  const [deployLatestChallenge, setDeployLatestChallenge] = useState(true);
+  const [deploySelectedChallenge, setDeploySelectedChallenge] = useState(true);
+  const [selectedChallengeId, setSelectedChallengeId] = useState('');
   const [matchPlan, setMatchPlan] = useState<MatchPlanSnapshot | null>(null);
   const [now, setNow] = useState(Date.now());
 
@@ -119,9 +128,31 @@ const Scoreboard = () => {
     if (!controlsOpen) return;
     fetch(`${botApiUrl}/match-plan`, { cache: 'no-store' })
       .then((response) => response.ok ? response.json() : null)
-      .then((body) => setMatchPlan(body as MatchPlanSnapshot | null))
+      .then((body) => {
+        const plan = body as MatchPlanSnapshot | null;
+        setMatchPlan(plan);
+        setSelectedChallengeId(plan?.selected_challenge?.id || '');
+      })
       .catch(() => setMatchPlan(null));
   }, [controlsOpen]);
+
+  const chooseChallenge = async (runId: string) => {
+    setSelectedChallengeId(runId);
+    setActionError(null);
+    if (!runId) return;
+    try {
+      const response = await fetch(`${botApiUrl}/challenges/${runId}/select`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      const body = await response.json().catch(() => ({})) as MatchPlanSnapshot & { error?: string };
+      if (!response.ok) throw new Error(body.error || `challenge selection failed with HTTP ${response.status}`);
+      setMatchPlan(body);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'challenge selection failed');
+    }
+  };
 
   const runAction = async (action: 'start' | 'pause' | 'resume' | 'step' | 'finish' | 'restart') => {
     if (!operatorToken) {
@@ -137,12 +168,13 @@ const Scoreboard = () => {
     setPendingAction(action);
     setActionError(null);
     try {
-      if (action === 'start' && (deployLatestChallenge || startQueuedAgents)) {
+      if (action === 'start' && (deploySelectedChallenge || startQueuedAgents)) {
         const planResponse = await fetch(`${botApiUrl}/match-plan/prepare`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            deploy_latest_challenge: deployLatestChallenge,
+            deploy_selected_challenge: deploySelectedChallenge,
+            challenge_run_id: selectedChallengeId || undefined,
             start_agents: startQueuedAgents,
           }),
         });
@@ -324,20 +356,31 @@ const Scoreboard = () => {
               <span>Challenge<strong>{matchPlan?.deployed_challenge?.vulnerability?.replaceAll('_', ' ') || 'Default service'}</strong></span>
               <span>Queued agents<strong>{matchPlan?.assignments.length ?? 0}</strong></span>
             </div>
+            <label className="drawer-field match-challenge-field">
+              <span>Challenge for this match</span>
+              <select value={selectedChallengeId} onChange={(event) => void chooseChallenge(event.target.value)}>
+                <option value="">Select a published challenge</option>
+                {(matchPlan?.published_challenges || []).map(challenge => (
+                  <option value={challenge.id} key={challenge.id}>
+                    {challenge.vulnerability?.replaceAll('_', ' ')} · {challenge.difficulty} · seed {challenge.seed}
+                  </option>
+                ))}
+              </select>
+            </label>
             <div className="control-summary">
-              <span>Latest published<strong>{matchPlan?.latest_published_challenge?.vulnerability?.replaceAll('_', ' ') || 'None'}</strong></span>
-              <span>Arena deploy<strong>{matchPlan?.latest_published_challenge?.deployed_at ? 'Current' : matchPlan?.latest_published_challenge ? 'Pending' : 'Default'}</strong></span>
+              <span>Selected<strong>{matchPlan?.selected_challenge?.vulnerability?.replaceAll('_', ' ') || 'None'}</strong></span>
+              <span>Arena active<strong>{matchPlan?.deployed_challenge?.id === matchPlan?.selected_challenge?.id ? 'Selected challenge' : 'Different challenge'}</strong></span>
             </div>
             <label className="check-field" style={{ margin: '12px 24px 0' }}>
-              <input type="checkbox" checked={deployLatestChallenge} onChange={(event) => setDeployLatestChallenge(event.target.checked)} />
-              Deploy newest published challenge and restart arena before Start match
+              <input type="checkbox" checked={deploySelectedChallenge} onChange={(event) => setDeploySelectedChallenge(event.target.checked)} />
+              Deploy and live-verify the selected challenge before round 1
             </label>
             <label className="check-field" style={{ margin: '12px 24px 0' }}>
               <input type="checkbox" checked={startQueuedAgents} onChange={(event) => setStartQueuedAgents(event.target.checked)} />
               Start queued bots and agents before Start match creates round 1
             </label>
             <div className="control-actions" role="group" aria-label="Scheduler actions">
-              <button disabled={matchStatus !== 'CREATED' || pendingAction !== null} onClick={() => void runAction('start')}><Play size={16} />Start match</button>
+              <button disabled={matchStatus !== 'CREATED' || pendingAction !== null || (deploySelectedChallenge && !selectedChallengeId)} onClick={() => void runAction('start')}><Play size={16} />Start match</button>
               <button disabled={matchStatus !== 'RUNNING' || pendingAction !== null} onClick={() => void runAction('pause')}><Pause size={16} />Pause</button>
               <button disabled={matchStatus !== 'PAUSED' || pendingAction !== null} onClick={() => void runAction('resume')}><Play size={16} />Resume</button>
               <button disabled={matchStatus !== 'PAUSED' || pendingAction !== null} onClick={() => void runAction('step')}><SkipForward size={16} />Run one round</button>

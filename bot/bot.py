@@ -153,7 +153,7 @@ def execute_tasks(ctx: BotContext, tasks: list[BotTask]) -> dict[int, list[str]]
             warn(f"unknown action skipped: {task.action_id}")
             continue
 
-        if action.scope != "target":
+        if action.scope not in {"target", "self"}:
             continue
 
         required = getattr(action, "required_capabilities", frozenset())
@@ -176,10 +176,14 @@ def execute_tasks(ctx: BotContext, tasks: list[BotTask]) -> dict[int, list[str]]
         ):
             continue
 
-        if task.target_team == ctx.my_team:
+        if action.scope == "target" and task.target_team == ctx.my_team:
             continue
 
-        if action.category == "Exploit" and not ping_team(ctx, task.target_team):
+        if (
+            action.scope == "target"
+            and action.category == "Exploit"
+            and not ping_team(ctx, task.target_team)
+        ):
             warn(f"team{task.target_team} [{action.id}] no ping response")
             ctx.emit(
                 "action.completed",
@@ -189,8 +193,14 @@ def execute_tasks(ctx: BotContext, tasks: list[BotTask]) -> dict[int, list[str]]
             )
             continue
 
-        ctx.emit("action.started", action_id=action.id, target_team=task.target_team)
-        result = action.run(ctx, task.target_team)
+        actual_target = task.target_team if action.scope == "target" else ctx.my_team
+        ctx.emit(
+            "action.started",
+            action_id=action.id,
+            target_team=actual_target,
+            arguments={k: v for k, v in task.arguments.items() if k not in {"flag", "token"}},
+        )
+        result = action.run(ctx, actual_target, task.arguments)
         log_action_result(result)
         ctx.emit(
             "action.completed",
@@ -200,7 +210,7 @@ def execute_tasks(ctx: BotContext, tasks: list[BotTask]) -> dict[int, list[str]]
             message=result.message,
             flag_count=len(result.flags),
         )
-        if result.flags:
+        if action.scope == "target" and result.flags:
             flags_by_team[task.target_team].extend(result.flags)
             for flag in sorted(set(result.flags)):
                 fingerprint = ctx.flag_fingerprint(flag)
