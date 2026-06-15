@@ -213,6 +213,35 @@ class PlanningHTTPTest(unittest.TestCase):
         conn.close()
         return response.status, body
 
+    def _get(self, path: str, token: str | None = None) -> tuple[int, dict]:
+        conn = http.client.HTTPConnection(
+            "127.0.0.1",
+            self.server.server_address[1],
+            timeout=3,
+        )
+        headers = {}
+        if token is not None:
+            headers["Authorization"] = f"Bearer {token}"
+        conn.request("GET", path, headers=headers)
+        response = conn.getresponse()
+        body = json.loads(response.read())
+        conn.close()
+        return response.status, body
+
+    def test_operator_routes_require_arena_operator_token(self) -> None:
+        status, body = self._get("/health")
+        self.assertEqual(status, 200)
+        self.assertTrue(body["ok"])
+
+        status, _ = self._get("/match-plan")
+        self.assertEqual(status, 401)
+        status, _ = self._get("/match-plan", "wrong-token")
+        self.assertEqual(status, 401)
+
+        status, body = self._get("/match-plan", self.bot_api._operator_token())
+        self.assertEqual(status, 200)
+        self.assertIn("assignments", body)
+
     def test_plan_endpoint_authenticates_and_returns_tasks(self) -> None:
         status, _ = self._post(None, _payload())
         self.assertEqual(status, 401)

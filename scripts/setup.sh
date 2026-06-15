@@ -770,6 +770,7 @@ EOF
     networks:
       ctf-network:
         ipv4_address: ${ARENA_NETWORK_PREFIX}.0.4
+      control-plane: {}
     ports:
       - "127.0.0.1:${ARENA_BOT_API_PORT}:${ARENA_BOT_API_PORT}"
     volumes:
@@ -806,6 +807,8 @@ EOF
     hostname: sandcastle-visualizer
     networks:
       - control-plane
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "${ARENA_VISUALIZER_BIND_HOST}:${ARENA_VISUALIZER_PORT}:80"
     labels:
