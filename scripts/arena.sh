@@ -257,12 +257,25 @@ app_container_state() {
 app_is_healthy() {
     local team_id="$1"
     local machine="team${team_id}-vuln"
+    local app="team${team_id}-vuln-app"
 
     [[ "$(container_state "${machine}")" == "running" ]] || return 1
     [[ "$(app_container_state "${team_id}")" == "running" ]] || return 1
-    docker exec "${machine}" \
-        curl -fsS --max-time 1 "http://127.0.0.1:${ARENA_SERVICE_PORT}/health" \
-        >/dev/null 2>&1
+
+    if [[ "${ARENA_ISOLATION_MODE}" == "dind" ]]; then
+        # In DinD mode the app runs inside the nested Docker daemon.
+        # network_mode: container:teamN-vuln refers to the *inner* teamN-vuln
+        # container, so the app is reachable on 127.0.0.1 only from within
+        # that inner network namespace — reached via a nested docker exec.
+        docker exec "${machine}" \
+            docker exec "${app}" \
+            curl -fsS --max-time 2 "http://127.0.0.1:${ARENA_SERVICE_PORT}/health" \
+            > /dev/null 2>&1
+    else
+        docker exec "${machine}" \
+            curl -fsS --max-time 1 "http://127.0.0.1:${ARENA_SERVICE_PORT}/health" \
+            > /dev/null 2>&1
+    fi
 }
 
 run_setup() {
