@@ -86,12 +86,14 @@ class FirewallTest(unittest.TestCase):
         self.assertIn(firewall.INPUT_RULE_COMMENT, rule)
 
     def test_redirect_rule_exempts_proxy_gateway_source(self):
-        rule = firewall._rule_spec()
+        bypass = firewall._proxy_bypass_rule_spec()
+        redirect = firewall._rule_spec()
 
-        self.assertIn("10.10.0.0/16", rule)
-        self.assertIn("!", rule)
-        self.assertIn("10.10.0.1/32", rule)
-        self.assertLess(rule.index("!"), rule.index("-d"))
+        self.assertIn("10.10.0.1/32", bypass)
+        self.assertIn("10.10.0.0/16", bypass)
+        self.assertIn(firewall.PROXY_BYPASS_COMMENT, bypass)
+        self.assertIn("RETURN", bypass)
+        self.assertNotIn("!", redirect)
 
     def test_install_and_remove_manage_redirect_and_input_rules(self):
         calls = []
@@ -110,6 +112,7 @@ class FirewallTest(unittest.TestCase):
 
         install_calls = [args for args, _ in calls if "-I" in args or "-A" in args]
         self.assertIn(firewall._proxy_input_rule_spec(), install_calls)
+        self.assertIn(firewall._proxy_bypass_rule_spec(), install_calls)
         self.assertIn(firewall._rule_spec(), install_calls)
         inspected = [args for args, _ in calls if args[:3] == ["-t", "filter", "-S"]]
         self.assertTrue(inspected)

@@ -141,8 +141,14 @@ verify_firewall_runtime() {
     docker exec sandcastle-firewall sh -ec '
         test "$(cat /proc/sys/net/bridge/bridge-nf-call-iptables)" = "1"
         iptables -t nat -C PREROUTING \
+            -s "$CTF_GATEWAY/32" \
+            -d "$CTF_NETWORK" \
+            -p tcp \
+            -m comment \
+            --comment sandcastle-firewall-proxy-bypass \
+            -j RETURN
+        iptables -t nat -C PREROUTING \
             -s "$CTF_NETWORK" \
-            ! -s "$CTF_GATEWAY/32" \
             -d "$CTF_NETWORK" \
             -p tcp \
             -m comment \
