@@ -363,7 +363,8 @@ services:
       network: host
     image: sandcastle/team${team_num}-vuln-app:latest
     container_name: team${team_num}-vuln-app
-    network_mode: host
+    ports:
+      - "${ARENA_SERVICE_PORT}:${ARENA_SERVICE_PORT}"
 EOF
         IFS=',' read -r -a dind_dns_servers <<< "${ARENA_DIND_DNS_SERVERS}"
         if ((${#dind_dns_servers[@]} > 0)); then
