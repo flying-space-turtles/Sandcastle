@@ -60,6 +60,13 @@ log_info()  { printf '[*] %s\n' "$*"; }
 log_ok()    { printf '[+] %s\n' "$*"; }
 log_fail()  { printf '[!] FAIL: %s\n' "$*" >&2; }
 
+status_has_line() {
+    local needle="$1"
+    local haystack="$2"
+
+    grep -Fq -- "${needle}" <<<"${haystack}"
+}
+
 die() {
     log_fail "$*"
     exit 1
@@ -343,6 +350,9 @@ EOF
     assert_log "docker compose -f ${FIXTURE}/docker-compose.yml up -d --build --remove-orphans"
     assert_log "docker rm -f team1-vuln-app"
     assert_log "docker compose -f ${FIXTURE}/teams/generated/team1/example-vuln/docker-compose.yml up"
+    status_sample=$'team1\tgateway\trunning\t-\nteam1\tapp\trunning\thealthy\n-\tfirewall\trunning\t-'
+    status_has_line $'-\tfirewall\trunning' "${status_sample}" ||
+        die "status matcher failed for firewall line"
     log_ok "[local] 1/5  up: ok"
 
     # -----------------------------------------------------------------------
@@ -476,12 +486,12 @@ run_docker_tests() {
     log_info "[docker] 2/7  status check"
     status_output="$("${ARENA}" status --format tsv)"
     for team in 1 2; do
-        grep -Fq "team${team}"$'\t'"gateway"$'\t'"running" <<<"${status_output}" ||
+        status_has_line "team${team}"$'\t'"gateway"$'\t'"running" "${status_output}" ||
             die "team${team} gateway not running"
-        grep -Fq "team${team}"$'\t'"app"$'\t'"running"$'\t'"healthy" <<<"${status_output}" ||
+        status_has_line "team${team}"$'\t'"app"$'\t'"running"$'\t'"healthy" "${status_output}" ||
             die "team${team} app not healthy"
     done
-    grep -Fq $'-\tfirewall\trunning' <<<"${status_output}" ||
+    status_has_line $'-\tfirewall\trunning' "${status_output}" ||
         die "firewall not running"
     log_ok "[docker] 2/7  status: ok"
 

@@ -8,6 +8,7 @@ FIXTURE="${TMP_ROOT}/fixture"
 LOG_FILE="${TMP_ROOT}/staging-dind-smoke.log"
 PHASE_FILE="${TMP_ROOT}/staging-smoke-phase"
 DIND_ISOLATION_LOG_FILE="${TMP_ROOT}/dind-isolation.log"
+INTEGRATION_LOG_FILE="${TMP_ROOT}/integration.log"
 
 cleanup() {
     rm -rf "${TMP_ROOT}"
@@ -54,6 +55,7 @@ cat > "${FIXTURE}/tests/integration_test.sh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf 'integration\n' >> "${STAGING_DIND_SMOKE_TEST_LOG:?}"
+printf 'integration-output\n'
 EOF
 
 chmod +x \
@@ -68,6 +70,7 @@ smoke_output="$(
     SANDCASTLE_ROOT="${FIXTURE}" \
         SANDCASTLE_STAGING_PHASE_FILE="${PHASE_FILE}" \
         SANDCASTLE_DIND_ISOLATION_LOG_FILE="${DIND_ISOLATION_LOG_FILE}" \
+        SANDCASTLE_INTEGRATION_LOG_FILE="${INTEGRATION_LOG_FILE}" \
         STAGING_DIND_SMOKE_TEST_LOG="${LOG_FILE}" \
         "${FIXTURE}/scripts/staging-dind-smoke.sh" --teams 4 --timeout 321
 )"
@@ -85,6 +88,7 @@ EOF
 actual="$(cat "${LOG_FILE}")"
 phase="$(cat "${PHASE_FILE}")"
 dind_log="$(cat "${DIND_ISOLATION_LOG_FILE}")"
+integration_log="$(cat "${INTEGRATION_LOG_FILE}")"
 
 if [[ "${actual}" != "${expected}" ]]; then
     echo "Unexpected staging DinD smoke order" >&2
@@ -100,6 +104,10 @@ if [[ "${phase}" != "running full integration test" ]]; then
 fi
 if [[ "${dind_log}" != "dind-isolation-output" ]]; then
     echo "Unexpected DinD isolation log: ${dind_log}" >&2
+    exit 1
+fi
+if [[ "${integration_log}" != "integration-output" ]]; then
+    echo "Unexpected integration log: ${integration_log}" >&2
     exit 1
 fi
 

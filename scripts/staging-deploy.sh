@@ -89,6 +89,7 @@ failure_report() {
     nested_dind_report
     staging_phase_report
     dind_isolation_log_report
+    integration_log_report
     echo "::endgroup::"
 }
 
@@ -106,6 +107,14 @@ dind_isolation_log_report() {
     [[ -n "${log_file}" && -f "${log_file}" ]] || return 0
     echo "--- DinD isolation test log tail ---"
     tail -n 200 "${log_file}" || true
+}
+
+integration_log_report() {
+    local log_file="${SANDCASTLE_INTEGRATION_LOG_FILE:-}"
+
+    [[ -n "${log_file}" && -f "${log_file}" ]] || return 0
+    echo "--- full integration test log tail ---"
+    tail -n 240 "${log_file}" || true
 }
 
 nested_dind_report() {
@@ -149,7 +158,7 @@ nested_dind_report() {
 }
 
 remote_run() {
-    local phase_file dind_isolation_log_file
+    local phase_file dind_isolation_log_file integration_log_file
 
     validate_common
     if [[ "${STAGING_DEPLOY_READ_STDIN:-0}" == "1" ]]; then
@@ -175,10 +184,13 @@ remote_run() {
     mkdir -p "${ROOT}/tmp"
     phase_file="${ROOT}/tmp/staging-smoke-phase"
     dind_isolation_log_file="${ROOT}/tmp/dind-isolation.log"
+    integration_log_file="${ROOT}/tmp/integration-test.log"
     rm -f "${phase_file}"
     rm -f "${dind_isolation_log_file}"
+    rm -f "${integration_log_file}"
     export SANDCASTLE_STAGING_PHASE_FILE="${phase_file}"
     export SANDCASTLE_DIND_ISOLATION_LOG_FILE="${dind_isolation_log_file}"
+    export SANDCASTLE_INTEGRATION_LOG_FILE="${integration_log_file}"
 
     echo "[*] Removing previous Sandcastle staging deployment..."
     ./scripts/cleanup.sh --remove-generated

@@ -9,6 +9,7 @@ TIMEOUT="${SANDCASTLE_STAGING_TIMEOUT:-240}"
 PHASE="initializing"
 PHASE_FILE="${SANDCASTLE_STAGING_PHASE_FILE:-}"
 DIND_ISOLATION_LOG_FILE="${SANDCASTLE_DIND_ISOLATION_LOG_FILE:-}"
+INTEGRATION_LOG_FILE="${SANDCASTLE_INTEGRATION_LOG_FILE:-}"
 
 set_phase() {
     PHASE="$1"
@@ -97,4 +98,9 @@ else
 fi
 set_phase "running full integration test"
 echo "[*] [staging-smoke] Running full integration test..."
-"${ROOT}/tests/integration_test.sh"
+if [[ -n "${INTEGRATION_LOG_FILE}" ]]; then
+    mkdir -p "$(dirname "${INTEGRATION_LOG_FILE}")"
+    "${ROOT}/tests/integration_test.sh" 2>&1 | tee "${INTEGRATION_LOG_FILE}"
+else
+    "${ROOT}/tests/integration_test.sh"
+fi
