@@ -28,6 +28,7 @@ import websockets
 # Configuration
 
 CTF_NETWORK = ipaddress.ip_network(os.environ["CTF_NETWORK"])
+CTF_GATEWAY = os.environ.get("CTF_GATEWAY") or str(next(CTF_NETWORK.hosts()))
 WS_PORT = int(os.environ["WS_PORT"])
 PROXY_PORT = int(os.environ["PROXY_PORT"])
 EVENT_QUEUE_SIZE = int(os.environ.get("EVENT_QUEUE_SIZE", "2048"))
@@ -127,6 +128,9 @@ def _rule_spec() -> list[str]:
         "PREROUTING",
         "-s",
         str(CTF_NETWORK),
+        "!",
+        "-s",
+        f"{CTF_GATEWAY}/32",
         "-d",
         str(CTF_NETWORK),
         "-p",

@@ -85,6 +85,14 @@ class FirewallTest(unittest.TestCase):
         self.assertIn("DNAT", rule)
         self.assertIn(firewall.INPUT_RULE_COMMENT, rule)
 
+    def test_redirect_rule_exempts_proxy_gateway_source(self):
+        rule = firewall._rule_spec()
+
+        self.assertIn("10.10.0.0/16", rule)
+        self.assertIn("!", rule)
+        self.assertIn("10.10.0.1/32", rule)
+        self.assertLess(rule.index("!"), rule.index("-d"))
+
     def test_install_and_remove_manage_redirect_and_input_rules(self):
         calls = []
 

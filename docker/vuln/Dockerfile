@@ -25,6 +25,7 @@ RUN apt-get update \
         vim \
         nano \
         net-tools \
+        iproute2 \
         iputils-ping \
         dnsutils \
         nmap \

@@ -211,6 +211,7 @@ services:
     network_mode: host
     environment:
       CTF_NETWORK: "10.10.0.0/16"
+      CTF_GATEWAY: "10.10.0.1"
       WS_PORT: "6789"
       PROXY_PORT: "15000"
       EVENT_QUEUE_SIZE: "2048"
