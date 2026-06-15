@@ -122,10 +122,6 @@ step "OpenAI provider contract tests"
 python3 -B "${ROOT}/tests/openai_provider_test.py"
 
 # ---------------------------------------------------------------------------
-step "Visualizer production proxy config tests"
-python3 -B "${ROOT}/tests/visualizer_proxy_test.py"
-
-# ---------------------------------------------------------------------------
 step "Authenticated agent planning API tests"
 python3 -B "${ROOT}/tests/agent_plan_api_test.py"
 

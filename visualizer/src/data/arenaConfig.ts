@@ -51,18 +51,6 @@ export const ARENA_CONFIG = {
   botLoopSeconds: requiredNumber('ARENA_BOT_LOOP_SECONDS', 0, 86400),
 };
 
-const trimTrailingSlash = (value: string) => value.replace(/\/+$/, '');
-
-export const botApiUrl = trimTrailingSlash(import.meta.env.VITE_BOT_API_URL || '/bot-api');
-export const firewallWsUrl = (() => {
-  const configured = trimTrailingSlash(import.meta.env.VITE_FIREWALL_WS_URL || '');
-  if (configured) {
-    return configured;
-  }
-  if (typeof window === 'undefined') {
-    return `ws://localhost:${ARENA_CONFIG.firewallWsPort}`;
-  }
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${window.location.host}/firewall-ws`;
-})();
+export const botApiUrl = `http://${ARENA_CONFIG.botApiHost}:${ARENA_CONFIG.botApiPort}`;
+export const firewallWsUrl = `ws://localhost:${ARENA_CONFIG.firewallWsPort}`;
 export const gameserverApiUrl = (import.meta.env.VITE_GAMESERVER_API_URL || '').replace(/\/+$/, '');

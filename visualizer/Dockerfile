@@ -19,10 +19,7 @@ RUN cd visualizer && npm run build
 
 FROM nginx:1.27-alpine
 
-ENV ARENA_BOT_API_PORT=7878 \
-    ARENA_FIREWALL_WS_PORT=6789
-
 COPY --from=build /app/visualizer/dist /usr/share/nginx/html
-COPY visualizer/nginx.conf.template /etc/nginx/templates/default.conf.template
+COPY visualizer/nginx.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 80
