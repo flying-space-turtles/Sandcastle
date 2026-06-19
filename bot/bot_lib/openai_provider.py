@@ -20,6 +20,7 @@ from .model_gateway import (
 DEFAULT_OPENAI_ENDPOINT = "https://api.openai.com/v1/responses"
 MAX_PROVIDER_RESPONSE_BYTES = 1_000_000
 _OPENAI_TOOL_NAME_PREFIX = "sandcastle_tool_"
+_OPENAI_GPT5_REASONING_EFFORT = "low"
 
 
 class OpenAIProvider:
@@ -206,7 +207,7 @@ class OpenAIProvider:
             "max_output_tokens": request.budget.max_output_tokens,
         }
         if self._uses_reasoning_effort(self.model_id):
-            body["reasoning"] = {"effort": "minimal"}
+            body["reasoning"] = {"effort": _OPENAI_GPT5_REASONING_EFFORT}
         return body
 
     @staticmethod

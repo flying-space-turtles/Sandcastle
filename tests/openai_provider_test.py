@@ -148,7 +148,7 @@ class OpenAIProviderTest(unittest.TestCase):
         self.assertEqual(body["model"], "gpt-5.4-mini")
         self.assertEqual(body["tool_choice"], "auto")
         self.assertTrue(body["parallel_tool_calls"])
-        self.assertEqual(body["reasoning"], {"effort": "minimal"})
+        self.assertEqual(body["reasoning"], {"effort": "low"})
         self.assertNotIn("text", body)
         tool = body["tools"][0]
         self.assertEqual(tool["type"], "function")
