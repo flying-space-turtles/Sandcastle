@@ -73,6 +73,28 @@ def _response_payload(plan: dict | None = None) -> dict:
     }
 
 
+def _function_call_payload(arguments: dict | str | None = None) -> dict:
+    if arguments is None:
+        arguments = {"target_team": 2}
+    return {
+        "id": "resp_123",
+        "model": "gpt-5.4-mini",
+        "output": [
+            {
+                "type": "function_call",
+                "id": "fc_123",
+                "call_id": "call-1",
+                "name": "sandcastle_tool_1",
+                "arguments": (
+                    arguments if isinstance(arguments, str) else json.dumps(arguments)
+                ),
+                "status": "completed",
+            }
+        ],
+        "usage": {"input_tokens": 100, "output_tokens": 20},
+    }
+
+
 class StubResponse:
     def __init__(self, payload: dict, request_id: str = "req_123") -> None:
         self.payload = json.dumps(payload).encode()
@@ -121,17 +143,20 @@ class OpenAIProviderTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             OpenAIProvider(api_key="key", model_id="")
 
-    def test_request_uses_responses_structured_output(self) -> None:
+    def test_request_uses_responses_function_tools(self) -> None:
         body = self.provider._request_body(_request())
         self.assertEqual(body["model"], "gpt-5.4-mini")
-        self.assertEqual(body["text"]["format"]["type"], "json_schema")
-        self.assertTrue(body["text"]["format"]["strict"])
-        schema = body["text"]["format"]["schema"]
-        _assert_strict_object_schemas(self, schema)
-        item_schema = schema["properties"]["tool_calls"]["items"]["anyOf"][0]
-        tool_enum = item_schema["properties"]["tool_id"]["enum"]
-        self.assertEqual(tool_enum, ["recon.health"])
-        arguments = item_schema["properties"]["arguments"]
+        self.assertEqual(body["tool_choice"], "auto")
+        self.assertTrue(body["parallel_tool_calls"])
+        self.assertEqual(body["reasoning"], {"effort": "minimal"})
+        self.assertNotIn("text", body)
+        tool = body["tools"][0]
+        self.assertEqual(tool["type"], "function")
+        self.assertEqual(tool["name"], "sandcastle_tool_1")
+        self.assertIn("recon.health", tool["description"])
+        self.assertTrue(tool["strict"])
+        arguments = tool["parameters"]
+        _assert_strict_object_schemas(self, arguments)
         self.assertEqual(arguments["required"], ["target_team", "vuln_type"])
         self.assertEqual(arguments["properties"]["target_team"]["type"], "integer")
         self.assertEqual(arguments["properties"]["vuln_type"]["type"], ["string", "null"])
@@ -143,19 +168,7 @@ class OpenAIProviderTest(unittest.TestCase):
     def test_parses_tool_calls_usage_request_id_and_cost(self) -> None:
         with patch(
             "urllib.request.urlopen",
-            return_value=StubResponse(
-                _response_payload(
-                    {
-                        "tool_calls": [
-                            {
-                                "call_id": "call-1",
-                                "tool_id": "recon.health",
-                                "arguments": {"target_team": 2, "vuln_type": None},
-                            }
-                        ]
-                    }
-                )
-            ),
+            return_value=StubResponse(_function_call_payload({"target_team": 2, "vuln_type": None})),
         ):
             response = self.provider.complete(_request(), timeout=2.0)
         self.assertEqual(response.tool_calls[0].tool_id, "recon.health")
@@ -172,15 +185,16 @@ class OpenAIProviderTest(unittest.TestCase):
         self.assertEqual(response.finish_reason, "refused")
         self.assertEqual(response.tool_calls, [])
 
-    def test_rejects_missing_or_invalid_structured_output(self) -> None:
-        missing = _response_payload()
-        missing["output"] = []
-        with patch("urllib.request.urlopen", return_value=StubResponse(missing)):
+    def test_rejects_incomplete_or_invalid_structured_output(self) -> None:
+        incomplete = _response_payload()
+        incomplete["status"] = "incomplete"
+        incomplete["incomplete_details"] = {"reason": "max_output_tokens"}
+        with patch("urllib.request.urlopen", return_value=StubResponse(incomplete)):
             with self.assertRaises(ModelGatewayResponseError):
                 self.provider.complete(_request(), timeout=2.0)
 
         invalid = _response_payload()
-        invalid["output"][0]["content"][0]["text"] = "not-json"
+        invalid["output"][0]["content"][0]["text"] = "{not-json"
         with patch("urllib.request.urlopen", return_value=StubResponse(invalid)):
             with self.assertRaises(ModelGatewayResponseError):
                 self.provider.complete(_request(), timeout=2.0)
