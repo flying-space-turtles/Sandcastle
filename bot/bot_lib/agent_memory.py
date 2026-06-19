@@ -246,6 +246,14 @@ class AgentMemoryStore:
         """Return recent entries as plain dicts (for API responses)."""
         return [e.as_dict() for e in self.recent(run_id, limit)]
 
+    def delete_run(self, run_id: str) -> int:
+        """Delete all memory entries for a run. Returns deleted row count."""
+        with closing(self.connect()) as conn:
+            cursor = conn.execute("DELETE FROM agent_memory WHERE run_id = ?", (run_id,))
+            deleted = cursor.rowcount if cursor.rowcount is not None else 0
+            conn.commit()
+        return deleted
+
     def prune(self, run_id: str) -> int:
         """Manually trigger retention enforcement. Returns deleted row count."""
         return self._prune(run_id)

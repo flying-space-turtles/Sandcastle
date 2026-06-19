@@ -153,7 +153,15 @@ remove_generated_workspaces() {
 
     if [[ -d "${generated_dir}" ]]; then
         echo "[*] Removing generated team workspaces..."
-        rm -rf "${generated_dir}"
+        if rm -rf "${generated_dir}" 2>/dev/null; then
+            return
+        fi
+        if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+            sudo -n rm -rf "${generated_dir}"
+            return
+        fi
+        echo "cleanup.sh: failed to remove ${generated_dir}; rerun with sudo or fix file ownership" >&2
+        return 1
     else
         echo "[*] No generated team workspaces found."
     fi
