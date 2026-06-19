@@ -71,7 +71,7 @@ The script:
 1. validates all required staging secrets and variables
 2. writes the SSH key and known-hosts data to temporary files
 3. creates the remote staging directory
-4. syncs the PR checkout with `rsync --delete --delete-excluded`
+4. syncs the PR checkout with `rsync --delete`, preserving remote runtime data
 5. runs the remote deployment in `STAGING_DEPLOY_PATH`
 
 On the VPS, the deployment:

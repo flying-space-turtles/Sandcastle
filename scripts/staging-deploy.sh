@@ -268,10 +268,12 @@ local_deploy() {
         "mkdir -p ${deploy_path_q}"
 
     echo "[*] Syncing checkout to staging VPS..."
-    rsync -az --delete --delete-excluded \
+    rsync -az --delete \
         --exclude '.git/' \
+        --exclude '.sandcastle/' \
         --exclude '.env' \
         --exclude '.env.*' \
+        --exclude 'challenges/' \
         --exclude '*.log' \
         --exclude 'logs/' \
         --exclude 'tmp/' \
