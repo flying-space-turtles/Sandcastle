@@ -2787,6 +2787,72 @@ summary:focus-visible {
 }
 .deployment-stats b { color: var(--ops-text); font-size: 14px; }
 
+.agent-stage-rail {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.agent-stage-rail span {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 24px;
+  overflow: hidden;
+  border: 1px solid rgba(164, 190, 207, 0.11);
+  border-radius: 6px;
+  color: #6f8794;
+  background: rgba(255, 255, 255, 0.022);
+  font-size: 8px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.agent-stage-rail span.is-done {
+  color: #78e4b1;
+  border-color: rgba(66, 211, 146, 0.2);
+  background: rgba(66, 211, 146, 0.055);
+}
+
+.agent-stage-rail span.is-active {
+  color: #dffaff;
+  border-color: rgba(50, 197, 232, 0.44);
+  background: rgba(50, 197, 232, 0.11);
+  box-shadow: inset 0 -2px 0 rgba(50, 197, 232, 0.48);
+}
+
+.agent-card-stage {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 10px;
+  border-left: 2px solid rgba(50, 197, 232, 0.58);
+  border-radius: 7px;
+  background: rgba(255, 255, 255, 0.024);
+}
+
+.agent-card-stage strong {
+  color: #dcf6ff;
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.agent-card-stage span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ops-muted);
+  font: 10px "SFMono-Regular", Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .deployment-card__footer {
   display: flex;
   justify-content: space-between;
@@ -2925,6 +2991,204 @@ summary:focus-visible {
   color: var(--ops-muted);
   background: rgba(10, 22, 31, 0.96);
   font-size: 10px;
+}
+
+.agent-inspector {
+  width: min(860px, 100vw);
+  overflow: hidden;
+}
+
+.agent-inspector .drawer-heading,
+.agent-inspector .drawer-footer {
+  flex: 0 0 auto;
+}
+
+.agent-inspector__status {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  padding: 14px 20px 10px;
+  border-bottom: 1px solid rgba(164, 190, 207, 0.08);
+}
+
+.agent-inspector__status strong {
+  color: #dcf6ff;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.agent-inspector__status small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ops-muted);
+  font: 10px "SFMono-Regular", Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-inspector > .agent-stage-rail {
+  flex: 0 0 auto;
+  padding: 12px 20px 14px;
+  border-bottom: 1px solid var(--ops-line);
+}
+
+.agent-inspector__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 18px 20px 22px;
+}
+
+.agent-event-list,
+.agent-change-list,
+.agent-thinking-list {
+  display: grid;
+  gap: 8px;
+}
+
+.agent-event-card,
+.agent-change-list article,
+.agent-thinking-list article {
+  border: 1px solid rgba(164, 190, 207, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.agent-event-card {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 11px 12px;
+  border-left: 3px solid rgba(50, 197, 232, 0.36);
+}
+
+.agent-event-card--plan { border-left-color: rgba(167, 139, 250, 0.6); }
+.agent-event-card--modify { border-left-color: rgba(245, 185, 66, 0.72); }
+.agent-event-card--verify { border-left-color: rgba(66, 211, 146, 0.72); }
+.agent-event-card--remember { border-left-color: rgba(148, 163, 184, 0.56); }
+
+.agent-event-card > span {
+  display: inline-flex;
+  justify-content: center;
+  min-height: 24px;
+  border: 1px solid rgba(50, 197, 232, 0.16);
+  border-radius: 6px;
+  padding: 5px 7px;
+  color: #9fddea;
+  background: rgba(50, 197, 232, 0.055);
+  font-size: 8px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.agent-event-card > div,
+.agent-change-list article > div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.agent-event-card header,
+.agent-thinking-list header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.agent-event-card strong,
+.agent-change-list strong,
+.agent-thinking-list strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #e1edf2;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-event-card p,
+.agent-change-list p,
+.agent-thinking-list p {
+  margin: 0;
+  color: #a9bdc7;
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.agent-event-card small,
+.agent-change-list small,
+.agent-event-card time,
+.agent-thinking-list time {
+  color: #718997;
+  font-size: 9px;
+}
+
+.agent-change-list article {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 12px;
+}
+
+.agent-change-list svg {
+  color: var(--ops-amber);
+}
+
+.agent-thinking-list article {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.agent-thinking-list dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+
+.agent-thinking-list dl div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 8px;
+  border-radius: 7px;
+  background: rgba(2, 6, 23, 0.22);
+}
+
+.agent-thinking-list dt {
+  color: #718997;
+  font-size: 8px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.agent-thinking-list dd {
+  min-width: 0;
+  max-height: 64px;
+  overflow: hidden;
+  margin: 0;
+  color: #c7d8df;
+  font: 9px/1.45 "SFMono-Regular", Consolas, monospace;
+  overflow-wrap: anywhere;
+}
+
+.agent-raw-log {
+  min-height: 360px;
+  max-height: none;
+  overflow: auto;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid rgba(164, 190, 207, 0.12);
+  border-radius: 8px;
+  color: #a8dfea;
+  background: #050d13;
+  font: 10px/1.6 "SFMono-Regular", Consolas, monospace;
+  white-space: pre-wrap;
 }
 
 .inspect-status {

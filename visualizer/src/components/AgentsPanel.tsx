@@ -69,7 +69,14 @@ interface AgentRun {
   provider: string;
   model_id: string;
   run_id: string;
-  summary: { captures: number; accepted: number; failures: number; current_activity: { type: string } | null };
+  stage?: { id: AgentStageId; label: string; detail: string };
+  summary: {
+    captures: number;
+    accepted: number;
+    failures: number;
+    current_activity: Record<string, unknown> | null;
+    last_event?: Record<string, unknown> | null;
+  };
 }
 
 interface MatchAssignment {
@@ -95,6 +102,20 @@ interface ActivityEntry {
   data?: Record<string, unknown>;
 }
 
+interface DeploymentEvent {
+  ts?: string;
+  type: string;
+  action_id?: string;
+  target_team?: number;
+  status?: string;
+  message?: string;
+  arguments?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+type AgentStageId = 'observe' | 'plan' | 'call' | 'modify' | 'verify' | 'remember';
+type AgentTab = 'timeline' | 'changes' | 'thinking' | 'raw';
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 async function api<T>(path: string, opts?: RequestInit): Promise<T> {
@@ -119,6 +140,151 @@ function renderMd(md: string): string {
 }
 
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : String(error);
+
+const AGENT_STAGES: Array<{ id: AgentStageId; label: string }> = [
+  { id: 'observe', label: 'Observe' },
+  { id: 'plan', label: 'Plan' },
+  { id: 'call', label: 'Call' },
+  { id: 'modify', label: 'Modify' },
+  { id: 'verify', label: 'Verify' },
+  { id: 'remember', label: 'Remember' },
+];
+
+function stageIndex(stage?: AgentStageId) {
+  return Math.max(0, AGENT_STAGES.findIndex(item => item.id === stage));
+}
+
+function actionStage(actionId = ''): AgentStageId {
+  if (actionId.startsWith('defend.apply_patch')) return 'modify';
+  if (actionId.startsWith('defend.run_checker') || actionId.startsWith('defend.run_exploit_regression')) return 'verify';
+  if (actionId.startsWith('defend.inspect') || actionId.startsWith('defend.read') || actionId.startsWith('defend.search')) return 'observe';
+  if (actionId.startsWith('attack.submit')) return 'verify';
+  return 'call';
+}
+
+function eventStage(event: DeploymentEvent): AgentStageId {
+  if (event.type === 'planner.model_usage' || event.type === 'round.planned') return 'plan';
+  if (event.type === 'action.started' || event.type === 'action.completed') return actionStage(event.action_id || '');
+  if (event.type === 'submission.started' || event.type === 'submission.completed') return 'verify';
+  if (event.type === 'deployment.sleeping' || event.type === 'round.completed') return 'remember';
+  return 'observe';
+}
+
+function memoryStage(entry: ActivityEntry): AgentStageId {
+  const data = entry.data || {};
+  const toolId = String(data.tool_id || '');
+  const eventType = String(data.event_type || '');
+  if (entry.kind === 'tool_call' || entry.kind === 'tool_result') return actionStage(toolId);
+  if (eventType.includes('plan')) return 'plan';
+  if (eventType.includes('stopped') || eventType.includes('pruned')) return 'remember';
+  return 'observe';
+}
+
+function eventTitle(event: DeploymentEvent) {
+  if (event.action_id) return event.action_id;
+  return event.type.replace(/\./g, ' ');
+}
+
+function eventDetail(event: DeploymentEvent) {
+  const parts = [
+    event.status,
+    event.message,
+    typeof event.target_team === 'number' ? `team ${event.target_team}` : '',
+    typeof event.tasks_accepted === 'number' ? `${event.tasks_accepted}/${event.tasks_proposed || 0} tasks` : '',
+    typeof event.tokens_used === 'number' ? `${event.tokens_used} tokens` : '',
+  ].filter(Boolean);
+  return parts.join(' · ') || 'No additional detail';
+}
+
+function activityLabel(activity: Record<string, unknown> | null | undefined) {
+  if (!activity) return 'Waiting for telemetry';
+  return String(activity.type || activity.event_type || activity.tool_id || 'Waiting for telemetry')
+    .replace(/\./g, ' ');
+}
+
+function memoryTitle(entry: ActivityEntry) {
+  const data = entry.data || {};
+  return String(data.tool_id || data.event_type || entry.kind).replace(/\./g, ' ');
+}
+
+function memoryDetail(entry: ActivityEntry) {
+  const data = entry.data || {};
+  const parts = [
+    data.status ? `status ${data.status}` : '',
+    data.target_team ? `team ${data.target_team}` : '',
+    data.round_number ? `round ${data.round_number}` : '',
+    data.tasks_accepted !== undefined ? `${data.tasks_accepted}/${data.tasks_proposed || 0} tasks` : '',
+    data.input_tokens !== undefined ? `${data.input_tokens}+${data.output_tokens || 0} tokens` : '',
+  ].filter(Boolean);
+  return parts.join(' · ') || entry.summary || 'No additional detail';
+}
+
+function parseDiffFiles(diff: unknown) {
+  if (typeof diff !== 'string') return [];
+  const files = new Set<string>();
+  diff.split('\n').forEach(line => {
+    const match = /^(?:---|\+\+\+) [ab]\/(.+)$/.exec(line.trim());
+    if (match && match[1] !== '/dev/null') files.add(match[1]);
+  });
+  return [...files];
+}
+
+function changedFilesFrom(events: DeploymentEvent[], memory: ActivityEntry[]) {
+  const changes = new Map<string, { path: string; source: string; status: string; detail: string }>();
+  for (const event of events) {
+    const actionId = event.action_id || '';
+    if (actionId === 'defend.apply_patch') {
+      const files = parseDiffFiles(event.arguments?.diff);
+      (files.length ? files : ['patch payload']).forEach(path => {
+        changes.set(path, {
+          path,
+          source: 'Patch',
+          status: String(event.status || event.type.replace('action.', '')),
+          detail: eventDetail(event),
+        });
+      });
+    }
+    if (actionId === 'defend.read_file' && typeof event.arguments?.path === 'string') {
+      changes.set(String(event.arguments.path), {
+        path: String(event.arguments.path),
+        source: 'Read',
+        status: String(event.status || 'inspected'),
+        detail: eventDetail(event),
+      });
+    }
+  }
+  for (const entry of memory) {
+    const data = entry.data || {};
+    const toolId = String(data.tool_id || '');
+    const path = typeof data.path === 'string' ? data.path : '';
+    if (path && (toolId === 'defend.read_file' || toolId === 'defend.apply_patch')) {
+      changes.set(path, {
+        path,
+        source: toolId === 'defend.apply_patch' ? 'Patch result' : 'Read result',
+        status: String(data.status || entry.kind),
+        detail: entry.summary,
+      });
+    }
+  }
+  return [...changes.values()];
+}
+
+function StageRail({ active }: { active?: AgentStageId }) {
+  const activeIndex = stageIndex(active);
+  return (
+    <div className="agent-stage-rail" aria-label="Agent stage">
+      {AGENT_STAGES.map((stage, index) => (
+        <span
+          key={stage.id}
+          className={`${index < activeIndex ? 'is-done' : ''} ${index === activeIndex ? 'is-active' : ''}`}
+          title={stage.label}
+        >
+          {stage.label}
+        </span>
+      ))}
+    </div>
+  );
+}
 
 // ── Sub-components ───────────────────────────────────────────────────────────
 
@@ -232,6 +398,189 @@ function LogDrawer({ title, runId, endpoint, onClose }: {
             </button>
           </div>
         )}
+      </aside>
+    </div>
+  );
+}
+
+function AgentInspector({
+  run,
+  onClose,
+  onStop,
+}: {
+  run: AgentRun;
+  onClose: () => void;
+  onStop: (id: string) => void;
+}) {
+  const [tab, setTab] = useState<AgentTab>('timeline');
+  const [memory, setMemory] = useState<ActivityEntry[]>([]);
+  const [events, setEvents] = useState<DeploymentEvent[]>([]);
+  const [logs, setLogs] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const active = ['RUNNING', 'DEPLOYING'].includes(run.status);
+
+  useEffect(() => {
+    let cancelled = false;
+    const loadActivity = () => {
+      Promise.all([
+        api<{ entries: ActivityEntry[] }>(`/agent-runs/${run.id}/memory?limit=120`),
+        api<{ events: DeploymentEvent[] }>(`/deployments/${run.id}/events?limit=300`),
+        api<{ lines: string[] }>(`/deployments/${run.id}/logs`),
+      ])
+        .then(([memoryBody, eventsBody, logsBody]) => {
+          if (cancelled) return;
+          setMemory(memoryBody.entries);
+          setEvents(eventsBody.events);
+          setLogs(logsBody.lines);
+          setError('');
+        })
+        .catch(err => { if (!cancelled) setError(errorMessage(err)); })
+        .finally(() => { if (!cancelled) setLoading(false); });
+    };
+    setLoading(true);
+    loadActivity();
+    const timer = active ? setInterval(loadActivity, 5000) : undefined;
+    return () => {
+      cancelled = true;
+      if (timer) clearInterval(timer);
+    };
+  }, [active, run.id]);
+
+  const timeline = [
+    ...events.map(event => ({
+      id: `event-${event.ts || ''}-${event.type}-${event.action_id || ''}`,
+      ts: event.ts || '',
+      stage: eventStage(event),
+      kind: event.type,
+      title: eventTitle(event),
+      detail: eventDetail(event),
+      summary: '',
+    })),
+    ...memory.map((entry, index) => ({
+      id: `memory-${entry.created_at}-${index}`,
+      ts: entry.created_at,
+      stage: memoryStage(entry),
+      kind: entry.kind,
+      title: memoryTitle(entry),
+      detail: memoryDetail(entry),
+      summary: entry.summary,
+    })),
+  ].sort((a, b) => a.ts.localeCompare(b.ts)).slice(-90);
+  const changes = changedFilesFrom(events, memory);
+  const thinking = [
+    ...memory.filter(entry => ['telemetry', 'tool_call', 'model_request', 'plan'].includes(entry.kind)),
+    ...events
+      .filter(event => event.type === 'planner.model_usage' || event.type === 'round.planned')
+      .map((event): ActivityEntry => ({
+        kind: event.type,
+        summary: eventDetail(event),
+        created_at: event.ts || '',
+        data: event,
+      })),
+  ].sort((a, b) => a.created_at.localeCompare(b.created_at));
+  const activeStage = run.stage?.id || timeline[timeline.length - 1]?.stage || 'observe';
+
+  return (
+    <div className="drawer-backdrop" onMouseDown={onClose}>
+      <aside className="ops-drawer agent-inspector" onMouseDown={e => e.stopPropagation()}>
+        <div className="drawer-heading">
+          <div>
+            <span className="section-icon"><Brain size={17}/></span>
+            <div>
+              <h2>{run.bot_name}</h2>
+              <p>team {run.team_id} · {run.provider}{run.model_id ? ` / ${run.model_id}` : ''}</p>
+            </div>
+          </div>
+          <button className="icon-button" onClick={onClose}><X size={17}/></button>
+        </div>
+
+        <div className="agent-inspector__status">
+          <span className={`deployment-status status-${run.status.toLowerCase()}`}>{run.status}</span>
+          <strong>{run.stage?.label || 'Observe'}</strong>
+          <small>{run.stage?.detail || activityLabel(run.summary?.current_activity)}</small>
+        </div>
+        <StageRail active={activeStage} />
+
+        <div className="inspector-tabs" role="tablist">
+          <button className={tab === 'timeline' ? 'is-active' : ''} onClick={() => setTab('timeline')}><Activity size={14}/>Timeline</button>
+          <button className={tab === 'changes' ? 'is-active' : ''} onClick={() => setTab('changes')}><FileCode2 size={14}/>Changes</button>
+          <button className={tab === 'thinking' ? 'is-active' : ''} onClick={() => setTab('thinking')}><Brain size={14}/>Thinking</button>
+          <button className={tab === 'raw' ? 'is-active' : ''} onClick={() => setTab('raw')}><ScrollText size={14}/>Raw</button>
+        </div>
+
+        <div className="agent-inspector__body">
+          {loading && <p className="empty-state">Loading agent activity...</p>}
+          {error && <div className="inline-alert">{error}</div>}
+
+          {!loading && tab === 'timeline' && (
+            <div className="agent-event-list">
+              {timeline.map(item => (
+                <article className={`agent-event-card agent-event-card--${item.stage}`} key={item.id}>
+                  <span>{AGENT_STAGES.find(stage => stage.id === item.stage)?.label}</span>
+                  <div>
+                    <header><strong>{item.title}</strong><time>{item.ts ? new Date(item.ts).toLocaleTimeString() : ''}</time></header>
+                    <p>{item.detail}</p>
+                    {item.summary && <small>{item.summary}</small>}
+                  </div>
+                </article>
+              ))}
+              {timeline.length === 0 && <p className="empty-state">No action telemetry has been recorded.</p>}
+            </div>
+          )}
+
+          {!loading && tab === 'changes' && (
+            <div className="agent-change-list">
+              {changes.map(change => (
+                <article key={`${change.source}-${change.path}`}>
+                  <FileCode2 size={15}/>
+                  <div>
+                    <strong>{change.path}</strong>
+                    <p>{change.source} · {change.status}</p>
+                    <small>{change.detail}</small>
+                  </div>
+                </article>
+              ))}
+              {changes.length === 0 && <p className="empty-state">No file reads or patch operations have been recorded.</p>}
+            </div>
+          )}
+
+          {!loading && tab === 'thinking' && (
+            <div className="agent-thinking-list">
+              {thinking.map((entry, index) => (
+                <article key={`${entry.created_at}-${entry.kind}-${index}`}>
+                  <header>
+                    <strong>{memoryTitle(entry)}</strong>
+                    <time>{entry.created_at ? new Date(entry.created_at).toLocaleTimeString() : ''}</time>
+                  </header>
+                  <p>{entry.summary || memoryDetail(entry)}</p>
+                  <dl>
+                    {Object.entries(entry.data || {}).slice(0, 8).map(([key, value]) => (
+                      <div key={key}>
+                        <dt>{key.replace(/_/g, ' ')}</dt>
+                        <dd>{typeof value === 'object' ? JSON.stringify(value) : String(value)}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                </article>
+              ))}
+              {thinking.length === 0 && <p className="empty-state">No model decisions have been recorded.</p>}
+            </div>
+          )}
+
+          {!loading && tab === 'raw' && (
+            <pre className="agent-raw-log"><code>{logs.join('\n') || 'No raw log lines available.'}</code></pre>
+          )}
+        </div>
+
+        <div className="drawer-footer">
+          <span>{timeline.length} event{timeline.length === 1 ? '' : 's'} · {changes.length} file touch{changes.length === 1 ? '' : 'es'}</span>
+          {active && (
+            <button className="danger-button" onClick={() => onStop(run.id)}>
+              <X size={15}/>Stop agent
+            </button>
+          )}
+        </div>
       </aside>
     </div>
   );
@@ -879,6 +1228,7 @@ function AgentsSection({ providers }: { providers: Provider[] }) {
               <div><strong>{a.assignment_kind === 'attack_defense' ? 'AttackDefenseAgent' : 'Scripted bot'}</strong><span>{a.config.provider || a.config.planner || 'scripted'}{a.config.model_id ? ` / ${a.config.model_id}` : ''}</span></div>
               <span className="deployment-status">{a.latest_deployment?.status || 'QUEUED'}</span>
             </div>
+            <StageRail active={a.latest_deployment?.stage?.id || 'observe'} />
             <div className="deployment-activity"><Activity size={14}/><span>Will launch from the same prepare flow used by Match controls.</span></div>
             <div className="deployment-stats"><span><b>{a.config.actions?.length ?? 0}</b> actions</span><span>{new Date(a.updated_at).toLocaleTimeString()}</span></div>
           </article>
@@ -901,9 +1251,14 @@ function AgentsSection({ providers }: { providers: Provider[] }) {
               <div><strong>{r.bot_name}</strong><span>{r.provider}{r.model_id?` / ${r.model_id}`:''}</span></div>
               <span className="deployment-status">{r.status}</span>
             </div>
+            <StageRail active={r.stage?.id || 'observe'} />
+            <div className="agent-card-stage">
+              <strong>{r.stage?.label || 'Observe'}</strong>
+              <span>{r.stage?.detail || activityLabel(r.summary?.current_activity)}</span>
+            </div>
             <div className="deployment-activity">
               <Activity size={14}/>
-              <span>{r.summary?.current_activity?.type ?? 'Waiting for telemetry'}</span>
+              <span>{activityLabel(r.summary?.current_activity)}</span>
             </div>
             <div className="deployment-stats">
               <span><b>{r.summary?.captures??0}</b> captures</span>
@@ -976,23 +1331,12 @@ function AgentsSection({ providers }: { providers: Provider[] }) {
         </div>
       )}
 
-      {/* Log inspect drawer */}
       {inspectId && inspectRun && (
-        <LogDrawer
-          title={inspectRun.bot_name}
-          runId={inspectId}
-          endpoint={`/agent-runs/${inspectId}/log`}
+        <AgentInspector
+          run={inspectRun}
           onClose={() => setInspectId(null)}
+          onStop={id => { void stopRun(id); setInspectId(null); }}
         />
-      )}
-
-      {/* Stop running agents */}
-      {inspectId && inspectRun && ['RUNNING','DEPLOYING'].includes(inspectRun.status) && (
-        <div style={{ position:'fixed', bottom:24, right:24, zIndex:9999 }}>
-          <button className="danger-button" onClick={() => { void stopRun(inspectId); setInspectId(null); }}>
-            <CircleStop size={14}/>Stop agent
-          </button>
-        </div>
       )}
     </div>
   );
