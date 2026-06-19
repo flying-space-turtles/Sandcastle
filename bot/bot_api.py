@@ -9,6 +9,7 @@ import hmac
 import json
 import os
 import re
+import shutil
 import shlex
 import sqlite3
 import subprocess
@@ -851,6 +852,38 @@ def _challenge_file(challenge_id: str, relative_path: str) -> dict[str, Any]:
         "size": target.stat().st_size,
         "language": target.suffix.lstrip(".") or "text",
         "content": content,
+    }
+
+
+def _delete_challenge_run(run_id: str) -> dict[str, Any]:
+    row = CHALLENGE_STORE.get(run_id)
+    if row is None:
+        raise FileNotFoundError("challenge run not found")
+    if row.get("status") == "running":
+        raise ValueError("challenge generation is still running")
+
+    challenge_id = str(row.get("challenge_id") or "")
+    deleted_row = CHALLENGE_STORE.delete(run_id)
+    if deleted_row is None:
+        raise FileNotFoundError("challenge run not found")
+
+    memory_deleted = AGENT_MEMORY.delete_run(run_id)
+    artifact_deleted = False
+    artifact_path = ""
+    if challenge_id and challenge_id not in CHALLENGE_STORE.referenced_challenge_ids():
+        root = (REPO_ROOT / "challenges" / "published" / challenge_id).resolve()
+        published_root = (REPO_ROOT / "challenges" / "published").resolve()
+        if root.is_dir() and published_root in root.parents:
+            shutil.rmtree(str(root))
+            artifact_deleted = True
+            artifact_path = _safe_rel(root)
+
+    return {
+        "run_id": run_id,
+        "challenge_id": challenge_id or None,
+        "memory_entries_deleted": memory_deleted,
+        "artifact_deleted": artifact_deleted,
+        "artifact_path": artifact_path,
     }
 
 
@@ -2254,7 +2287,7 @@ class BotAPIHandler(BaseHTTPRequestHandler):
             "Access-Control-Allow-Origin",
             origin if ALLOWED_ORIGINS.match(origin) else "http://localhost:5173",
         )
-        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
         self.send_header("Vary", "Origin")
 
@@ -2566,6 +2599,36 @@ class BotAPIHandler(BaseHTTPRequestHandler):
                     200,
                     {"agent_run": _deployment_payload(row, include_config=False)},
                 )
+            return
+
+        self._json(404, {"error": "not found"})
+
+    def do_DELETE(self) -> None:
+        path = urlparse(self.path).path.rstrip("/")
+        if not self._require_operator():
+            return
+
+        challenge_match = re.fullmatch(r"/challenges/([a-zA-Z0-9._-]+)", path)
+        if challenge_match:
+            run_id = challenge_match.group(1)
+            try:
+                result = _delete_challenge_run(run_id)
+            except FileNotFoundError as exc:
+                self._json(404, {"error": str(exc)})
+                return
+            except ValueError as exc:
+                self._json(409, {"error": str(exc)})
+                return
+            rows = CHALLENGE_STORE.list(limit=100)
+            self._json(
+                200,
+                {
+                    "ok": True,
+                    "deleted": result,
+                    "challenges": [_challenge_payload(r) for r in rows],
+                    **_match_plan_payload(),
+                },
+            )
             return
 
         self._json(404, {"error": "not found"})

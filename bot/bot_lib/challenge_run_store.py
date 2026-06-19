@@ -122,6 +122,15 @@ class ChallengeRunStore:
             )
             conn.commit()
 
+    def delete(self, run_id: str) -> dict[str, Any] | None:
+        row = self.get(run_id)
+        if row is None:
+            return None
+        with sqlite3.connect(self._db) as conn:
+            conn.execute("DELETE FROM challenge_runs WHERE id = ?", (run_id,))
+            conn.commit()
+        return row
+
     def select(self, run_id: str) -> dict[str, Any] | None:
         """Select exactly one published challenge for the next match."""
         now = _now()
@@ -196,6 +205,13 @@ class ChallengeRunStore:
             conn.row_factory = sqlite3.Row
             rows = conn.execute("SELECT * FROM challenge_runs WHERE status = 'running'").fetchall()
         return [dict(r) for r in rows]
+
+    def referenced_challenge_ids(self) -> set[str]:
+        with sqlite3.connect(self._db) as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT challenge_id FROM challenge_runs WHERE challenge_id IS NOT NULL"
+            ).fetchall()
+        return {str(row[0]) for row in rows if row[0]}
 
     # ------------------------------------------------------------------
     # Helpers

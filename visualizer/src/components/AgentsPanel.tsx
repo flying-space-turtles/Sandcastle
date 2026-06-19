@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Activity, Brain, CheckCircle2, FileCode2, FlaskConical,
-  ListTree, Plus, RefreshCw, Rocket, ScrollText, ShieldCheck, Swords, Target, X,
+  ListTree, Plus, RefreshCw, Rocket, ScrollText, ShieldCheck, Swords, Target, Trash2, X,
 } from 'lucide-react';
 import { botApiRequest } from '../data/operatorApi';
 
@@ -241,10 +241,12 @@ function ChallengeInspector({
   challenge,
   onClose,
   onChanged,
+  onDelete,
 }: {
   challenge: ChallengeRun;
   onClose: () => void;
   onChanged: (message: string) => void;
+  onDelete: (challenge: ChallengeRun) => void;
 }) {
   const [tab, setTab] = useState<'overview' | 'files' | 'activity'>('overview');
   const [activity, setActivity] = useState<ActivityEntry[]>([]);
@@ -413,6 +415,9 @@ function ChallengeInspector({
             <button disabled={busy || challenge.status !== 'published' || !validation?.deployable} onClick={selectForMatch}>
               <Target size={15}/>{challenge.is_selected ? 'Selected' : 'Use for next match'}
             </button>
+            <button className="danger-button" disabled={busy} onClick={() => onDelete(challenge)}>
+              <Trash2 size={15}/>Remove
+            </button>
             <button className="primary-button" disabled={busy || challenge.status !== 'published' || !validation?.deployable} onClick={deployNow}>
               <Rocket size={15}/>{busy ? 'Working...' : challenge.is_active ? 'Redeploy and verify' : 'Deploy now'}
             </button>
@@ -498,6 +503,33 @@ function ChallengeLab({ providers }: { providers: Provider[] }) {
       load();
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function deleteChallenge(challenge: ChallengeRun) {
+    const warning = challenge.is_active
+      ? 'This challenge is marked active in the arena. Removing it clears persistent Challenge Lab state, but it does not rebuild live team containers.'
+      : challenge.is_selected
+        ? 'This challenge is selected for the next match. Removing it clears that selection.'
+        : 'Remove this generated vulnerable app and its stored activity?';
+    const label = `${challenge.vulnerability.replace(/_/g, ' ')} seed ${challenge.seed}`;
+    if (!window.confirm(`${warning}\n\nRemove ${label}?`)) return;
+
+    setBusy(true); setNotice('');
+    try {
+      const result = await api<{ challenges: ChallengeRun[]; deleted?: { artifact_deleted?: boolean } }>(
+        `/challenges/${challenge.id}`,
+        { method: 'DELETE' },
+      );
+      setChallenges(result.challenges);
+      setInspectId(current => current === challenge.id ? null : current);
+      setNotice(result.deleted?.artifact_deleted
+        ? 'Challenge removed from persistent state and published artifacts.'
+        : 'Challenge removed from persistent state.');
+    } catch (error) {
+      setNotice(errorMessage(error));
     } finally {
       setBusy(false);
     }
@@ -621,6 +653,9 @@ function ChallengeLab({ providers }: { providers: Provider[] }) {
               >
                 <Target size={14}/>{c.is_selected ? 'Selected for match' : 'Use for next match'}
               </button>
+              <button className="danger-button" disabled={busy || c.status === 'running'} onClick={() => void deleteChallenge(c)}>
+                <Trash2 size={14}/>Remove
+              </button>
             </div>
           </article>
         ))}
@@ -719,6 +754,7 @@ function ChallengeLab({ providers }: { providers: Provider[] }) {
           challenge={inspectRun}
           onClose={() => setInspectId(null)}
           onChanged={message => { setNotice(message); load(); }}
+          onDelete={challenge => void deleteChallenge(challenge)}
         />
       )}
     </div>

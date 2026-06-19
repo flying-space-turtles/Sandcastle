@@ -3259,7 +3259,7 @@ summary:focus-visible {
 
 .challenge-card__actions {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 7px;
   padding-top: 11px;
   border-top: 1px solid var(--ops-line);
@@ -3285,6 +3285,13 @@ summary:focus-visible {
   color: #f8cf72;
   border-color: rgba(245, 185, 66, 0.35);
   background: rgba(245, 185, 66, 0.08);
+}
+
+.challenge-card__actions button.danger-button,
+.drawer-footer__actions > button.danger-button {
+  color: #fecdd3;
+  border-color: rgba(251, 113, 133, 0.32);
+  background: rgba(159, 36, 56, 0.18);
 }
 
 .challenge-status-pill--active {
