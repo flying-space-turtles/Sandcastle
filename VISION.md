@@ -229,3 +229,4 @@ Before changing code:
 4. Add focused tests and include the exact verification commands.
 5. Do not claim isolation, firewall enforcement, or arena readiness without a
    runtime test that proves it.
+
