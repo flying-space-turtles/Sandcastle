@@ -277,8 +277,7 @@ local_deploy() {
         --exclude '*.log' \
         --exclude 'logs/' \
         --exclude 'tmp/' \
-        --exclude 'teams/generated/' \
-        --exclude 'teams/team*/' \
+        --exclude 'teams/' \
         --exclude 'visualizer/node_modules/' \
         --exclude 'visualizer/dist/' \
         --exclude '__pycache__/' \
