@@ -1,160 +1,156 @@
-# Raport: folosirea toolurilor de AI in dezvoltarea software
+# Report: Use Of AI Tools During Software Development
 
-Acest proiect a fost dezvoltat folosind extensiv tooluri de agentic AI. AI-ul
-nu a fost folosit doar pentru autocomplete sau generare izolata de cod, ci ca
-parte din procesul de inginerie: planificare pe taskuri, audit de cod,
-implementare incrementala, verificare, documentare si iteratii pe baza
-feedbackului.
+This project was developed with extensive use of agentic AI tools. AI was not
+used only for autocomplete or isolated code generation. It was integrated into
+the engineering process for task planning, code audits, incremental
+implementation, verification, documentation, and feedback-driven iteration.
 
-## Tooluri folosite
+## Tools Used
 
-Principalele tooluri de AI folosite in timpul dezvoltarii au fost:
+The main AI tools used during development were:
 
-- Codex cu GPT-5.5;
+- Codex with GPT-5.5;
 - Devin AI;
-- Antigravity cu Claude Sonnet 4.6;
+- Antigravity with Claude Sonnet 4.6;
 - Gemini CLI;
 - GitHub Copilot.
 
-Am folosit atat interfete de tip app, cat si TUI/CLI. In functie de task,
-agentii primeau acces pe branchuri specifice si lucrau pe schimbari izolate.
-Acest lucru a permis separarea mai clara a modificarilor, review mai usor si
-reducerea riscului ca un agent sa schimbe parti nelegate de task.
+We used both application-style interfaces and TUI/CLI workflows. Depending on
+the task, agents received access to specific branches and worked on isolated
+changes. This made it easier to separate modifications, review results, and
+reduce the risk of an agent changing code outside the intended task.
 
-## Modul de lucru
+## Working Method
 
-Taskurile au fost scrise explicit, de obicei in format Markdown, pentru a fi
-usor de inteles de catre modelele AI. Un task tipic includea:
+Tasks were written explicitly, usually in Markdown, so they were easy for AI
+models to understand. A typical task included:
 
-- contextul functional al schimbarii;
-- scopul concret al taskului;
-- fisiere sau module relevante;
-- pasi incrementali de implementare;
-- criterii de acceptare;
-- comenzi de testare sau verificare;
-- restrictii, de exemplu sa nu se modifice teste, sa nu se rescrie fisiere
-  nelegate sau sa nu se expuna secrete.
+- the functional context of the change;
+- the concrete goal;
+- relevant files or modules;
+- incremental implementation steps;
+- acceptance criteria;
+- test or verification commands;
+- constraints, such as not changing tests, not rewriting unrelated files, and
+  not exposing secrets.
 
-Pentru taskurile mai mari, am impartit cerintele in pasi mici. De exemplu, un
-agent primea mai intai cerinta de a intelege o zona din codebase, apoi de a
-face o schimbare limitata, apoi de a rula testele relevante si de a explica
-rezultatul. Acest proces incremental a facut mai usor de detectat cand un model
-facea o presupunere gresita.
+For larger tasks, requirements were split into smaller steps. For example, an
+agent would first be asked to understand one area of the codebase, then make a
+limited change, then run the relevant tests and explain the result. This
+incremental process made it easier to detect when a model made an incorrect
+assumption.
 
-## Dezvoltare pe branchuri si taskuri din Linear
+## Branches And Linear Tasks
 
-O parte din lucru a fost organizata in jurul taskurilor definite in Linear.
-Pentru fiecare task, modelul primea o descriere clara si era directionat catre
-branchul potrivit. Agentul putea sa citeasca repository-ul, sa propuna sau sa
-aplice schimbari, sa ruleze teste si sa faca un rezumat tehnic al rezultatului.
+Part of the work was organized around tasks defined in Linear. For each task,
+the model received a clear description and was directed to the appropriate
+branch. The agent could read the repository, propose or apply changes, run
+tests, and produce a technical summary of the result.
 
-Branchurile au fost folosite ca limita practica de lucru:
+Branches were used as a practical boundary for agent work:
 
-- fiecare schimbare importanta era izolata intr-un branch;
-- commiturile erau grupate dupa scop;
-- rezultatele agentilor puteau fi verificate inainte de merge;
-- CI-ul si staging-ul validau ca modificarile functioneaza in contextul real al
-  proiectului.
+- each important change was isolated on a branch;
+- commits were grouped by purpose;
+- agent output could be reviewed before merge;
+- CI and staging validated that changes worked in the real project context.
 
-Aceasta abordare a fost importanta deoarece agentii pot produce schimbari bune,
-dar trebuie totusi verificati prin review, teste si CI.
+This approach was important because agents can produce useful changes, but
+their output still needs review, tests, and CI validation.
 
-## Prompting si context scris in Markdown
+## Prompting And Markdown Context
 
-Am folosit prompturi incrementale, clare si orientate pe rezultat. In loc sa
-cerem "implementeaza feature-ul X" fara context, am descris ce trebuie facut,
-care sunt constrangerile si cum se poate verifica rezultatul.
+We used incremental prompts that were clear and outcome-oriented. Instead of
+asking an agent to "implement feature X" without context, we described what had
+to be done, what constraints applied, and how the result should be verified.
 
-Markdown-ul a fost util pentru ca permite structurarea taskurilor in:
+Markdown was useful because it allowed tasks to be structured into:
 
-- obiectiv;
+- objective;
 - context;
-- pasi;
-- criterii de acceptare;
-- observatii;
-- comenzi de verificare.
+- steps;
+- acceptance criteria;
+- observations;
+- verification commands.
 
-Am folosit agenti si pentru audituri de cod si pentru scrierea contextului in
-fisiere Markdown. De exemplu, dupa ce un agent analiza o zona din proiect,
-rezultatul putea fi pastrat ca documentatie sau backlog. Apoi, prin prompturi
-incrementale, puteam continua de la acel context in loc sa reluam analiza de la
-zero.
+Agents were also used for code audits and for writing context into Markdown
+files. After an agent analyzed an area of the project, the result could be kept
+as documentation or backlog material. Later, incremental prompts could continue
+from that written context instead of repeating the full analysis from scratch.
 
-## Rolul agentilor in proiect
+## Agent Roles In The Project
 
-Agentii au fost folositi pentru mai multe tipuri de activitati:
+Agents were used for several types of work:
 
-- explorarea codebase-ului si identificarea modulelor relevante;
-- implementarea de functionalitati;
-- fixarea bugurilor aparute in CI sau staging;
-- scrierea si actualizarea documentatiei;
-- audit tehnic si identificarea riscurilor;
-- explicarea arhitecturii pentru prezentare;
-- verificarea comportamentului cu teste locale si GitHub Actions.
+- exploring the codebase and identifying relevant modules;
+- implementing features;
+- fixing bugs found in CI or staging;
+- writing and updating documentation;
+- performing technical audits and identifying risks;
+- explaining architecture for presentation;
+- verifying behavior with local tests and GitHub Actions.
 
-Un exemplu concret este fluxul de depanare pentru staging: agentul a folosit
-`gh` pentru a inspecta logurile reale din GitHub Actions, a identificat ca
-problema nu era doar in `rsync`, ci si in curatarea fisierelor generate cu
-ownership de container, apoi a reparat scripturile si a verificat din nou
-workflow-ul.
+One concrete example was the staging deployment debugging flow. The agent used
+`gh` to inspect real GitHub Actions logs, identified that the problem was not
+only in `rsync` but also in cleanup of container-owned generated files, then
+patched the scripts and checked the workflow again.
 
-## Ce inseamna agentic AI in acest proces
+## What Agentic AI Meant In This Process
 
-In acest proiect, agentic AI a insemnat ca modelele nu au fost folosite doar
-pentru sugestii pasive, ci pentru executarea unor bucle de lucru:
+In this project, agentic AI meant that models were not used only for passive
+suggestions. They executed complete development loops:
 
 ```text
-cerinta -> citire context -> plan -> modificare -> testare -> explicare -> iteratie
+request -> read context -> plan -> modify -> test -> explain -> iterate
 ```
 
-Totusi, AI-ul nu a fost tratat ca sursa finala de adevar. Am pastrat un proces
-de inginerie in jurul lui:
+However, AI was not treated as the final source of truth. We kept an
+engineering process around it:
 
-- taskuri clare;
-- acces limitat pe branchuri;
-- modificari incrementale;
-- teste locale;
+- clear tasks;
+- limited branch access;
+- incremental changes;
+- local tests;
 - CI;
 - staging;
-- review uman;
-- documentatie pentru deciziile importante.
+- human review;
+- documentation for important decisions.
 
-Aceasta combinatie este importanta. Agentii pot accelera dezvoltarea, dar
-calitatea vine din limite, verificari si feedback.
+This combination mattered. Agents can accelerate development, but quality comes
+from boundaries, verification, and feedback.
 
-## Beneficii observate
+## Observed Benefits
 
-Folosirea toolurilor agentice a ajutat in special la:
+Using agentic tools helped especially with:
 
-- intelegerea mai rapida a unui codebase mare;
-- transformarea unor cerinte ambigue in pasi concreti;
-- generarea rapida de patchuri initiale;
-- gasirea cauzei unor erori din CI prin loguri reale;
-- scrierea de documentatie tehnica;
-- mentinerea contextului intre iteratii prin fisiere Markdown;
-- explorarea mai multor abordari fara a bloca dezvoltarea principala.
+- understanding a large codebase faster;
+- turning ambiguous requirements into concrete steps;
+- generating initial patches quickly;
+- finding the root cause of CI failures from real logs;
+- writing technical documentation;
+- preserving context between iterations through Markdown files;
+- exploring multiple approaches without blocking the main development flow.
 
-## Limitari si control
+## Limitations And Controls
 
-Modelele pot gresi. Din acest motiv, procesul a inclus masuri de control:
+Models can be wrong. For that reason, the process included controls:
 
-- nu se accepta schimbari fara verificare;
-- agentii nu trebuie sa modifice fisiere nelegate de task;
-- se folosesc teste relevante pentru fiecare schimbare;
-- se verifica statusul Git inainte si dupa modificari;
-- nu se expun secrete sau chei API;
-- staging-ul si CI-ul sunt folosite ca validare finala.
+- changes were not accepted without verification;
+- agents were expected not to modify files unrelated to the task;
+- relevant tests were run for each change;
+- Git status was checked before and after modifications;
+- secrets and API keys were not exposed;
+- staging and CI were used as final validation.
 
-Aceste limite au facut posibil sa folosim AI-ul ca un colaborator tehnic, nu ca
-un mecanism nesupravegheat de generare de cod.
+These limits made it possible to use AI as a technical collaborator, not as an
+unsupervised code-generation mechanism.
 
-## Concluzie
+## Conclusion
 
-Sandcastle a fost dezvoltat folosind agentic AI intr-un mod controlat si
-ingineresc. Toolurile precum Codex, Devin AI, Antigravity, Gemini CLI si GitHub
-Copilot au fost integrate in procesul de lucru prin taskuri clare, branchuri
-dedicate, prompturi incrementale, audituri, documentatie si verificari automate.
+Sandcastle was developed with agentic AI in a controlled engineering process.
+Tools such as Codex, Devin AI, Antigravity, Gemini CLI, and GitHub Copilot were
+integrated through clear tasks, dedicated branches, incremental prompts, audits,
+documentation, and automated verification.
 
-Rezultatul nu este doar un proiect care foloseste AI in functionalitatea sa, ci
-si un proiect construit printr-un proces care demonstreaza cum se poate lucra
-responsabil cu agenti AI in dezvoltarea software.
+The result is not only a project that uses AI in its functionality, but also a
+project built through a process that demonstrates how agentic AI can be used
+responsibly during software development.
