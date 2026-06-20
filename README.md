@@ -24,6 +24,10 @@ static puzzle. They have to inspect unfamiliar code, patch their own service,
 keep it alive, attack opponents, submit flags, and operate inside clear
 infrastructure and credential boundaries.
 
+> [!NOTE]
+> This project has been implemented using agentic AI. See the development
+> process report in [AI-assisted development](docs/ai-assisted-development-report.md).
+
 ## Live Deployment
 
 The current public staging deployment is available at
@@ -210,6 +214,8 @@ environment.
   operating modes.
 - [Agent testing and evals](docs/agent-testing-evals.md) - how model contracts,
   fake-provider loops, smoke checks, and staging evals prove agent behavior.
+- [AI-assisted development](docs/ai-assisted-development-report.md) - report on
+  how agentic AI tools were used during the software development process.
 - [Writing checkers](docs/writing-checkers.md) - checker plugin contract and
   service authoring expectations.
 - [Staging deployments](docs/staging-deploy.md) - PR-label-gated deployment to
