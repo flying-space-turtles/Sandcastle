@@ -125,7 +125,9 @@ planning, provider gateways, scoped credentials, memory, and team-local tools.
 
 Agent behavior is proved through contract tests for model requests, tool-call
 validation, deterministic fake-provider loops, budgeted provider smoke checks,
-and staging evals that run the full arena path end to end.
+and staging evals that run the full arena path end to end. See
+[Agent testing and evals](docs/agent-testing-evals.md) for the detailed
+validation model.
 
 ## Project Map
 
@@ -206,6 +208,8 @@ environment.
   tie ordering.
 - [Isolation](docs/isolation.md) - trusted, filtered-proxy, and Docker-in-Docker
   operating modes.
+- [Agent testing and evals](docs/agent-testing-evals.md) - how model contracts,
+  fake-provider loops, smoke checks, and staging evals prove agent behavior.
 - [Writing checkers](docs/writing-checkers.md) - checker plugin contract and
   service authoring expectations.
 - [Staging deployments](docs/staging-deploy.md) - PR-label-gated deployment to
