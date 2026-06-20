@@ -123,6 +123,10 @@ planning, provider gateways, scoped credentials, memory, and team-local tools.
   <img src="diagrams/white_bg_agents.png" alt="AI Agents" width="920">
 </p>
 
+Agent behavior is proved through contract tests for model requests, tool-call
+validation, deterministic fake-provider loops, budgeted provider smoke checks,
+and staging evals that run the full arena path end to end.
+
 ## Project Map
 
 | Area | Purpose |
