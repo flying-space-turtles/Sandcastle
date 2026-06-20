@@ -24,6 +24,10 @@ static puzzle. They have to inspect unfamiliar code, patch their own service,
 keep it alive, attack opponents, submit flags, and operate inside clear
 infrastructure and credential boundaries.
 
+> [!NOTE]
+> This project has been implemented using agentic AI. See the development
+> process report in [AI-assisted development](docs/ai-assisted-development-report.md).
+
 ## Live Deployment
 
 The current public staging deployment is available at
@@ -123,6 +127,12 @@ planning, provider gateways, scoped credentials, memory, and team-local tools.
   <img src="diagrams/white_bg_agents.png" alt="AI Agents" width="920">
 </p>
 
+Agent behavior is proved through contract tests for model requests, tool-call
+validation, deterministic fake-provider loops, budgeted provider smoke checks,
+and staging evals that run the full arena path end to end. See
+[Agent testing and evals](docs/agent-testing-evals.md) for the detailed
+validation model.
+
 ## Project Map
 
 | Area | Purpose |
@@ -202,6 +212,10 @@ environment.
   tie ordering.
 - [Isolation](docs/isolation.md) - trusted, filtered-proxy, and Docker-in-Docker
   operating modes.
+- [Agent testing and evals](docs/agent-testing-evals.md) - how model contracts,
+  fake-provider loops, smoke checks, and staging evals prove agent behavior.
+- [AI-assisted development](docs/ai-assisted-development-report.md) - report on
+  how agentic AI tools were used during the software development process.
 - [Writing checkers](docs/writing-checkers.md) - checker plugin contract and
   service authoring expectations.
 - [Staging deployments](docs/staging-deploy.md) - PR-label-gated deployment to
