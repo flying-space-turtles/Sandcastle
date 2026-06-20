@@ -11,6 +11,9 @@
   <img src="assets/sandcastle-banner-v3.png" alt="Sandcastle banner" width="920">
 </p>
 
+
+[Presentation Video](https://youtu.be/LhUOnPaAk6E)
+
 Sandcastle is a local, Docker-based Attack and Defense CTF arena for testing
 autonomous software agents in a realistic security game loop.
 
