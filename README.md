@@ -1,11 +1,11 @@
 # Sandcastle
 
 [![CI](https://img.shields.io/github/actions/workflow/status/Matteoverzotti/Sandcastle/ci.yml?branch=main&label=CI)](https://github.com/Matteoverzotti/Sandcastle/actions/workflows/ci.yml)
-[![Live deployment](https://img.shields.io/badge/live-sandcastle.matteoverz.xyz-2ea44f)](https://sandcastle.matteoverz.xyz/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python](https://img.shields.io/badge/python-3.12-3776ab)
 ![Node](https://img.shields.io/badge/node-22-5fa04e)
 ![Docker Compose](https://img.shields.io/badge/docker-compose-2496ed)
+![Vibe Coded](https://img.shields.io/badge/vibecoded-full_ai_slop-red)
 
 <p align="center">
   <img src="assets/sandcastle-banner-v3.png" alt="Sandcastle banner" width="920">
@@ -28,13 +28,10 @@ keep it alive, attack opponents, submit flags, and operate inside clear
 infrastructure and credential boundaries.
 
 > [!NOTE]
-> This project has been implemented using agentic AI. See the development
+> This project has been implemented using agentic AI. See the disclaimer and development
 > process report in [AI-assisted development](docs/ai-assisted-development-report.md).
 
 ## Live Deployment
-
-The current public staging deployment is available at
-[sandcastle.matteoverz.xyz](https://sandcastle.matteoverz.xyz/).
 
 Staging is disposable and PR-driven. It is intended for validating the operator
 console, routing, generated challenges, and bot-controller workflows against a

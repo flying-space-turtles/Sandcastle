@@ -5,6 +5,21 @@ used only for autocomplete or isolated code generation. It was integrated into
 the engineering process for task planning, code audits, incremental
 implementation, verification, documentation, and feedback-driven iteration.
 
+> [!IMPORTANT] 
+> We, the original developers of this project, do not encourage following in our 
+> footsteps. While, for good or bad, AI usage is encouraged more and more among
+> professional work, we have grown to appreciate the struggle in hand-crafting an
+> elegant solution and training our problem-solving skills on personal projects.
+> This was a University project that required extensive use of AI for understanding
+> its capabilities. While we are proud with the state the project has reached,
+> nothing about this felt truly fulfilling. The result is a soulless application
+> that no one knows how to fix if it breaks. 
+>
+> Encourage people to love and care for their projects as they used to not long ago. 
+> To make them stand out as original, hand-crafted hidden gems, amongst the ocean 
+> of soulless AI slop that surrounds us more and more every day.
+
+
 ## Tools Used
 
 The main AI tools used during development were:
